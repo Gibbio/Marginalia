@@ -1,0 +1,23 @@
+{
+  "name": "Marginalia",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "make bootstrap",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "editor.formatOnSave": true
+      }
+    }
+  }
+}

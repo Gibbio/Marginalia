@@ -1,0 +1,27 @@
+name: Research Spike
+description: Time-boxed exploration for uncertain technical work.
+title: "[Research] "
+labels:
+  - type:research
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Research Question
+      description: What uncertainty needs to be reduced?
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Boundaries, assumptions, or non-goals for the spike.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Expected Output
+      description: What artifact should the spike produce?
+    validations:
+      required: true

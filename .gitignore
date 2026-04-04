@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local state
+.marginalia/
+*.sqlite
+*.sqlite3
+*.db
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/*.code-workspace
+
+# Devcontainer cache
+.devcontainer/.cache/
