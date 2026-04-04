@@ -1,0 +1,11 @@
+# Chapter One
+
+Marginalia should feel like an attentive reading companion.
+
+It should remember where the user paused and what they wanted to revisit.
+
+# Chapter Two
+
+The first implementation target is a reliable local CLI.
+
+Provider integrations stay behind ports so the core remains replaceable.
