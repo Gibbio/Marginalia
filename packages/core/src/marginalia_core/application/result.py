@@ -24,15 +24,15 @@ class OperationResult:
     data: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def ok(cls, message: str, *, data: dict[str, Any] | None = None) -> "OperationResult":
+    def ok(cls, message: str, *, data: dict[str, Any] | None = None) -> OperationResult:
         return cls(status=OperationStatus.OK, message=message, data=data or {})
 
     @classmethod
-    def planned(cls, message: str, *, data: dict[str, Any] | None = None) -> "OperationResult":
+    def planned(cls, message: str, *, data: dict[str, Any] | None = None) -> OperationResult:
         return cls(status=OperationStatus.PLANNED, message=message, data=data or {})
 
     @classmethod
-    def error(cls, message: str, *, data: dict[str, Any] | None = None) -> "OperationResult":
+    def error(cls, message: str, *, data: dict[str, Any] | None = None) -> OperationResult:
         return cls(status=OperationStatus.ERROR, message=message, data=data or {})
 
     def to_dict(self) -> dict[str, Any]:

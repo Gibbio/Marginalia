@@ -21,4 +21,7 @@ class FakeTopicSummarizer:
     """Return explicit placeholder summaries."""
 
     def summarize_topic(self, topic: str) -> str:
-        return f"Fake summary for topic '{topic}'. Replace the summarizer port with a real provider later."
+        return (
+            f"Fake summary for topic '{topic}'. "
+            "Replace the summarizer port with a real provider later."
+        )

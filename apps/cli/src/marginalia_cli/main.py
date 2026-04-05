@@ -21,6 +21,29 @@ app = typer.Typer(
     add_completion=False,
 )
 
+CONFIG_OPTION = typer.Option(
+    None,
+    "--config",
+    help="Optional path to a TOML config file.",
+    exists=False,
+    dir_okay=False,
+    resolve_path=True,
+)
+VERBOSE_OPTION = typer.Option(False, "--verbose", help="Enable verbose CLI logging.")
+JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON output.")
+DOCUMENT_PATH_ARGUMENT = typer.Argument(..., exists=True, dir_okay=False, resolve_path=True)
+OPTIONAL_DOCUMENT_ID_ARGUMENT = typer.Argument(
+    None,
+    help="Document identifier. Uses the active or latest document if omitted.",
+)
+TOPIC_ARGUMENT = typer.Argument(..., help="Topic to summarize.")
+QUERY_ARGUMENT = typer.Argument(..., help="Free-text search query.")
+NOTE_TEXT_OPTION = typer.Option(
+    None,
+    "--text",
+    help="Optional explicit note content. If omitted, the fake dictation adapter is used.",
+)
+
 
 def _json_default(value: object) -> object:
     if isinstance(value, Path):
@@ -29,7 +52,7 @@ def _json_default(value: object) -> object:
         return value.isoformat()
     if isinstance(value, Enum):
         return value.value
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     return str(value)
 
@@ -58,15 +81,8 @@ def _container_from_context(ctx: typer.Context) -> CliContainer:
 @app.callback()
 def main(
     ctx: typer.Context,
-    config_path: Path | None = typer.Option(
-        None,
-        "--config",
-        help="Optional path to a TOML config file.",
-        exists=False,
-        dir_okay=False,
-        resolve_path=True,
-    ),
-    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose CLI logging."),
+    config_path: Path | None = CONFIG_OPTION,
+    verbose: bool = VERBOSE_OPTION,
 ) -> None:
     """Configure shared command context."""
 
@@ -76,13 +92,13 @@ def main(
 @app.command()
 def ingest(
     ctx: typer.Context,
-    path: Path = typer.Argument(..., exists=True, dir_okay=False, resolve_path=True),
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    path: Path = DOCUMENT_PATH_ARGUMENT,
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Ingest a text or markdown document into local storage."""
 
     container = _container_from_context(ctx)
-    result = container.storage_service.ingest_text_file(path)
+    result = container.ingestion_service.ingest_text_file(path)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=_exit_code(result))
 
@@ -90,11 +106,8 @@ def ingest(
 @app.command()
 def play(
     ctx: typer.Context,
-    document_id: str | None = typer.Argument(
-        None,
-        help="Document identifier. Uses the active session document if omitted.",
-    ),
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    document_id: str | None = OPTIONAL_DOCUMENT_ID_ARGUMENT,
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Start or resume reading from a stored document."""
 
@@ -107,7 +120,7 @@ def play(
 @app.command()
 def pause(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Pause the active reading session."""
 
@@ -120,7 +133,7 @@ def pause(
 @app.command()
 def resume(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Resume the active reading session."""
 
@@ -133,7 +146,7 @@ def resume(
 @app.command("repeat")
 def repeat_current(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Return the current chunk anchor and text."""
 
@@ -146,7 +159,7 @@ def repeat_current(
 @app.command("restart-chapter")
 def restart_chapter(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Move the session cursor to the start of the current chapter."""
 
@@ -159,7 +172,7 @@ def restart_chapter(
 @app.command("next-chapter")
 def next_chapter(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Move the session cursor to the next chapter."""
 
@@ -172,7 +185,7 @@ def next_chapter(
 @app.command("note-start")
 def note_start(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Mark the active session as recording a note."""
 
@@ -185,12 +198,8 @@ def note_start(
 @app.command("note-stop")
 def note_stop(
     ctx: typer.Context,
-    text: str | None = typer.Option(
-        None,
-        "--text",
-        help="Optional explicit note content. If omitted, the fake dictation adapter is used.",
-    ),
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    text: str | None = NOTE_TEXT_OPTION,
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Persist the current note and anchor it to the session position."""
 
@@ -203,7 +212,7 @@ def note_stop(
 @app.command("rewrite-current")
 def rewrite_current(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Create a placeholder rewrite draft for the current section."""
 
@@ -216,8 +225,8 @@ def rewrite_current(
 @app.command("summarize-topic")
 def summarize_topic(
     ctx: typer.Context,
-    topic: str = typer.Argument(..., help="Topic to summarize."),
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    topic: str = TOPIC_ARGUMENT,
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Summarize a topic inside the current local corpus using the fake provider."""
 
@@ -230,8 +239,8 @@ def summarize_topic(
 @app.command("search-document")
 def search_document(
     ctx: typer.Context,
-    query: str = typer.Argument(..., help="Free-text document search query."),
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    query: str = QUERY_ARGUMENT,
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Search document titles and stored outline text."""
 
@@ -244,8 +253,8 @@ def search_document(
 @app.command("search-notes")
 def search_notes(
     ctx: typer.Context,
-    query: str = typer.Argument(..., help="Free-text note search query."),
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    query: str = QUERY_ARGUMENT,
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Search locally stored notes."""
 
@@ -258,12 +267,12 @@ def search_notes(
 @app.command()
 def status(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Report the active reading session state."""
 
     container = _container_from_context(ctx)
-    result = container.reader_service.status()
+    result = container.session_query_service.current_status()
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=_exit_code(result))
 
@@ -271,12 +280,13 @@ def status(
 @app.command()
 def doctor(
     ctx: typer.Context,
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output."),
+    as_json: bool = JSON_OPTION,
 ) -> None:
     """Report local configuration and placeholder provider wiring."""
 
     container = _container_from_context(ctx)
     report: dict[str, Any] = container.settings.doctor_report()
+    report["database"] = container.database.health_report()
     result = OperationResult.ok("Marginalia CLI environment looks coherent.", data=report)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=0)

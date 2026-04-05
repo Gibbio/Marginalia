@@ -40,6 +40,10 @@ class ReadingPosition:
     chunk_index: int = 0
     char_offset: int = 0
 
+    @property
+    def anchor(self) -> str:
+        return f"section:{self.section_index}/chunk:{self.chunk_index}"
+
 
 @dataclass(slots=True)
 class ReadingSession:

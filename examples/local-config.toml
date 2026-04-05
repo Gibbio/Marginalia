@@ -1,0 +1,14 @@
+environment = "local"
+log_level = "INFO"
+default_voice = "marginalia-default"
+database_path = ".marginalia/local.sqlite3"
+
+[providers]
+command_stt = "fake"
+dictation_stt = "fake"
+tts = "fake"
+llm = "fake"
+
+[fake_providers]
+commands = ["pause", "resume", "note-start", "note-stop"]
+dictation_text = "Remember to sharpen the transition in this section."

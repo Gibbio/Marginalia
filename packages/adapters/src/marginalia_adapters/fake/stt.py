@@ -26,3 +26,6 @@ class FakeDictationTranscriber:
 
     def transcribe(self) -> str:
         return self._transcript
+
+    def set_transcript(self, transcript: str) -> None:
+        self._transcript = transcript

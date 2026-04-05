@@ -23,13 +23,17 @@ class AppSettings:
     dictation_stt_provider: str
     tts_provider: str
     llm_provider: str
+    fake_command_script: tuple[str, ...]
+    fake_dictation_text: str
+    default_voice: str
     config_path: Path | None = None
 
     @classmethod
-    def load(cls, config_path: Path | None = None) -> "AppSettings":
+    def load(cls, config_path: Path | None = None) -> AppSettings:
         resolved_config = config_path or _config_path_from_env()
         config_data = _load_toml_file(resolved_config) if resolved_config else {}
         providers = config_data.get("providers", {})
+        fake_providers = config_data.get("fake_providers", {})
 
         home_dir = _path_setting(
             env_key="MARGINALIA_HOME",
@@ -70,6 +74,19 @@ class AppSettings:
             ),
             tts_provider=os.getenv("MARGINALIA_TTS_PROVIDER", str(providers.get("tts", "fake"))),
             llm_provider=os.getenv("MARGINALIA_LLM_PROVIDER", str(providers.get("llm", "fake"))),
+            fake_command_script=_tuple_setting(
+                env_key="MARGINALIA_FAKE_COMMANDS",
+                config_data=fake_providers,
+                config_key="commands",
+            ),
+            fake_dictation_text=os.getenv(
+                "MARGINALIA_FAKE_DICTATION_TEXT",
+                str(fake_providers.get("dictation_text", "Placeholder dictated note.")),
+            ),
+            default_voice=os.getenv(
+                "MARGINALIA_DEFAULT_VOICE",
+                str(config_data.get("default_voice", "marginalia-default")),
+            ),
             config_path=resolved_config,
         )
 
@@ -91,12 +108,20 @@ class AppSettings:
                 "data_dir": self.data_dir,
                 "database_path": self.database_path,
                 "config_path": self.config_path,
+                "database_parent_exists": self.database_path.parent.exists(),
             },
             "providers": {
                 "command_stt": self.command_stt_provider,
                 "dictation_stt": self.dictation_stt_provider,
                 "tts": self.tts_provider,
                 "llm": self.llm_provider,
+            },
+            "fake_providers": {
+                "command_script": self.fake_command_script,
+                "dictation_text": self.fake_dictation_text,
+            },
+            "defaults": {
+                "voice": self.default_voice,
             },
         }
 
@@ -130,3 +155,20 @@ def _path_setting(
     if not value.is_absolute() and base_dir is not None:
         return (base_dir / value).resolve()
     return value
+
+
+def _tuple_setting(
+    *,
+    env_key: str,
+    config_data: dict[str, Any],
+    config_key: str,
+) -> tuple[str, ...]:
+    if env_value := os.getenv(env_key):
+        return tuple(item.strip() for item in env_value.split(",") if item.strip())
+
+    config_value = config_data.get(config_key, ())
+    if isinstance(config_value, str):
+        return tuple(item.strip() for item in config_value.split(",") if item.strip())
+    if isinstance(config_value, list):
+        return tuple(str(item) for item in config_value if str(item).strip())
+    return ()

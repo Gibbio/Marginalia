@@ -15,15 +15,23 @@ def _utc_now() -> datetime:
 class EventName(str, Enum):
     """Stable event names used by the local core."""
 
-    READING_STARTED = "reader.session.started"
-    PLAYBACK_PAUSED = "reader.playback.paused"
-    PLAYBACK_RESUMED = "reader.playback.resumed"
-    READING_POSITION_CHANGED = "reader.position.changed"
+    DOCUMENT_INGESTED = "document.ingested"
+    READING_STARTED = "reading.started"
+    READING_PAUSED = "reading.paused"
+    READING_RESUMED = "reading.resumed"
+    READING_PROGRESSED = "reading.progressed"
     NOTE_RECORDING_STARTED = "note.recording.started"
+    NOTE_RECORDING_STOPPED = "note.recording.stopped"
     NOTE_SAVED = "note.saved"
+    REWRITE_REQUESTED = "rewrite.requested"
     REWRITE_COMPLETED = "rewrite.completed"
+    SUMMARY_REQUESTED = "summary.requested"
     SUMMARY_COMPLETED = "summary.completed"
-    SYSTEM_ERROR = "system.error"
+    PLAYBACK_STARTED = "playback.started"
+    PLAYBACK_PAUSED = "playback.paused"
+    PLAYBACK_RESUMED = "playback.resumed"
+    PLAYBACK_STOPPED = "playback.stopped"
+    ERROR_RAISED = "error.raised"
 
 
 @dataclass(frozen=True, slots=True)

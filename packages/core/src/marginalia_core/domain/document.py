@@ -21,6 +21,10 @@ class DocumentChunk:
     char_start: int
     char_end: int
 
+    @property
+    def anchor(self) -> str:
+        return f"chunk:{self.index}"
+
 
 @dataclass(frozen=True, slots=True)
 class DocumentSection:
@@ -34,6 +38,13 @@ class DocumentSection:
     @property
     def text(self) -> str:
         return "\n\n".join(chunk.text for chunk in self.chunks)
+
+    @property
+    def chunk_count(self) -> int:
+        return len(self.chunks)
+
+    def get_chunk(self, chunk_index: int) -> DocumentChunk:
+        return self.chunks[chunk_index]
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +60,16 @@ class Document:
     @property
     def chapter_count(self) -> int:
         return len(self.sections)
+
+    @property
+    def total_chunk_count(self) -> int:
+        return sum(section.chunk_count for section in self.sections)
+
+    def get_section(self, section_index: int) -> DocumentSection:
+        return self.sections[section_index]
+
+    def get_chunk(self, section_index: int, chunk_index: int) -> DocumentChunk:
+        return self.get_section(section_index).get_chunk(chunk_index)
 
 
 def build_document_outline(source_path: Path, raw_text: str) -> Document:
@@ -103,7 +124,8 @@ def build_document_outline(source_path: Path, raw_text: str) -> Document:
             )
         ]
 
-    document_id = sha256(f"{source_path.resolve()}::{cleaned_text}".encode("utf-8")).hexdigest()[:12]
+    document_hash_input = f"{source_path.resolve()}::{cleaned_text}".encode()
+    document_id = sha256(document_hash_input).hexdigest()[:12]
     return Document(
         document_id=document_id,
         title=title,
@@ -113,7 +135,9 @@ def build_document_outline(source_path: Path, raw_text: str) -> Document:
 
 
 def _chunk_section_text(section_text: str) -> tuple[DocumentChunk, ...]:
-    paragraphs = [paragraph.strip() for paragraph in section_text.split("\n\n") if paragraph.strip()]
+    paragraphs = [
+        paragraph.strip() for paragraph in section_text.split("\n\n") if paragraph.strip()
+    ]
     if not paragraphs:
         return (
             DocumentChunk(

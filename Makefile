@@ -23,9 +23,7 @@ test:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_DIR)/bin/pytest
 
 smoke:
-	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_DB_PATH=.marginalia/smoke.sqlite3 $(VENV_PYTHON) -m marginalia_cli doctor --json
-	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_DB_PATH=.marginalia/smoke.sqlite3 $(VENV_PYTHON) -m marginalia_cli ingest examples/sample-document.txt --json
-	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_DB_PATH=.marginalia/smoke.sqlite3 $(VENV_PYTHON) -m marginalia_cli status --json
+	./scripts/smoke.sh
 
 run-cli-help:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_cli --help

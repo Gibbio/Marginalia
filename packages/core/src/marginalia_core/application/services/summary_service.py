@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from marginalia_core.application.result import OperationResult
-from marginalia_core.domain.summary import SummaryResult
+from marginalia_core.domain.summary import SummaryRequest, SummaryResult
 from marginalia_core.events.models import DomainEvent, EventName
 from marginalia_core.ports.events import EventPublisher
 from marginalia_core.ports.llm import TopicSummarizer
@@ -25,17 +25,27 @@ class SummaryService:
         self._event_publisher = event_publisher
 
     def summarize_topic(self, topic: str) -> OperationResult:
-        documents = self._document_repository.search_documents(topic)
+        request = SummaryRequest(topic=topic)
+        self._event_publisher.publish(
+            DomainEvent(
+                name=EventName.SUMMARY_REQUESTED,
+                payload={"topic": request.topic, "document_id": request.document_id},
+            )
+        )
+        documents = self._document_repository.search_documents(request.topic)
         matched_document_ids = tuple(result.entity_id for result in documents)
         summary = SummaryResult(
-            topic=topic,
-            summary_text=self._topic_summarizer.summarize_topic(topic),
+            topic=request.topic,
+            summary_text=self._topic_summarizer.summarize_topic(request.topic),
             matched_document_ids=matched_document_ids,
         )
         self._event_publisher.publish(
             DomainEvent(
                 name=EventName.SUMMARY_COMPLETED,
-                payload={"topic": topic, "matched_document_ids": matched_document_ids},
+                payload={
+                    "topic": request.topic,
+                    "matched_document_ids": matched_document_ids,
+                },
             )
         )
         return OperationResult.ok(

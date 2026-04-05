@@ -7,9 +7,14 @@ from marginalia_core.domain.document import (
     build_document_outline,
 )
 from marginalia_core.domain.note import VoiceNote
-from marginalia_core.domain.reading_session import PlaybackState, ReaderState, ReadingPosition, ReadingSession
+from marginalia_core.domain.reading_session import (
+    PlaybackState,
+    ReaderState,
+    ReadingPosition,
+    ReadingSession,
+)
 from marginalia_core.domain.rewrite import RewriteDraft, RewriteStatus
-from marginalia_core.domain.search import SearchResult
+from marginalia_core.domain.search import SearchQuery, SearchResult
 from marginalia_core.domain.summary import SummaryRequest, SummaryResult
 
 __all__ = [
@@ -22,6 +27,7 @@ __all__ = [
     "ReadingSession",
     "RewriteDraft",
     "RewriteStatus",
+    "SearchQuery",
     "SearchResult",
     "SummaryRequest",
     "SummaryResult",

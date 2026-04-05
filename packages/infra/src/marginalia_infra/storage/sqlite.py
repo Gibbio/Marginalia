@@ -1,84 +1,153 @@
-"""SQLite-backed placeholder repositories."""
+"""SQLite-backed repositories and schema bootstrap."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from marginalia_core.domain.document import Document, DocumentChunk, DocumentSection
 from marginalia_core.domain.note import VoiceNote
-from marginalia_core.domain.reading_session import PlaybackState, ReaderState, ReadingPosition, ReadingSession
+from marginalia_core.domain.reading_session import (
+    PlaybackState,
+    ReaderState,
+    ReadingPosition,
+    ReadingSession,
+)
 from marginalia_core.domain.rewrite import RewriteDraft, RewriteStatus
-from marginalia_core.domain.search import SearchResult
+from marginalia_core.domain.search import SearchQuery, SearchResult
+
+SCHEMA_VERSION = "1"
+
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS schema_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+    document_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    outline_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    playback_state TEXT NOT NULL,
+    section_index INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    char_offset INTEGER NOT NULL,
+    active_note_id TEXT,
+    last_command TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+    note_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    document_id TEXT NOT NULL,
+    section_index INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    char_offset INTEGER NOT NULL,
+    transcript TEXT NOT NULL,
+    raw_audio_path TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS drafts (
+    draft_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    section_index INTEGER NOT NULL,
+    source_excerpt TEXT NOT NULL,
+    note_transcripts_json TEXT NOT NULL,
+    rewritten_text TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_imported_at ON documents(imported_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notes_document_id ON notes(document_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_drafts_document_id ON drafts(document_id, created_at DESC);
+"""
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
+class SQLiteDatabase:
+    """Single SQLite database handle and schema bootstrap utility."""
 
-
-class _SQLiteRepository:
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
 
-    def _connect(self) -> sqlite3.Connection:
+    @property
+    def database_path(self) -> Path:
+        return self._database_path
+
+    def connect(self) -> sqlite3.Connection:
         self._database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self._database_path)
         connection.row_factory = sqlite3.Row
         return connection
 
-    def ensure_schema(self) -> None:
-        with self._connect() as connection:
-            connection.executescript(
+    def initialize(self) -> None:
+        with self.connect() as connection:
+            connection.executescript(SCHEMA_SQL)
+            connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS documents (
-                    document_id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    source_path TEXT NOT NULL,
-                    imported_at TEXT NOT NULL,
-                    outline_json TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_id TEXT PRIMARY KEY,
-                    document_id TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    playback_state TEXT NOT NULL,
-                    section_index INTEGER NOT NULL,
-                    chunk_index INTEGER NOT NULL,
-                    char_offset INTEGER NOT NULL,
-                    active_note_id TEXT,
-                    last_command TEXT,
-                    updated_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS notes (
-                    note_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    document_id TEXT NOT NULL,
-                    section_index INTEGER NOT NULL,
-                    chunk_index INTEGER NOT NULL,
-                    char_offset INTEGER NOT NULL,
-                    transcript TEXT NOT NULL,
-                    raw_audio_path TEXT,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS drafts (
-                    draft_id TEXT PRIMARY KEY,
-                    document_id TEXT NOT NULL,
-                    section_index INTEGER NOT NULL,
-                    source_excerpt TEXT NOT NULL,
-                    note_transcripts_json TEXT NOT NULL,
-                    rewritten_text TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-                """
+                INSERT INTO schema_metadata(key, value)
+                VALUES('schema_version', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (SCHEMA_VERSION,),
             )
+
+    def schema_version(self) -> str:
+        self.initialize()
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM schema_metadata WHERE key = 'schema_version'"
+            ).fetchone()
+        return str(row["value"]) if row is not None else "unknown"
+
+    def table_names(self) -> tuple[str, ...]:
+        self.initialize()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                ORDER BY name ASC
+                """
+            ).fetchall()
+        return tuple(str(row["name"]) for row in rows)
+
+    def health_report(self) -> dict[str, Any]:
+        return {
+            "database_path": self.database_path,
+            "database_exists": self.database_path.exists(),
+            "schema_version": self.schema_version(),
+            "tables": self.table_names(),
+        }
+
+
+class _SQLiteRepository:
+    def __init__(self, database: Path | SQLiteDatabase) -> None:
+        self._database = (
+            database if isinstance(database, SQLiteDatabase) else SQLiteDatabase(database)
+        )
+
+    def _connect(self) -> sqlite3.Connection:
+        return self._database.connect()
+
+    def ensure_schema(self) -> None:
+        self._database.initialize()
 
 
 class SQLiteDocumentRepository(_SQLiteRepository):
@@ -118,26 +187,34 @@ class SQLiteDocumentRepository(_SQLiteRepository):
 
     def list_documents(self) -> Sequence[Document]:
         with self._connect() as connection:
-            rows = connection.execute("SELECT outline_json FROM documents ORDER BY imported_at DESC").fetchall()
+            rows = connection.execute(
+                "SELECT outline_json FROM documents ORDER BY imported_at DESC"
+            ).fetchall()
         return tuple(_document_from_payload(json.loads(str(row["outline_json"]))) for row in rows)
 
-    def search_documents(self, query: str) -> Sequence[SearchResult]:
-        needle = f"%{query.lower()}%"
+    def search_documents(self, query: SearchQuery | str) -> Sequence[SearchResult]:
+        search_query = _normalize_search_query(query)
+        needle = f"%{search_query.normalized_text.lower()}%"
+
+        sql = """
+            SELECT document_id, outline_json
+            FROM documents
+            WHERE (LOWER(title) LIKE ? OR LOWER(outline_json) LIKE ?)
+        """
+        params: list[object] = [needle, needle]
+        if search_query.document_id is not None:
+            sql += " AND document_id = ?"
+            params.append(search_query.document_id)
+        sql += " ORDER BY imported_at DESC LIMIT ?"
+        params.append(max(search_query.limit, 1))
+
         with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT document_id, title, outline_json
-                FROM documents
-                WHERE LOWER(title) LIKE ? OR LOWER(outline_json) LIKE ?
-                ORDER BY imported_at DESC
-                """,
-                (needle, needle),
-            ).fetchall()
+            rows = connection.execute(sql, tuple(params)).fetchall()
 
         results: list[SearchResult] = []
         for row in rows:
             payload = json.loads(str(row["outline_json"]))
-            excerpt = _excerpt_from_document_payload(payload, query)
+            excerpt = _excerpt_from_document_payload(payload, search_query.normalized_text)
             results.append(
                 SearchResult(
                     entity_kind="document",
@@ -273,18 +350,23 @@ class SQLiteNoteRepository(_SQLiteRepository):
             ).fetchall()
         return tuple(_note_from_row(row) for row in rows)
 
-    def search_notes(self, query: str) -> Sequence[SearchResult]:
-        needle = f"%{query.lower()}%"
+    def search_notes(self, query: SearchQuery | str) -> Sequence[SearchResult]:
+        search_query = _normalize_search_query(query)
+        needle = f"%{search_query.normalized_text.lower()}%"
+        sql = """
+            SELECT note_id, section_index, chunk_index, transcript
+            FROM notes
+            WHERE LOWER(transcript) LIKE ?
+        """
+        params: list[object] = [needle]
+        if search_query.document_id is not None:
+            sql += " AND document_id = ?"
+            params.append(search_query.document_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(search_query.limit, 1))
+
         with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT note_id, section_index, chunk_index, transcript
-                FROM notes
-                WHERE LOWER(transcript) LIKE ?
-                ORDER BY created_at DESC
-                """,
-                (needle,),
-            ).fetchall()
+            rows = connection.execute(sql, tuple(params)).fetchall()
         return tuple(
             SearchResult(
                 entity_kind="note",
@@ -345,6 +427,12 @@ class SQLiteRewriteDraftRepository(_SQLiteRepository):
         return tuple(_draft_from_row(row) for row in rows)
 
 
+def _normalize_search_query(query: SearchQuery | str) -> SearchQuery:
+    if isinstance(query, SearchQuery):
+        return query
+    return SearchQuery(text=query)
+
+
 def _document_to_payload(document: Document) -> dict[str, Any]:
     return {
         "document_id": document.document_id,
@@ -372,12 +460,11 @@ def _document_to_payload(document: Document) -> dict[str, Any]:
 
 
 def _document_from_payload(payload: dict[str, Any]) -> Document:
-    section_payloads = payload["sections"]
     sections = tuple(
         DocumentSection(
             index=int(section["index"]),
             title=str(section["title"]),
-            source_anchor=str(section["source_anchor"]) if section["source_anchor"] is not None else None,
+            source_anchor=_optional_string(section["source_anchor"]),
             chunks=tuple(
                 DocumentChunk(
                     index=int(chunk["index"]),
@@ -388,7 +475,7 @@ def _document_from_payload(payload: dict[str, Any]) -> Document:
                 for chunk in section["chunks"]
             ),
         )
-        for section in section_payloads
+        for section in payload["sections"]
     )
     return Document(
         document_id=str(payload["document_id"]),
@@ -401,13 +488,12 @@ def _document_from_payload(payload: dict[str, Any]) -> Document:
 
 def _excerpt_from_document_payload(payload: dict[str, Any], query: str) -> str:
     title = str(payload["title"])
-    rendered_sections = []
+    rendered_sections: list[str] = []
     for section in payload["sections"]:
         section_title = str(section["title"])
         chunk_text = " ".join(str(chunk["text"]) for chunk in section["chunks"])
         rendered_sections.append(f"{section_title}: {chunk_text}")
-    body = " ".join(rendered_sections)
-    combined = f"{title} {body}".strip()
+    combined = f"{title} {' '.join(rendered_sections)}".strip()
     lowered = combined.lower()
     index = lowered.find(query.lower())
     if index < 0:
@@ -445,3 +531,9 @@ def _draft_from_row(row: sqlite3.Row) -> RewriteDraft:
         status=RewriteStatus(str(row["status"])),
         created_at=datetime.fromisoformat(str(row["created_at"])),
     )
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)

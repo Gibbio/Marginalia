@@ -22,3 +22,8 @@ class InMemoryEventBus:
 
     def subscribe(self, event_name: EventName, handler: EventHandler) -> None:
         self._subscribers[event_name].append(handler)
+
+    def recent(self, limit: int = 10) -> tuple[DomainEvent, ...]:
+        if limit <= 0:
+            return ()
+        return tuple(self.published_events[-limit:])

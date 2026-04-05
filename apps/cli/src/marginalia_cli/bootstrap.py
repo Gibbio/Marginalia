@@ -9,16 +9,20 @@ from marginalia_adapters.fake.llm import FakeRewriteGenerator, FakeTopicSummariz
 from marginalia_adapters.fake.playback import FakePlaybackEngine
 from marginalia_adapters.fake.stt import FakeCommandRecognizer, FakeDictationTranscriber
 from marginalia_adapters.fake.tts import FakeSpeechSynthesizer
+from marginalia_core.application.services.document_ingestion_service import (
+    DocumentIngestionService,
+)
 from marginalia_core.application.services.note_service import NoteService
 from marginalia_core.application.services.reader_service import ReaderService
 from marginalia_core.application.services.rewrite_service import RewriteService
 from marginalia_core.application.services.search_service import SearchService
-from marginalia_core.application.services.storage_coordinator import StorageCoordinationService
+from marginalia_core.application.services.session_query_service import SessionQueryService
 from marginalia_core.application.services.summary_service import SummaryService
 from marginalia_infra.config.settings import AppSettings
 from marginalia_infra.events import InMemoryEventBus
 from marginalia_infra.logging.setup import configure_logging
 from marginalia_infra.storage.sqlite import (
+    SQLiteDatabase,
     SQLiteDocumentRepository,
     SQLiteNoteRepository,
     SQLiteRewriteDraftRepository,
@@ -31,12 +35,15 @@ class CliContainer:
     """Runtime object graph for CLI commands."""
 
     settings: AppSettings
+    database: SQLiteDatabase
+    event_bus: InMemoryEventBus
+    ingestion_service: DocumentIngestionService
     reader_service: ReaderService
     note_service: NoteService
     rewrite_service: RewriteService
     summary_service: SummaryService
     search_service: SearchService
-    storage_service: StorageCoordinationService
+    session_query_service: SessionQueryService
 
 
 def build_container(config_path: Path | None = None, *, verbose: bool = False) -> CliContainer:
@@ -47,22 +54,16 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
     configure_logging(level="DEBUG" if verbose else settings.log_level)
 
     event_bus = InMemoryEventBus()
+    database = SQLiteDatabase(settings.database_path)
+    database.initialize()
 
-    document_repository = SQLiteDocumentRepository(settings.database_path)
-    session_repository = SQLiteSessionRepository(settings.database_path)
-    note_repository = SQLiteNoteRepository(settings.database_path)
-    draft_repository = SQLiteRewriteDraftRepository(settings.database_path)
+    document_repository = SQLiteDocumentRepository(database)
+    session_repository = SQLiteSessionRepository(database)
+    note_repository = SQLiteNoteRepository(database)
+    draft_repository = SQLiteRewriteDraftRepository(database)
 
-    for repository in (
-        document_repository,
-        session_repository,
-        note_repository,
-        draft_repository,
-    ):
-        repository.ensure_schema()
-
-    command_stt = FakeCommandRecognizer()
-    dictation_stt = FakeDictationTranscriber()
+    command_stt = FakeCommandRecognizer(commands=settings.fake_command_script)
+    dictation_stt = FakeDictationTranscriber(transcript=settings.fake_dictation_text)
     tts = FakeSpeechSynthesizer()
     playback = FakePlaybackEngine()
     rewrite_generator = FakeRewriteGenerator()
@@ -70,6 +71,12 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
 
     return CliContainer(
         settings=settings,
+        database=database,
+        event_bus=event_bus,
+        ingestion_service=DocumentIngestionService(
+            document_repository=document_repository,
+            event_publisher=event_bus,
+        ),
         reader_service=ReaderService(
             document_repository=document_repository,
             session_repository=session_repository,
@@ -101,7 +108,10 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
             document_repository=document_repository,
             note_repository=note_repository,
         ),
-        storage_service=StorageCoordinationService(
+        session_query_service=SessionQueryService(
+            session_repository=session_repository,
             document_repository=document_repository,
+            note_repository=note_repository,
+            draft_repository=draft_repository,
         ),
     )

@@ -78,6 +78,16 @@ class NoteService:
             session.state = ReaderState.PAUSED
             session.touch()
 
+        self._event_publisher.publish(
+            DomainEvent(
+                name=EventName.NOTE_RECORDING_STOPPED,
+                payload={
+                    "session_id": session.session_id,
+                    "document_id": session.document_id,
+                    "note_id": note.note_id,
+                },
+            )
+        )
         session.active_note_id = None
         session.last_command = "note-stop"
         self._session_repository.save_session(session)
@@ -88,7 +98,11 @@ class NoteService:
                     "session_id": session.session_id,
                     "document_id": session.document_id,
                     "note_id": note.note_id,
+                    "anchor": note.anchor,
                 },
             )
         )
-        return OperationResult.ok("Anchored voice note saved.", data={"note": note, "session": session})
+        return OperationResult.ok(
+            "Anchored voice note saved.",
+            data={"note": note, "session": session},
+        )

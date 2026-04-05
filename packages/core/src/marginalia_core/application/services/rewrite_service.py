@@ -66,6 +66,17 @@ class RewriteService:
             return OperationResult.error(str(exc))
 
         section = document.sections[session.position.section_index]
+        self._event_publisher.publish(
+            DomainEvent(
+                name=EventName.REWRITE_REQUESTED,
+                payload={
+                    "session_id": session.session_id,
+                    "document_id": session.document_id,
+                    "section_index": section.index,
+                    "note_count": len(section_notes),
+                },
+            )
+        )
         rewritten_text = self._rewrite_generator.rewrite_section(section.text, section_notes)
         draft = RewriteDraft(
             draft_id=str(uuid4()),
@@ -78,6 +89,7 @@ class RewriteService:
         )
         self._draft_repository.save_draft(draft)
         self._state_machine.transition(session, ReaderState.PAUSED)
+        session.last_command = "rewrite-current"
         self._session_repository.save_session(session)
         self._event_publisher.publish(
             DomainEvent(
@@ -86,6 +98,7 @@ class RewriteService:
                     "session_id": session.session_id,
                     "document_id": session.document_id,
                     "draft_id": draft.draft_id,
+                    "section_index": section.index,
                 },
             )
         )

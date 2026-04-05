@@ -24,3 +24,7 @@ class VoiceNote:
     transcript: str
     raw_audio_path: Path | None = None
     created_at: datetime = field(default_factory=_utc_now)
+
+    @property
+    def anchor(self) -> str:
+        return self.position.anchor

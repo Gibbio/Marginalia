@@ -38,7 +38,10 @@ class ReaderService:
 
     def play(self, document_id: str | None) -> OperationResult:
         session = self._session_repository.get_active_session()
+        latest_document = self._document_repository.list_documents()
         target_document_id = document_id or (session.document_id if session else None)
+        if target_document_id is None and latest_document:
+            target_document_id = latest_document[0].document_id
         if target_document_id is None:
             return OperationResult.error("No active session and no document id was provided.")
 
@@ -56,27 +59,43 @@ class ReaderService:
             )
 
         try:
-            target_state = ReaderState.READING if session.state is not ReaderState.READING else session.state
+            target_state = (
+                ReaderState.READING if session.state is not ReaderState.READING else session.state
+            )
             self._state_machine.transition(session, target_state)
         except InvalidTransitionError as exc:
             return OperationResult.error(str(exc))
 
         self._playback_engine.start(document, session.position)
-        self._speech_synthesizer.synthesize(
-            document.sections[session.position.section_index].chunks[session.position.chunk_index].text
+        current_chunk = document.get_chunk(
+            session.position.section_index,
+            session.position.chunk_index,
         )
+        fake_audio = self._speech_synthesizer.synthesize(current_chunk.text)
         session.last_command = "play"
         session.touch()
         self._session_repository.save_session(session)
+        self._publish(
+            EventName.PLAYBACK_STARTED,
+            session_id=session.session_id,
+            document_id=session.document_id,
+            anchor=session.position.anchor,
+        )
         self._publish(
             EventName.READING_STARTED,
             session_id=session.session_id,
             document_id=session.document_id,
             state=session.state.value,
+            anchor=session.position.anchor,
         )
         return OperationResult.ok(
             "Reading session is active. Audio output is still backed by a fake adapter.",
-            data={"session": session},
+            data={
+                "session": session,
+                "document_title": document.title,
+                "current_chunk": current_chunk.text,
+                "audio_bytes": len(fake_audio),
+            },
         )
 
     def pause(self) -> OperationResult:
@@ -91,6 +110,11 @@ class ReaderService:
         self._playback_engine.pause()
         session.last_command = "pause"
         self._session_repository.save_session(session)
+        self._publish(
+            EventName.READING_PAUSED,
+            session_id=session.session_id,
+            document_id=session.document_id,
+        )
         self._publish(
             EventName.PLAYBACK_PAUSED,
             session_id=session.session_id,
@@ -111,6 +135,11 @@ class ReaderService:
         session.last_command = "resume"
         self._session_repository.save_session(session)
         self._publish(
+            EventName.READING_RESUMED,
+            session_id=session.session_id,
+            document_id=session.document_id,
+        )
+        self._publish(
             EventName.PLAYBACK_RESUMED,
             session_id=session.session_id,
             document_id=session.document_id,
@@ -126,12 +155,13 @@ class ReaderService:
         if document is None:
             return OperationResult.error("The active session references a missing document.")
 
-        section = document.sections[session.position.section_index]
-        chunk = section.chunks[session.position.chunk_index]
+        section = document.get_section(session.position.section_index)
+        chunk = section.get_chunk(session.position.chunk_index)
         return OperationResult.ok(
             "Current chunk located.",
             data={
                 "session": session,
+                "anchor": session.position.anchor,
                 "section_title": section.title,
                 "chunk_text": chunk.text,
             },
@@ -142,18 +172,25 @@ class ReaderService:
         if session is None:
             return OperationResult.error("No active reading session exists.")
 
-        session.position = ReadingPosition(section_index=session.position.section_index, chunk_index=0)
+        session.position = ReadingPosition(
+            section_index=session.position.section_index,
+            chunk_index=0,
+        )
         session.last_command = "restart-chapter"
         self._playback_engine.seek(session.position)
         self._session_repository.save_session(session)
         self._publish(
-            EventName.READING_POSITION_CHANGED,
+            EventName.READING_PROGRESSED,
             session_id=session.session_id,
             document_id=session.document_id,
             section_index=session.position.section_index,
             chunk_index=session.position.chunk_index,
+            anchor=session.position.anchor,
         )
-        return OperationResult.ok("Session moved to the start of the current chapter.", data={"session": session})
+        return OperationResult.ok(
+            "Session moved to the start of the current chapter.",
+            data={"session": session},
+        )
 
     def next_chapter(self) -> OperationResult:
         session = self._session_repository.get_active_session()
@@ -173,22 +210,14 @@ class ReaderService:
         self._playback_engine.seek(session.position)
         self._session_repository.save_session(session)
         self._publish(
-            EventName.READING_POSITION_CHANGED,
+            EventName.READING_PROGRESSED,
             session_id=session.session_id,
             document_id=session.document_id,
             section_index=session.position.section_index,
             chunk_index=session.position.chunk_index,
+            anchor=session.position.anchor,
         )
         return OperationResult.ok("Session moved to the next chapter.", data={"session": session})
-
-    def status(self) -> OperationResult:
-        session = self._session_repository.get_active_session()
-        if session is None:
-            return OperationResult.ok(
-                "No active session. Marginalia is idle.",
-                data={"state": ReaderState.IDLE.value},
-            )
-        return OperationResult.ok("Active session located.", data={"session": session})
 
     def _publish(self, event_name: EventName, **payload: object) -> None:
         self._event_publisher.publish(DomainEvent(name=event_name, payload=payload))
