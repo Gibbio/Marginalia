@@ -20,8 +20,8 @@ from marginalia_core.domain.reading_session import (
 from marginalia_core.domain.rewrite import RewriteDraft, RewriteStatus
 from marginalia_core.domain.search import SearchQuery, SearchResult
 
-SCHEMA_VERSION = "2"
-SCHEMA_PROFILE = "sqlite-v2"
+SCHEMA_VERSION = "3"
+SCHEMA_PROFILE = "sqlite-v3"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -72,8 +72,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     tts_provider TEXT,
     command_stt_provider TEXT,
     playback_provider TEXT,
+    command_listening_active INTEGER NOT NULL DEFAULT 0,
+    command_language TEXT,
     audio_reference TEXT,
     playback_process_id INTEGER,
+    runtime_process_id INTEGER,
+    runtime_status TEXT,
+    runtime_error TEXT,
+    startup_cleanup_summary TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -198,6 +204,18 @@ class SQLiteDatabase:
             self._ensure_column(
                 connection,
                 table_name="sessions",
+                column_name="command_listening_active",
+                definition="INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="command_language",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
                 column_name="audio_reference",
                 definition="TEXT",
             )
@@ -206,6 +224,30 @@ class SQLiteDatabase:
                 table_name="sessions",
                 column_name="playback_process_id",
                 definition="INTEGER",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="runtime_process_id",
+                definition="INTEGER",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="runtime_status",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="runtime_error",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="startup_cleanup_summary",
+                definition="TEXT",
             )
             connection.execute(
                 """
@@ -482,11 +524,17 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     tts_provider,
                     command_stt_provider,
                     playback_provider,
+                    command_listening_active,
+                    command_language,
                     audio_reference,
                     playback_process_id,
+                    runtime_process_id,
+                    runtime_status,
+                    runtime_error,
+                    startup_cleanup_summary,
                     updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     document_id = excluded.document_id,
                     state = excluded.state,
@@ -502,8 +550,14 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     tts_provider = excluded.tts_provider,
                     command_stt_provider = excluded.command_stt_provider,
                     playback_provider = excluded.playback_provider,
+                    command_listening_active = excluded.command_listening_active,
+                    command_language = excluded.command_language,
                     audio_reference = excluded.audio_reference,
                     playback_process_id = excluded.playback_process_id,
+                    runtime_process_id = excluded.runtime_process_id,
+                    runtime_status = excluded.runtime_status,
+                    runtime_error = excluded.runtime_error,
+                    startup_cleanup_summary = excluded.startup_cleanup_summary,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -522,8 +576,14 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     session.tts_provider,
                     session.command_stt_provider,
                     session.playback_provider,
+                    int(session.command_listening_active),
+                    session.command_language,
                     session.audio_reference,
                     session.playback_process_id,
+                    session.runtime_process_id,
+                    session.runtime_status,
+                    session.runtime_error,
+                    session.startup_cleanup_summary,
                     session.updated_at.isoformat(),
                 ),
             )
@@ -564,9 +624,21 @@ class SQLiteSessionRepository(_SQLiteRepository):
                 str(row["command_stt_provider"]) if row["command_stt_provider"] else None
             ),
             playback_provider=str(row["playback_provider"]) if row["playback_provider"] else None,
+            command_listening_active=bool(int(row["command_listening_active"] or 0)),
+            command_language=str(row["command_language"]) if row["command_language"] else None,
             audio_reference=str(row["audio_reference"]) if row["audio_reference"] else None,
             playback_process_id=(
                 int(row["playback_process_id"]) if row["playback_process_id"] is not None else None
+            ),
+            runtime_process_id=(
+                int(row["runtime_process_id"]) if row["runtime_process_id"] is not None else None
+            ),
+            runtime_status=str(row["runtime_status"]) if row["runtime_status"] else None,
+            runtime_error=str(row["runtime_error"]) if row["runtime_error"] else None,
+            startup_cleanup_summary=(
+                str(row["startup_cleanup_summary"])
+                if row["startup_cleanup_summary"]
+                else None
             ),
             updated_at=datetime.fromisoformat(str(row["updated_at"])),
         )

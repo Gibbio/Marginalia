@@ -1,0 +1,10 @@
+language = "it"
+
+[intents]
+pause = ["pausa"]
+resume = ["continua", "riprendi"]
+repeat = ["ripeti"]
+next_chapter = ["capitolo successivo"]
+restart_chapter = ["ricomincia capitolo"]
+status = ["stato"]
+stop = ["stop", "ferma"]

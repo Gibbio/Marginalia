@@ -23,13 +23,15 @@ PLAYBACK_CAPABILITIES = ProviderCapabilities(
 class FakePlaybackEngine:
     """Track playback commands without attempting real audio output."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, auto_complete_after_snapshots: int | None = None) -> None:
         self.state = PlaybackState.STOPPED
         self.last_document_id: str | None = None
         self.last_position = ReadingPosition()
         self.last_action = "stopped"
         self.progress_units = 0
         self.audio_reference: str | None = None
+        self._auto_complete_after_snapshots = auto_complete_after_snapshots
+        self._remaining_playing_snapshots: int | None = None
 
     def describe_capabilities(self) -> ProviderCapabilities:
         return PLAYBACK_CAPABILITIES
@@ -58,6 +60,7 @@ class FakePlaybackEngine:
         self.last_action = "start"
         self.progress_units += 1
         self.audio_reference = synthesis.audio_reference if synthesis else None
+        self._remaining_playing_snapshots = self._auto_complete_after_snapshots
         return self.snapshot()
 
     def pause(self) -> PlaybackSnapshot:
@@ -69,12 +72,14 @@ class FakePlaybackEngine:
         self.state = PlaybackState.PLAYING
         self.last_action = "resume"
         self.progress_units += 1
+        self._remaining_playing_snapshots = self._auto_complete_after_snapshots
         return self.snapshot()
 
     def stop(self) -> PlaybackSnapshot:
         self.state = PlaybackState.STOPPED
         self.last_action = "stop"
         self.audio_reference = None
+        self._remaining_playing_snapshots = None
         return self.snapshot()
 
     def seek(self, position: ReadingPosition) -> PlaybackSnapshot:
@@ -84,6 +89,15 @@ class FakePlaybackEngine:
         return self.snapshot()
 
     def snapshot(self) -> PlaybackSnapshot:
+        if (
+            self.state is PlaybackState.PLAYING
+            and self._remaining_playing_snapshots is not None
+        ):
+            if self._remaining_playing_snapshots <= 0:
+                self.state = PlaybackState.STOPPED
+                self.last_action = "completed"
+            else:
+                self._remaining_playing_snapshots -= 1
         return PlaybackSnapshot(
             state=self.state,
             last_action=self.last_action,

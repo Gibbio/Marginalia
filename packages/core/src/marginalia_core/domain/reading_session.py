@@ -62,8 +62,14 @@ class ReadingSession:
     tts_provider: str | None = None
     command_stt_provider: str | None = None
     playback_provider: str | None = None
+    command_listening_active: bool = False
+    command_language: str | None = None
     audio_reference: str | None = None
     playback_process_id: int | None = None
+    runtime_process_id: int | None = None
+    runtime_status: str | None = None
+    runtime_error: str | None = None
+    startup_cleanup_summary: str | None = None
     updated_at: datetime = field(default_factory=_utc_now)
 
     def touch(self) -> None:

@@ -84,6 +84,14 @@ class SessionQueryService:
                     "playback": session.playback_provider,
                     "voice": session.voice,
                 },
+                "runtime": {
+                    "command_listening_active": session.command_listening_active,
+                    "command_language": session.command_language,
+                    "runtime_process_id": session.runtime_process_id,
+                    "runtime_status": session.runtime_status,
+                    "runtime_error": session.runtime_error,
+                    "startup_cleanup_summary": session.startup_cleanup_summary,
+                },
                 "counts": {
                     "notes": len(notes),
                     "drafts": len(drafts),
@@ -139,8 +147,6 @@ class SessionQueryService:
         session.playback_process_id = (
             snapshot.process_id if snapshot.process_id is not None else session.playback_process_id
         )
-        if snapshot.state.value == "stopped" and session.state is ReaderState.READING:
-            session.state = ReaderState.PAUSED
         session.touch()
         self._session_repository.save_session(session)
         return self._playback_snapshot_for_session(session, snapshot)

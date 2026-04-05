@@ -48,7 +48,7 @@ include = [
 marginalia_cli = ["py.typed"]
 marginalia_core = ["py.typed"]
 marginalia_adapters = ["py.typed"]
-marginalia_infra = ["py.typed"]
+marginalia_infra = ["py.typed", "config/commands/*.toml"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Literal
 
 from marginalia_core.ports.capabilities import ProviderCapabilities
 from marginalia_core.ports.stt import (
     CommandRecognition,
     DictationSegment,
     DictationTranscript,
+    SpeechInterruptCapture,
+    SpeechInterruptMonitor,
 )
 
 COMMAND_STT_CAPABILITIES = ProviderCapabilities(
     provider_name="fake-command-stt",
     interface_kind="command-stt",
-    supported_languages=("en",),
+    supported_languages=("it", "en"),
     supports_streaming=False,
     supports_partial_results=False,
     supports_timestamps=False,
@@ -53,6 +56,39 @@ class FakeCommandRecognizer:
             provider_name=COMMAND_STT_CAPABILITIES.provider_name,
             raw_text=command,
         )
+
+    def capture_interrupt(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+        on_speech_start: Callable[[int], None] | None = None,
+    ) -> SpeechInterruptCapture:
+        if not self._commands:
+            return SpeechInterruptCapture(
+                provider_name=COMMAND_STT_CAPABILITIES.provider_name,
+                speech_detected=False,
+                capture_ended_ms=int((timeout_seconds or 0.0) * 1000),
+                timed_out=True,
+                input_device_name="fake-input",
+            )
+
+        command = self._commands.popleft()
+        detection_ms = 120
+        if on_speech_start is not None:
+            on_speech_start(detection_ms)
+        return SpeechInterruptCapture(
+            provider_name=COMMAND_STT_CAPABILITIES.provider_name,
+            speech_detected=True,
+            speech_detected_ms=detection_ms,
+            capture_started_ms=detection_ms,
+            capture_ended_ms=detection_ms + 240,
+            recognized_command=command,
+            raw_text=command,
+            input_device_name="fake-input",
+        )
+
+    def open_interrupt_monitor(self) -> SpeechInterruptMonitor:
+        return _FakeSpeechInterruptMonitor(self)
 
 
 class FakeDictationTranscriber:
@@ -99,3 +135,31 @@ class FakeDictationTranscriber:
 
     def queue_transcript(self, transcript: str) -> None:
         self._transcripts.append(transcript)
+
+
+class _FakeSpeechInterruptMonitor:
+    """Keep fake command capture alive across multiple interrupt attempts."""
+
+    def __init__(self, recognizer: FakeCommandRecognizer) -> None:
+        self._recognizer = recognizer
+
+    def __enter__(self) -> _FakeSpeechInterruptMonitor:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> Literal[False]:
+        self.close()
+        return False
+
+    def capture_next_interrupt(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+        on_speech_start: Callable[[int], None] | None = None,
+    ) -> SpeechInterruptCapture:
+        return self._recognizer.capture_interrupt(
+            timeout_seconds=timeout_seconds,
+            on_speech_start=on_speech_start,
+        )
+
+    def close(self) -> None:
+        return None

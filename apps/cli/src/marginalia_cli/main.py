@@ -32,9 +32,9 @@ CONFIG_OPTION = typer.Option(
 VERBOSE_OPTION = typer.Option(False, "--verbose", help="Enable verbose CLI logging.")
 JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON output.")
 DOCUMENT_PATH_ARGUMENT = typer.Argument(..., exists=True, dir_okay=False, resolve_path=True)
-OPTIONAL_DOCUMENT_ID_ARGUMENT = typer.Argument(
+PLAY_TARGET_ARGUMENT = typer.Argument(
     None,
-    help="Document identifier. Uses the active or latest document if omitted.",
+    help="Filesystem path or stored document id. Uses the active or latest document if omitted.",
 )
 TOPIC_ARGUMENT = typer.Argument(..., help="Topic to summarize.")
 QUERY_ARGUMENT = typer.Argument(..., help="Free-text search query.")
@@ -42,12 +42,6 @@ NOTE_TEXT_OPTION = typer.Option(
     None,
     "--text",
     help="Optional explicit note content. If omitted, the fake dictation adapter is used.",
-)
-MAX_COMMANDS_OPTION = typer.Option(
-    5,
-    "--max-commands",
-    min=1,
-    help="Maximum number of voice commands to process before exiting the control loop.",
 )
 
 
@@ -84,6 +78,49 @@ def _container_from_context(ctx: typer.Context) -> CliContainer:
     return build_container(config_path=config_path, verbose=verbose)
 
 
+def _augment_runtime_details(container: CliContainer, result: OperationResult) -> None:
+    if not result.data:
+        return
+
+    doctor_report = container.settings.doctor_report()
+    provider_capabilities = {
+        "command_stt": container.command_stt.describe_capabilities(),
+        "tts": container.speech_synthesizer.describe_capabilities(),
+        "playback": container.playback_engine.describe_capabilities(),
+    }
+    requested_providers = {
+        "command_stt": container.settings.command_stt_provider,
+        "tts": container.settings.tts_provider,
+        "playback": container.settings.playback_provider,
+    }
+    resolved_providers = {
+        key: value.provider_name for key, value in provider_capabilities.items()
+    }
+    result.data["runtime_details"] = {
+        "config_path": container.settings.config_path,
+        "command_language": container.command_lexicon.language,
+        "command_lexicon_path": container.command_lexicon.source_path,
+        "runtime_record": container.runtime_supervisor.current_runtime(),
+        "requested_providers": requested_providers,
+        "resolved_providers": resolved_providers,
+        "fallback_used": {
+            "command_stt": requested_providers["command_stt"] != "fake"
+            and resolved_providers["command_stt"].startswith("fake-"),
+            "tts": requested_providers["tts"] != "fake"
+            and resolved_providers["tts"].startswith("fake-"),
+            "playback": requested_providers["playback"] != "fake"
+            and resolved_providers["playback"].startswith("fake-"),
+        },
+        "audio_devices": {
+            "default_input": doctor_report["provider_checks"]["vosk"]["selected_input_device"],
+            "default_output": doctor_report["provider_checks"]["playback"]["default_output_device"],
+            "bluetooth_output_active": doctor_report["provider_checks"]["playback"][
+                "bluetooth_output_active"
+            ],
+        },
+    }
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -112,13 +149,14 @@ def ingest(
 @app.command()
 def play(
     ctx: typer.Context,
-    document_id: str | None = OPTIONAL_DOCUMENT_ID_ARGUMENT,
+    target: str | None = PLAY_TARGET_ARGUMENT,
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Start or resume reading from a stored document."""
+    """Ingest or select a document, then start the continuous read+listen runtime."""
 
     container = _container_from_context(ctx)
-    result = container.reader_service.play(document_id)
+    result = container.reading_runtime_service.play(target)
+    _augment_runtime_details(container, result)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=_exit_code(result))
 
@@ -193,37 +231,11 @@ def stop(
     ctx: typer.Context,
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Stop local playback and move the active session to IDLE."""
+    """Stop playback plus the active command-listening runtime."""
 
     container = _container_from_context(ctx)
-    result = container.reader_service.stop()
-    _emit_result(result, as_json=as_json)
-    raise typer.Exit(code=_exit_code(result))
-
-
-@app.command("listen")
-def listen_for_command(
-    ctx: typer.Context,
-    as_json: bool = JSON_OPTION,
-) -> None:
-    """Listen once for a local voice command and dispatch it."""
-
-    container = _container_from_context(ctx)
-    result = container.reader_service.listen_for_command()
-    _emit_result(result, as_json=as_json)
-    raise typer.Exit(code=_exit_code(result))
-
-
-@app.command("control-loop")
-def control_loop(
-    ctx: typer.Context,
-    max_commands: int = MAX_COMMANDS_OPTION,
-    as_json: bool = JSON_OPTION,
-) -> None:
-    """Process a bounded local voice-control loop."""
-
-    container = _container_from_context(ctx)
-    result = container.reader_service.run_control_loop(max_commands=max_commands)
+    result = container.reading_runtime_service.stop()
+    _augment_runtime_details(container, result)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=_exit_code(result))
 
@@ -319,6 +331,7 @@ def status(
 
     container = _container_from_context(ctx)
     result = container.session_query_service.current_status()
+    _augment_runtime_details(container, result)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=_exit_code(result))
 
@@ -344,6 +357,15 @@ def doctor(
     report["provider_capabilities"] = provider_capabilities
     report["resolved_providers"] = {
         key: value.provider_name for key, value in provider_capabilities.items()
+    }
+    report["command_lexicon"] = {
+        "language": container.command_lexicon.language,
+        "source_path": container.command_lexicon.source_path,
+        "phrases": container.command_lexicon.grammar,
+    }
+    report["runtime"] = {
+        "active_runtime": container.runtime_supervisor.current_runtime(),
+        "uses_default_audio_devices": True,
     }
     result = OperationResult.ok("Marginalia CLI environment looks coherent.", data=report)
     _emit_result(result, as_json=as_json)

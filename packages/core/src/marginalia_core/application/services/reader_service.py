@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from marginalia_core.application.command_router import VoiceCommandIntent, resolve_voice_command
+from marginalia_core.application.command_router import (
+    CommandLexicon,
+    VoiceCommandIntent,
+    resolve_voice_command,
+)
 from marginalia_core.application.result import OperationResult, OperationStatus
 from marginalia_core.application.state_machine import InvalidTransitionError, ReaderStateMachine
 from marginalia_core.domain.document import Document, DocumentChunk, DocumentSection
@@ -34,6 +38,7 @@ class ReaderService:
         speech_synthesizer: SpeechSynthesizer,
         event_publisher: EventPublisher,
         command_recognizer: CommandRecognizer,
+        command_lexicon: CommandLexicon,
         default_voice: str = "marginalia-default",
     ) -> None:
         self._document_repository = document_repository
@@ -42,6 +47,7 @@ class ReaderService:
         self._speech_synthesizer = speech_synthesizer
         self._event_publisher = event_publisher
         self._command_recognizer = command_recognizer
+        self._command_lexicon = command_lexicon
         self._state_machine = ReaderStateMachine()
         self._default_voice = default_voice
         self._tts_provider_name = speech_synthesizer.describe_capabilities().provider_name
@@ -89,8 +95,145 @@ class ReaderService:
             command_name="play",
             command_source=command_source,
             recognized_command=recognized_command,
-            message=self._play_message(),
+            message=self._play_message(playback_scope="current-chunk"),
             publish_started=True,
+        )
+
+    def synchronize_active_session(self) -> OperationResult:
+        """Return the active session plus a fresh playback snapshot."""
+
+        session = self._session_repository.get_active_session()
+        if session is None:
+            return OperationResult.error("No active reading session exists.")
+
+        document = self._document_repository.get_document(session.document_id)
+        if document is None:
+            return OperationResult.error("The active session references a missing document.")
+
+        playback_snapshot = self._synchronize_session_playback(session)
+        section, chunk = self._current_location(document, session)
+        return OperationResult.ok(
+            "Active session synchronized.",
+            data={
+                "session": session,
+                "document": document,
+                "position": {
+                    "anchor": session.position.anchor,
+                    "section_title": section.title,
+                    "chunk_text": chunk.text,
+                },
+                "playback": playback_snapshot,
+            },
+        )
+
+    def dispatch_recognized_command(self, recognition: CommandRecognition) -> OperationResult:
+        """Dispatch a pre-recognized voice command while reading is active."""
+
+        session = self._session_repository.get_active_session()
+        if session is None:
+            return OperationResult.error("No active reading session exists.")
+
+        session.last_recognized_command = recognition.command
+        session.command_stt_provider = recognition.provider_name
+        intent = resolve_voice_command(recognition.command, self._command_lexicon)
+        if intent is None:
+            session.touch()
+            self._session_repository.save_session(session)
+            return OperationResult.error(
+                "Recognized command is outside the supported vocabulary.",
+                data={"session": session, "recognition": recognition},
+            )
+
+        result = self._dispatch_voice_intent(intent, recognition)
+        response_factory = (
+            OperationResult.error if result.status is OperationStatus.ERROR else OperationResult.ok
+        )
+        return response_factory(
+            "Voice command recognized and dispatched.",
+            data={
+                "recognition": recognition,
+                "handled_command": intent.value,
+                "command_result": result.to_dict(),
+            },
+        )
+
+    def advance_after_playback_completion(self) -> OperationResult:
+        """Advance to the next chunk or mark the document complete."""
+
+        session = self._session_repository.get_active_session()
+        if session is None:
+            return OperationResult.error("No active reading session exists.")
+
+        document = self._document_repository.get_document(session.document_id)
+        if document is None:
+            return OperationResult.error("The active session references a missing document.")
+
+        current_section = document.get_section(session.position.section_index)
+        next_chunk_index = session.position.chunk_index + 1
+        if next_chunk_index < current_section.chunk_count:
+            session.position = ReadingPosition(
+                section_index=session.position.section_index,
+                chunk_index=next_chunk_index,
+            )
+            result = self._start_current_chunk(
+                session,
+                document,
+                command_name="auto-advance",
+                command_source="runtime",
+                recognized_command=None,
+                message="Reading advanced to the next chunk.",
+                publish_started=False,
+            )
+            return OperationResult.ok(
+                "Reading advanced to the next chunk.",
+                data={**result.data, "completed_document": False},
+            )
+
+        next_section_index = session.position.section_index + 1
+        if next_section_index < len(document.sections):
+            session.position = ReadingPosition(section_index=next_section_index, chunk_index=0)
+            result = self._start_current_chunk(
+                session,
+                document,
+                command_name="auto-advance",
+                command_source="runtime",
+                recognized_command=None,
+                message="Reading advanced to the next chapter.",
+                publish_started=False,
+            )
+            self._publish(
+                EventName.CHAPTER_ADVANCED,
+                session_id=session.session_id,
+                document_id=session.document_id,
+                section_index=session.position.section_index,
+                anchor=session.position.anchor,
+            )
+            return OperationResult.ok(
+                "Reading advanced to the next chapter.",
+                data={**result.data, "completed_document": False},
+            )
+
+        playback_snapshot = self._playback_engine.stop()
+        session.state = ReaderState.IDLE
+        session.command_listening_active = False
+        session.runtime_status = "completed"
+        self._apply_playback_snapshot(session, playback_snapshot)
+        self._mark_command(
+            session,
+            command_name="document-complete",
+            command_source="runtime",
+            recognized_command=None,
+        )
+        self._session_repository.save_session(session)
+        self._publish(
+            EventName.PLAYBACK_STOPPED,
+            session_id=session.session_id,
+            document_id=session.document_id,
+            playback_state=playback_snapshot.state.value,
+        )
+        return OperationResult.ok(
+            "Document playback completed.",
+            data={"session": session, "playback": playback_snapshot, "completed_document": True},
         )
 
     def pause(
@@ -357,6 +500,9 @@ class ReaderService:
         playback_snapshot = self._playback_engine.stop()
         session.state = ReaderState.IDLE
         self._apply_playback_snapshot(session, playback_snapshot)
+        session.command_listening_active = False
+        session.runtime_status = "stopped"
+        session.runtime_error = None
         self._mark_command(
             session,
             command_name="stop",
@@ -375,84 +521,10 @@ class ReaderService:
             data={"session": session, "playback": playback_snapshot},
         )
 
-    def listen_for_command(self) -> OperationResult:
-        session = self._session_repository.get_active_session()
-        if session is None:
-            return OperationResult.error("No active reading session exists.")
+    def report_voice_status(self, *, recognized_command: str | None = None) -> OperationResult:
+        """Return the current voice-oriented session status without re-entering capture."""
 
-        self._synchronize_session_playback(session)
-        previous_state = session.state
-        try:
-            self._state_machine.transition(session, ReaderState.LISTENING_FOR_COMMAND)
-        except InvalidTransitionError as exc:
-            return OperationResult.error(str(exc))
-
-        session.command_stt_provider = self._command_provider_name
-        session.last_command = "listen"
-        session.last_command_source = "cli"
-        self._session_repository.save_session(session)
-
-        try:
-            recognition = self._command_recognizer.listen_for_command()
-        except Exception as exc:
-            session.state = previous_state
-            session.touch()
-            self._session_repository.save_session(session)
-            return OperationResult.error(str(exc))
-
-        if recognition is None:
-            session.state = previous_state
-            session.touch()
-            self._session_repository.save_session(session)
-            return OperationResult.ok(
-                "No voice command was recognized.",
-                data={"session": session, "recognition": None},
-            )
-
-        session.last_recognized_command = recognition.command
-        session.command_stt_provider = recognition.provider_name
-        intent = resolve_voice_command(recognition.command)
-        if intent is None:
-            session.state = previous_state
-            session.touch()
-            self._session_repository.save_session(session)
-            return OperationResult.error(
-                "Recognized command is outside the supported vocabulary.",
-                data={"session": session, "recognition": recognition},
-            )
-
-        result = self._dispatch_voice_intent(intent, recognition)
-        response_factory = (
-            OperationResult.error if result.status is OperationStatus.ERROR else OperationResult.ok
-        )
-        return response_factory(
-            "Voice command recognized and dispatched.",
-            data={
-                "recognition": recognition,
-                "handled_command": intent.value,
-                "command_result": result.to_dict(),
-            },
-        )
-
-    def run_control_loop(self, *, max_commands: int = 5) -> OperationResult:
-        if max_commands < 1:
-            return OperationResult.error("Control loop requires at least one command slot.")
-
-        handled: list[dict[str, object]] = []
-        for _ in range(max_commands):
-            result = self.listen_for_command()
-            handled.append(result.to_dict())
-            if result.status is OperationStatus.ERROR:
-                return OperationResult.error(
-                    "Voice command loop aborted on an error.",
-                    data={"iterations": handled},
-                )
-            if result.data.get("handled_command") == VoiceCommandIntent.STOP.value:
-                break
-        return OperationResult.ok(
-            "Voice command loop completed.",
-            data={"iterations": handled, "handled_count": len(handled)},
-        )
+        return self._voice_status(recognized_command=recognized_command)
 
     def _dispatch_voice_intent(
         self,
@@ -522,8 +594,37 @@ class ReaderService:
         publish_started: bool,
     ) -> OperationResult:
         section, chunk = self._current_location(document, session)
+        return self._start_playback_for_text(
+            session,
+            document,
+            section=section,
+            chunk=chunk,
+            text_to_synthesize=chunk.text,
+            playback_scope="current-chunk",
+            command_name=command_name,
+            command_source=command_source,
+            recognized_command=recognized_command,
+            message=message,
+            publish_started=publish_started,
+        )
+
+    def _start_playback_for_text(
+        self,
+        session: ReadingSession,
+        document: Document,
+        *,
+        section: DocumentSection,
+        chunk: DocumentChunk,
+        text_to_synthesize: str,
+        playback_scope: str,
+        command_name: str,
+        command_source: str,
+        recognized_command: str | None,
+        message: str,
+        publish_started: bool,
+    ) -> OperationResult:
         synthesis_result = self._speech_synthesizer.synthesize(
-            SynthesisRequest(text=chunk.text, voice=self._default_voice)
+            SynthesisRequest(text=text_to_synthesize, voice=self._default_voice)
         )
         playback_snapshot = self._playback_engine.start(
             document,
@@ -584,6 +685,8 @@ class ReaderService:
                 "document_title": document.title,
                 "section_title": section.title,
                 "current_chunk": chunk.text,
+                "playback_scope": playback_scope,
+                "rendered_char_count": len(text_to_synthesize),
                 "synthesis": synthesis_result,
                 "playback": playback_snapshot,
             },
@@ -643,13 +746,10 @@ class ReaderService:
         self._playback_engine.hydrate(self._playback_snapshot_for_session(session))
         snapshot = self._playback_engine.snapshot()
         self._apply_playback_snapshot(session, snapshot)
-        if snapshot.state is PlaybackState.STOPPED and session.state is ReaderState.READING:
-            session.state = ReaderState.PAUSED
-            session.touch()
         self._session_repository.save_session(session)
         return snapshot
 
-    def _play_message(self) -> str:
+    def _play_message(self, *, playback_scope: str) -> str:
         if self._tts_provider_name == "fake-tts":
             return "Reading session is active. Audio output is still backed by a fake adapter."
         return "Reading session is active with local audio playback."

@@ -2,7 +2,8 @@ environment = "local"
 log_level = "INFO"
 database_path = ".marginalia/alpha.sqlite3"
 audio_cache_dir = ".marginalia/audio-cache"
-default_voice = "if_sara"
+command_language = "it"
+default_voice = "im_nicola"
 
 [providers]
 command_stt = "vosk"
@@ -28,15 +29,10 @@ noise_scale = 0.667
 model_path = "/Users/mauriziogobbo/Marginalia/.models/vosk/vosk-model-small-it-0.22"
 sample_rate = 16000
 timeout_seconds = 4.0
-commands = [
-  "pausa",
-  "continua",
-  "ripeti",
-  "capitolo successivo",
-  "ricomincia capitolo",
-  "stato",
-  "stop",
-]
+# Runtime mode uses the OS default input device.
+# Optional overrides remain available only for troubleshooting.
+# input_device_name = "Desk Mic"
+# input_device_index = 1
 
 [playback]
 command = "afplay"
