@@ -49,7 +49,7 @@ class SubprocessPlaybackEngine:
         self._state = snapshot.state
         self._last_document_id = snapshot.document_id
         if snapshot.anchor:
-            self._last_position = _position_from_anchor(snapshot.anchor)
+            self._last_position = ReadingPosition.from_anchor(snapshot.anchor)
         self._last_action = snapshot.last_action
         self._progress_units = snapshot.progress_units
         self._audio_reference = snapshot.audio_reference
@@ -154,17 +154,6 @@ class SubprocessPlaybackEngine:
         self._state = PlaybackState.STOPPED
         self._process_id = None
 
-
-def _position_from_anchor(anchor: str) -> ReadingPosition:
-    section_index = 0
-    chunk_index = 0
-    for item in anchor.split("/"):
-        key, _, raw_value = item.partition(":")
-        if key == "section":
-            section_index = int(raw_value)
-        elif key == "chunk":
-            chunk_index = int(raw_value)
-    return ReadingPosition(section_index=section_index, chunk_index=chunk_index)
 
 
 def _process_exists(process_id: int) -> bool:

@@ -42,7 +42,7 @@ class FakePlaybackEngine:
         self.state = snapshot.state
         self.last_document_id = snapshot.document_id
         if snapshot.anchor is not None:
-            self.last_position = _position_from_anchor(snapshot.anchor)
+            self.last_position = ReadingPosition.from_anchor(snapshot.anchor)
         self.last_action = snapshot.last_action
         self.progress_units = snapshot.progress_units
         self.audio_reference = snapshot.audio_reference
@@ -110,13 +110,3 @@ class FakePlaybackEngine:
         )
 
 
-def _position_from_anchor(anchor: str) -> ReadingPosition:
-    section_index = 0
-    chunk_index = 0
-    for item in anchor.split("/"):
-        key, _, raw_value = item.partition(":")
-        if key == "section":
-            section_index = int(raw_value)
-        elif key == "chunk":
-            chunk_index = int(raw_value)
-    return ReadingPosition(section_index=section_index, chunk_index=chunk_index)

@@ -44,6 +44,20 @@ class ReadingPosition:
     def anchor(self) -> str:
         return f"section:{self.section_index}/chunk:{self.chunk_index}"
 
+    @classmethod
+    def from_anchor(cls, anchor: str) -> ReadingPosition:
+        """Parse a ``section:N/chunk:M`` anchor string back into a position."""
+
+        section_index = 0
+        chunk_index = 0
+        for item in anchor.split("/"):
+            key, _, raw_value = item.partition(":")
+            if key == "section":
+                section_index = int(raw_value)
+            elif key == "chunk":
+                chunk_index = int(raw_value)
+        return cls(section_index=section_index, chunk_index=chunk_index)
+
 
 @dataclass(slots=True)
 class ReadingSession:
@@ -70,6 +84,7 @@ class ReadingSession:
     runtime_status: str | None = None
     runtime_error: str | None = None
     startup_cleanup_summary: str | None = None
+    is_active: bool = True
     updated_at: datetime = field(default_factory=_utc_now)
 
     def touch(self) -> None:
