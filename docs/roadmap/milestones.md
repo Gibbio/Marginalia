@@ -23,10 +23,12 @@ Status on April 5, 2026: implemented.
 
 - document ingestion
 - session lifecycle commands with persisted provider/runtime metadata
-- real local Piper synthesis path
+- real local Kokoro synthesis path by default, with Piper retained as an optional alternate adapter
 - real local Vosk command-recognition path
 - local subprocess playback path
-- bounded `listen` and `control-loop` CLI flows
+- one supported foreground runtime: `play` starts reading plus continuous command listening together
+- language-specific command lexicon files loaded from TOML
+- stale runtime cleanup before a new foreground session starts
 - note anchoring
 - rewrite draft placeholder generation
 - topic summarization placeholder generation
@@ -42,6 +44,7 @@ Remaining hardening before V1:
 - richer chunking and progress semantics
 - better document, note, and draft inspection commands
 - stronger real-provider install ergonomics and compatibility guidance
+- manual decision on whether the single read-while-listening runtime is acceptable enough to continue
 - optional event persistence if it becomes operationally useful
 
 ## V1 Usable CLI

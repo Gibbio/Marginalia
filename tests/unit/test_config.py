@@ -42,6 +42,15 @@ def test_settings_default_playback_provider_remains_fake(monkeypatch: MonkeyPatc
     assert settings.playback_provider == "fake"
 
 
+def test_settings_default_command_language_is_italian(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("MARGINALIA_COMMAND_LANGUAGE", raising=False)
+
+    settings = AppSettings.load()
+
+    assert settings.command_language == "it"
+    assert settings.command_lexicon_dir.name == "commands"
+
+
 def test_doctor_report_marks_vosk_unready_without_audio_input_device(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -72,6 +81,45 @@ def test_doctor_report_marks_vosk_unready_without_audio_input_device(
     assert report["provider_checks"]["vosk"]["input_device_available"] is False
     assert report["provider_checks"]["vosk"]["input_device_count"] == 0
     assert report["provider_checks"]["vosk"]["ready"] is False
+
+
+def test_doctor_report_surfaces_default_input_and_bluetooth_output(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    model_path = tmp_path / "vosk-model"
+    model_path.mkdir()
+
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name: str) -> object | None:
+        if name in {"vosk", "sounddevice"}:
+            return object()
+        return real_find_spec(name)
+
+    fake_sounddevice = types.ModuleType("sounddevice")
+    fake_sounddevice.default = types.SimpleNamespace(device=(1, 2))  # type: ignore[attr-defined]
+    fake_sounddevice.query_devices = (  # type: ignore[attr-defined]
+        lambda: [
+            {"name": "Speaker", "max_input_channels": 0, "max_output_channels": 2},
+            {"name": "Desk Mic", "max_input_channels": 1, "max_output_channels": 0},
+            {"name": "AirPods Pro 3", "max_input_channels": 0, "max_output_channels": 2},
+        ]
+    )
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
+    monkeypatch.setenv("MARGINALIA_VOSK_MODEL_PATH", str(model_path))
+
+    settings = AppSettings.load()
+    report = settings.doctor_report()
+
+    assert report["provider_checks"]["vosk"]["selected_input_device"]["name"] == "Desk Mic"
+    assert report["provider_checks"]["vosk"]["ready"] is True
+    assert report["provider_checks"]["vosk"]["uses_default_input_device"] is True
+    assert report["provider_checks"]["playback"]["default_output_device"]["name"] == "AirPods Pro 3"
+    assert report["provider_checks"]["playback"]["bluetooth_output_active"] is True
+    assert report["provider_checks"]["playback"]["uses_default_output_device"] is True
 
 
 def test_doctor_report_marks_kokoro_unready_without_runtime(

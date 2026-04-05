@@ -73,8 +73,8 @@ def test_sqlite_database_health_report(tmp_path: Path) -> None:
 
     report = database.health_report()
 
-    assert report["schema_version"] == "2"
-    assert report["schema_profile"] == "sqlite-v2"
+    assert report["schema_version"] == "3"
+    assert report["schema_profile"] == "sqlite-v3"
     assert "documents" in report["tables"]
     assert "document_sections" in report["tables"]
     assert "document_chunks" in report["tables"]
@@ -141,8 +141,14 @@ def test_sqlite_session_round_trip_preserves_provider_runtime_metadata(tmp_path:
             tts_provider="piper",
             command_stt_provider="vosk-command-stt",
             playback_provider="subprocess-playback",
+            command_listening_active=True,
+            command_language="it",
             audio_reference="/tmp/audio.wav",
             playback_process_id=4321,
+            runtime_process_id=9876,
+            runtime_status="active",
+            runtime_error=None,
+            startup_cleanup_summary="Terminated stale runtime pid 111.",
         )
     )
 
@@ -154,5 +160,10 @@ def test_sqlite_session_round_trip_preserves_provider_runtime_metadata(tmp_path:
     assert restored.tts_provider == "piper"
     assert restored.command_stt_provider == "vosk-command-stt"
     assert restored.playback_provider == "subprocess-playback"
+    assert restored.command_listening_active is True
+    assert restored.command_language == "it"
     assert restored.audio_reference == "/tmp/audio.wav"
     assert restored.playback_process_id == 4321
+    assert restored.runtime_process_id == 9876
+    assert restored.runtime_status == "active"
+    assert restored.startup_cleanup_summary == "Terminated stale runtime pid 111."

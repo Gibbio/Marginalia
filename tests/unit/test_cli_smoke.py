@@ -1,4 +1,4 @@
-"""CLI smoke tests."""
+"""CLI smoke tests for the single supported runtime mode."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from marginalia_cli.main import app
 
 
-def test_doctor_command_returns_json(tmp_path: Path) -> None:
+def test_doctor_command_reports_command_lexicon_and_schema(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         app,
@@ -25,128 +25,71 @@ def test_doctor_command_returns_json(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "ok"
-    assert payload["data"]["database"]["schema_version"] == "2"
-    assert payload["data"]["database"]["schema_profile"] == "sqlite-v2"
-    assert (
-        payload["data"]["provider_capabilities"]["command_stt"]["provider_name"]
-        == "fake-command-stt"
-    )
-    assert payload["data"]["provider_capabilities"]["playback"]["provider_name"] == "fake-playback"
+    assert payload["data"]["database"]["schema_version"] == "3"
+    assert payload["data"]["database"]["schema_profile"] == "sqlite-v3"
+    assert payload["data"]["command_lexicon"]["language"] == "it"
 
 
-def test_ingest_command_returns_document_id(tmp_path: Path) -> None:
-    runner = CliRunner()
-    source_path = Path("tests/fixtures/sample_document.txt").resolve()
-    result = runner.invoke(
-        app,
-        ["ingest", str(source_path), "--json"],
-        env={
-            "MARGINALIA_DB_PATH": str(tmp_path / "ingest.sqlite3"),
-            "MARGINALIA_TTS_PROVIDER": "fake",
-            "MARGINALIA_PLAYBACK_PROVIDER": "fake",
-        },
-    )
-
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["data"]["document"]["document_id"]
-    assert payload["data"]["stats"]["chapter_count"] == 2
-
-
-def test_play_command_returns_synthesis_and_playback(tmp_path: Path) -> None:
+def test_play_command_auto_ingests_file_and_completes_runtime(tmp_path: Path) -> None:
     runner = CliRunner()
     source_path = Path("tests/fixtures/sample_document.txt").resolve()
     env = {
         "MARGINALIA_DB_PATH": str(tmp_path / "play.sqlite3"),
         "MARGINALIA_TTS_PROVIDER": "fake",
         "MARGINALIA_PLAYBACK_PROVIDER": "fake",
+        "MARGINALIA_FAKE_PLAYBACK_AUTO_COMPLETE_POLLS": "0",
     }
 
-    ingest_result = runner.invoke(app, ["ingest", str(source_path), "--json"], env=env)
-    document_id = json.loads(ingest_result.stdout)["data"]["document"]["document_id"]
-
-    result = runner.invoke(app, ["play", document_id, "--json"], env=env)
+    result = runner.invoke(app, ["play", str(source_path), "--json"], env=env)
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["data"]["synthesis"]["provider_name"] == "fake-tts"
-    assert payload["data"]["playback"]["state"] == "playing"
+    assert payload["data"]["runtime"]["outcome"] == "completed"
+    assert payload["data"]["target"]["ingested_now"] is True
+    assert payload["data"]["session"]["runtime_status"] == "completed"
+    assert payload["data"]["runtime_details"]["command_language"] == "it"
 
 
-def test_repeat_resume_and_navigation_commands(tmp_path: Path) -> None:
+def test_play_command_dispatches_fake_voice_commands_during_runtime(tmp_path: Path) -> None:
     runner = CliRunner()
     source_path = Path("tests/fixtures/sample_document.txt").resolve()
     env = {
-        "MARGINALIA_DB_PATH": str(tmp_path / "navigation.sqlite3"),
+        "MARGINALIA_DB_PATH": str(tmp_path / "runtime.sqlite3"),
+        "MARGINALIA_FAKE_COMMANDS": "pausa,continua,stop",
+        "MARGINALIA_TTS_PROVIDER": "fake",
+        "MARGINALIA_PLAYBACK_PROVIDER": "fake",
+        "MARGINALIA_FAKE_PLAYBACK_AUTO_COMPLETE_POLLS": "2",
+    }
+
+    result = runner.invoke(app, ["play", str(source_path), "--json"], env=env)
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["data"]["runtime"]["outcome"] == "stopped"
+    assert payload["data"]["runtime"]["handled_command_count"] == 3
+    assert payload["data"]["runtime"]["handled_commands"][0]["handled_command"] == "pause"
+    assert payload["data"]["runtime"]["handled_commands"][1]["handled_command"] == "resume"
+    assert payload["data"]["runtime"]["handled_commands"][2]["handled_command"] == "stop"
+
+    status_result = runner.invoke(app, ["status", "--json"], env=env)
+    assert status_result.exit_code == 0
+    status_payload = json.loads(status_result.stdout)
+    assert status_payload["data"]["runtime"]["command_listening_active"] is False
+    assert status_payload["data"]["runtime"]["runtime_status"] == "stopped"
+    assert status_payload["data"]["runtime_details"]["command_language"] == "it"
+
+
+def test_stop_command_reports_cleanup_even_without_active_runtime(tmp_path: Path) -> None:
+    runner = CliRunner()
+    env = {
+        "MARGINALIA_DB_PATH": str(tmp_path / "stop.sqlite3"),
         "MARGINALIA_TTS_PROVIDER": "fake",
         "MARGINALIA_PLAYBACK_PROVIDER": "fake",
     }
 
-    ingest_result = runner.invoke(app, ["ingest", str(source_path), "--json"], env=env)
-    document_id = json.loads(ingest_result.stdout)["data"]["document"]["document_id"]
-
-    assert runner.invoke(app, ["play", document_id, "--json"], env=env).exit_code == 0
-
-    repeat_result = runner.invoke(app, ["repeat", "--json"], env=env)
-    assert repeat_result.exit_code == 0
-    repeat_payload = json.loads(repeat_result.stdout)
-    assert repeat_payload["data"]["section_title"] == "Chapter One"
-    assert repeat_payload["data"]["synthesis"]["provider_name"] == "fake-tts"
-
-    next_result = runner.invoke(app, ["next-chapter", "--json"], env=env)
-    assert next_result.exit_code == 0
-    next_payload = json.loads(next_result.stdout)
-    assert next_payload["data"]["session"]["position"]["section_index"] == 1
-
-    pause_result = runner.invoke(app, ["pause", "--json"], env=env)
-    assert pause_result.exit_code == 0
-
-    resume_result = runner.invoke(app, ["resume", "--json"], env=env)
-    assert resume_result.exit_code == 0
-    resume_payload = json.loads(resume_result.stdout)
-    assert resume_payload["data"]["session"]["state"] == "READING"
-
-
-def test_listen_command_dispatches_fake_voice_command(tmp_path: Path) -> None:
-    runner = CliRunner()
-    source_path = Path("tests/fixtures/sample_document.txt").resolve()
-    env = {
-        "MARGINALIA_DB_PATH": str(tmp_path / "listen.sqlite3"),
-        "MARGINALIA_FAKE_COMMANDS": "pausa",
-        "MARGINALIA_TTS_PROVIDER": "fake",
-        "MARGINALIA_PLAYBACK_PROVIDER": "fake",
-    }
-
-    ingest_result = runner.invoke(app, ["ingest", str(source_path), "--json"], env=env)
-    document_id = json.loads(ingest_result.stdout)["data"]["document"]["document_id"]
-    assert runner.invoke(app, ["play", document_id, "--json"], env=env).exit_code == 0
-
-    result = runner.invoke(app, ["listen", "--json"], env=env)
+    result = runner.invoke(app, ["stop", "--json"], env=env)
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["data"]["handled_command"] == "pause"
-    assert payload["data"]["command_result"]["data"]["session"]["state"] == "PAUSED"
-
-
-def test_control_loop_processes_multiple_fake_commands(tmp_path: Path) -> None:
-    runner = CliRunner()
-    source_path = Path("tests/fixtures/sample_document.txt").resolve()
-    env = {
-        "MARGINALIA_DB_PATH": str(tmp_path / "control-loop.sqlite3"),
-        "MARGINALIA_FAKE_COMMANDS": "pausa,continua",
-        "MARGINALIA_TTS_PROVIDER": "fake",
-        "MARGINALIA_PLAYBACK_PROVIDER": "fake",
-    }
-
-    ingest_result = runner.invoke(app, ["ingest", str(source_path), "--json"], env=env)
-    document_id = json.loads(ingest_result.stdout)["data"]["document"]["document_id"]
-    assert runner.invoke(app, ["play", document_id, "--json"], env=env).exit_code == 0
-
-    result = runner.invoke(app, ["control-loop", "--max-commands", "2", "--json"], env=env)
-
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["data"]["handled_count"] == 2
-    assert payload["data"]["iterations"][0]["data"]["handled_command"] == "pause"
-    assert payload["data"]["iterations"][1]["data"]["handled_command"] == "resume"
+    assert payload["status"] == "ok"
+    assert payload["data"]["cleanup"]["cleaned_up"] is False

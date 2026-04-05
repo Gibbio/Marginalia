@@ -45,8 +45,11 @@ Useful environment variables:
 - `MARGINALIA_AUDIO_CACHE_DIR`
 - `MARGINALIA_LOG_LEVEL`
 - `MARGINALIA_CONFIG`
+- `MARGINALIA_COMMAND_LANGUAGE`
+- `MARGINALIA_COMMAND_LEXICON_DIR`
 - `MARGINALIA_FAKE_COMMANDS`
 - `MARGINALIA_FAKE_DICTATION_TEXT`
+- `MARGINALIA_FAKE_PLAYBACK_AUTO_COMPLETE_POLLS`
 - `MARGINALIA_DEFAULT_VOICE`
 - `MARGINALIA_TTS_PROVIDER`
 - `MARGINALIA_KOKORO_PYTHON_EXECUTABLE`
@@ -72,8 +75,10 @@ Example:
 - resolved paths
 - writable database location
 - active provider names
+- command language and lexicon path
 - provider capabilities
 - Kokoro, Piper, Vosk, and playback readiness
+- default audio device visibility for real speech testing
 - SQLite schema version, profile, and current table counts
 
 ## Real Provider Setup
@@ -92,29 +97,38 @@ The repository does not download these assets automatically. Configure them
 explicitly through `examples/alpha-local-config.toml` or equivalent
 environment variables, then verify readiness with `doctor`.
 
+## Single Runtime Verification
+
+The supported Alpha 0.1 runtime is a single flow:
+
+```bash
+.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml play path/to/document.md --json
+```
+
+That command now:
+
+- ingests the file if needed
+- starts reading automatically
+- opens the microphone automatically
+- keeps command listening active during playback
+- uses the OS default input and output devices
+- cleans up a stale previous Marginalia runtime before starting
+
+The full manual verification flow lives in
+[`docs/testing/alpha-0.1-runtime-loop.md`](../testing/alpha-0.1-runtime-loop.md).
+
 ## Smoke Flow
 
 `make smoke` exercises the current reference workflow:
 
 - doctor
-- ingest
 - play
-- repeat
-- next-chapter
-- restart-chapter
-- pause
-- resume
-- control-loop
-- note-start
-- note-stop
-- rewrite-current
-- summarize-topic
-- search-document
-- search-notes
-- status
+- status after a scripted stop command sequence
+- play again through clean document completion
+- final status check
 
 This flow is deterministic and uses fake providers by default, including a
-scripted voice-command loop.
+scripted read-while-listening runtime.
 
 ## Devcontainer
 

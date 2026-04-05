@@ -28,10 +28,13 @@ loop:
 - monorepo structure for long-term product development
 - Python core packages with clean architecture boundaries
 - CLI as the first usable interface
-- SQLite-backed local persistence with schema v2 compatibility bootstrap
+- SQLite-backed local persistence with schema v3 compatibility bootstrap
 - normalized document storage for documents, sections, and chunks
 - real local Kokoro TTS by default, optional Piper TTS, and Vosk command-STT adapters behind ports
 - local subprocess-backed playback for generated audio artifacts
+- one supported runtime mode: `play` ingests or selects a file, starts reading automatically, opens the microphone automatically, and keeps command listening active until completion or explicit stop
+- language-specific voice command lexicons loaded from TOML files
+- stale runtime/process cleanup before a new foreground reading session starts
 - fake provider fallbacks for testing and development
 - event-driven application services for ingestion, sessioning, notes, rewrite,
   summary, search, and voice control
@@ -122,7 +125,7 @@ Marginalia can run from environment variables or from an explicit TOML file.
 
 - `examples/local-config.toml` keeps the deterministic fake-provider setup
 - `examples/alpha-local-config.toml` shows the real local alpha path with
-  Kokoro, `afplay`, and Vosk
+  Kokoro, `afplay`, and Vosk using the default OS audio devices
 
 Example:
 
@@ -134,8 +137,10 @@ Example:
 
 - resolved local paths
 - configured provider names
+- configured command language and lexicon path
 - provider capability metadata
 - readiness checks for Kokoro, Piper, Vosk, and playback
+- default input/output device visibility for the supported runtime path
 - SQLite schema version, profile, tables, and row counts
 
 ## Current CLI Commands
@@ -150,8 +155,6 @@ The CLI surface currently includes:
 - `restart-chapter`
 - `next-chapter`
 - `stop`
-- `listen`
-- `control-loop`
 - `note-start`
 - `note-stop`
 - `rewrite-current`
@@ -161,32 +164,35 @@ The CLI surface currently includes:
 - `status`
 - `doctor`
 
-Example V0 flow:
-
-```bash
-.venv/bin/python -m marginalia_cli ingest examples/sample-document.txt --json
-.venv/bin/python -m marginalia_cli play --json
-.venv/bin/python -m marginalia_cli repeat --json
-.venv/bin/python -m marginalia_cli next-chapter --json
-.venv/bin/python -m marginalia_cli pause --json
-.venv/bin/python -m marginalia_cli control-loop --max-commands 2 --json
-.venv/bin/python -m marginalia_cli note-start --json
-.venv/bin/python -m marginalia_cli note-stop --text "Review the opening paragraph." --json
-.venv/bin/python -m marginalia_cli rewrite-current --json
-.venv/bin/python -m marginalia_cli summarize-topic local --json
-.venv/bin/python -m marginalia_cli status --json
-```
-
-Example Alpha 0.1 real-provider flow:
+Example Alpha 0.1 flow:
 
 ```bash
 .venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml doctor --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml ingest path/to/document.md --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml play --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml listen --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml control-loop --max-commands 5 --json
+.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml play path/to/document.md --json
+.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml pause --json
+.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml resume --json
+.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml next-chapter --json
+.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml stop --json
 .venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml status --json
 ```
+
+## Single Runtime Mode
+
+Alpha 0.1 now supports one interactive runtime only:
+
+- provide a file path or stored document id to `play`
+- Marginalia ingests the file when needed
+- playback starts automatically on the OS default output device
+- microphone listening starts automatically on the OS default input device
+- command listening stays active while playback is ongoing
+- the document advances chunk by chunk and chapter by chapter until the end or `stop`
+- starting a new `play` cleans up any stale Marginalia runtime process first
+
+The command vocabulary is loaded from language-specific TOML files under
+`packages/infra/src/marginalia_infra/config/commands/`.
+
+The repeatable manual verification flow lives in
+[`docs/testing/alpha-0.1-runtime-loop.md`](docs/testing/alpha-0.1-runtime-loop.md).
 
 ## What Is Real Now
 
@@ -194,11 +200,13 @@ Example Alpha 0.1 real-provider flow:
 - normalized document persistence for documents, sections, and chunks
 - persisted reading session state changes across separate CLI invocations
 - persisted provider metadata, audio references, and playback process metadata
+- persisted runtime metadata for command listening, command language, runtime pid, and startup cleanup summary
 - real local Kokoro synthesis to WAV artifacts when configured
 - optional real local Piper synthesis to WAV artifacts when configured
-- real local Vosk command recognition with a constrained Italian vocabulary when configured
-- local subprocess-backed playback control through `play`, `pause`, `resume`, and `stop`
-- bounded CLI voice command handling through `listen` and `control-loop`
+- real local Vosk command recognition with a constrained language-specific command lexicon when configured
+- local subprocess-backed playback control through the continuous `play` runtime plus manual `pause`, `resume`, and `stop`
+- automatic chunk and chapter progression during the supported read+listen runtime
+- startup cleanup of stale foreground runtime records before a new session begins
 - anchored note capture via explicit text or a fake dictation provider
 - deterministic rewrite draft generation with source anchor and provider
   metadata
@@ -215,7 +223,8 @@ Example Alpha 0.1 real-provider flow:
 - real note dictation STT
 - production rewrite and summarization providers
 - persistent event history outside the current process
-- sentence-level playback tracking and automatic chapter progression
+- sentence-level playback tracking
+- true ducking during simultaneous Bluetooth playback and microphone capture
 - desktop UI and editor adapters
 
 ## Roadmap Summary
@@ -226,6 +235,7 @@ Near term:
 - improve chunking and reading progress heuristics
 - add document, note, and draft inspection commands
 - harden the real-provider path for more environments and better diagnostics
+- evaluate whether the single read-while-listening runtime is smooth enough to pursue beyond Alpha 0.1
 
 Later:
 

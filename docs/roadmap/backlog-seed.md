@@ -17,10 +17,12 @@ current baseline, not as open bootstrap work:
 - configuration and logging setup
 - unit tests, integration tests, and smoke flow
 - devcontainer and local development tooling
-- real local Piper TTS adapter behind the speech port
+- real local Kokoro TTS adapter behind the speech port, with Piper retained as an alternate real adapter
 - real local Vosk command recognizer behind the command-STT port
 - local subprocess playback adapter
-- bounded CLI voice control loop with deterministic fake smoke coverage
+- single supported read-while-listening runtime with deterministic fake coverage
+- language-specific command lexicon files
+- stale runtime cleanup before new foreground sessions start
 
 ## Next: Introduce explicit SQLite migrations
 
@@ -65,9 +67,24 @@ Acceptance criteria:
 - progress-related events remain stable
 - repeat output reflects a more precise reading unit
 
+## Next: Decide whether the single runtime UX is viable
+
+Purpose: use the Alpha 0.1 runtime verification flow to decide if Bluetooth
+listening plus continuous command capture is good enough to keep pushing.
+
+Suggested labels: `type:research`, `area:voice`, `area:product`, `size:s`
+
+Context: `office`
+
+Acceptance criteria:
+
+- at least one Bluetooth headset and one separate-mic setup are scored with the documented sheet
+- notes include whether simultaneous playback plus microphone listening remains intelligible enough
+- the team records whether the runtime is acceptable, unacceptable, or needs one more iteration
+
 ## Next: Harden real provider packaging and setup
 
-Purpose: reduce friction for macOS local alpha runs with Piper and Vosk.
+Purpose: reduce friction for macOS local alpha runs with Kokoro, Piper, and Vosk.
 
 Suggested labels: `type:feature`, `area:voice`, `area:infra`, `size:m`
 
@@ -77,6 +94,7 @@ Acceptance criteria:
 
 - setup docs clearly cover provider installation pitfalls
 - `doctor` offers clearer remediation hints for missing real providers
+- `doctor` reports default input device and likely Bluetooth output state clearly
 - local config examples stay accurate as provider requirements evolve
 
 ## Next: Strengthen event payload contracts
@@ -155,8 +173,8 @@ Acceptance criteria:
 
 ## Next: Improve command recognition robustness
 
-Purpose: make the local command loop less brittle without broadening scope into
-full dictation.
+Purpose: make the continuous local command loop less brittle without broadening
+scope into full dictation.
 
 Suggested labels: `type:feature`, `area:voice`, `area:core`, `size:m`
 

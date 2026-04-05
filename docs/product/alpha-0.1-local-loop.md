@@ -5,25 +5,28 @@
 Alpha 0.1 proves the narrow local loop on macOS Apple Silicon:
 
 1. ingest a markdown or text document
-2. synthesize the current reading chunk with a local TTS provider
-3. play the generated audio locally
-4. recognize a small Italian command vocabulary locally
-5. update persisted reading session state coherently
+2. start reading automatically with a local TTS provider
+3. open the microphone automatically on the OS default input device
+4. keep command listening active while playback is ongoing
+5. update persisted reading session state coherently until document completion or stop
+6. restart safely by cleaning up a stale previous runtime before a new session begins
 
 The supported real-provider path is:
 
 - TTS: Kokoro by default, Piper as an optional alternate adapter
 - playback: `afplay`
-- command STT: Vosk with a constrained Italian grammar
+- command STT: Vosk with a constrained language-specific command lexicon
 
 ## What Is Real
 
 - document ingestion into SQLite
 - persisted reading session state and provider metadata
+- persisted runtime metadata for active listening, command language, runtime pid, and startup cleanup
 - Kokoro synthesis to local WAV artifacts
 - local playback through a subprocess-backed adapter
-- Vosk microphone capture for a bounded command vocabulary
-- `listen` and `control-loop` CLI flows
+- Vosk microphone capture for a bounded command vocabulary loaded from file
+- automatic reading + automatic continuous command listening in the `play` runtime
+- automatic chunk and chapter progression until completion or stop
 
 ## What Remains Fake
 
@@ -31,7 +34,6 @@ The supported real-provider path is:
 - rewrite generation
 - topic summarization
 - sentence-accurate playback progress
-- automatic chapter progression when audio ends
 
 ## Prerequisites
 
@@ -53,11 +55,12 @@ Start from [examples/alpha-local-config.toml](/Users/mauriziogobbo/Marginalia/ex
 
 Important notes:
 
+- `command_language = "it"` selects the lexicon file used for spoken command matching.
+- command phrases come from `packages/infra/src/marginalia_infra/config/commands/<language>.toml`.
 - `default_voice` is the active Kokoro voice id in the default setup.
 - `kokoro.python_executable` should point to a dedicated Python 3.12 or 3.11 runtime.
 - `kokoro.lang_code = "i"` selects the Italian pipeline.
 - `piper.model_path` remains available if you want to switch back to Piper.
-- `vosk.commands` should stay small and explicit for this alpha.
 - `providers.allow_fallback = false` is recommended for real alpha runs so missing prerequisites fail clearly.
 
 Because the official `kokoro` package is smaller than the model weights it uses,
@@ -77,10 +80,12 @@ Doctor reports:
 
 - resolved paths
 - configured provider names
+- configured command language and command lexicon file
 - Kokoro runtime readiness
 - Piper executable and model readiness
-- Vosk model, Python package, and input-device readiness
+- Vosk model, Python package, and default-input readiness
 - playback command readiness
+- default input and output audio device visibility when `sounddevice` is available
 - SQLite schema and table counts
 
 Do not continue to the real alpha loop until:
@@ -95,29 +100,21 @@ and Python packages are installed correctly.
 
 ## CLI Flow
 
-Ingest a document:
+Start the only supported runtime flow:
 
 ```bash
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml ingest path/to/document.md --json
+.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml play path/to/document.md --json
 ```
 
-Start playback for the latest or selected document:
+What `play` now does:
 
-```bash
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml play --json
-```
-
-Control the active session with one-shot voice capture:
-
-```bash
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml listen --json
-```
-
-Or run a bounded voice loop:
-
-```bash
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml control-loop --max-commands 5 --json
-```
+- ingests the file when you pass a path
+- starts playback automatically
+- starts command listening automatically
+- keeps listening active while reading
+- advances across chunks and chapters automatically
+- exits only on document completion, explicit `stop`, or fatal runtime failure
+- cleans up a stale prior Marginalia runtime before starting
 
 Manual command equivalents remain available:
 
@@ -144,6 +141,9 @@ Manual command equivalents remain available:
 
 - Playback is chunk-based, not sentence-based.
 - `resume` may re-synthesize the current chunk if there is no live paused playback process to continue.
-- `listen` and `control-loop` are bounded CLI commands, not a background service.
+- Bluetooth audio quality may still degrade at the macOS device-profile level when the same headset is used for both playback and microphone input.
 - The microphone path is intentionally optimized for short deterministic commands, not free dictation.
 - Fake providers remain available and stay useful for deterministic development and smoke flows.
+
+For the repeatable manual runtime verification flow, use
+[docs/testing/alpha-0.1-runtime-loop.md](/Users/mauriziogobbo/Marginalia/docs/testing/alpha-0.1-runtime-loop.md).

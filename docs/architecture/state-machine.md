@@ -3,9 +3,9 @@
 ## States
 
 - `IDLE`: no active reading session
-- `READING`: session is actively reading the current document location
-- `PAUSED`: playback is paused but the session remains active
-- `LISTENING_FOR_COMMAND`: active spoken command capture is in progress
+- `READING`: session is actively reading the current document location; in Alpha 0.1 this is normally paired with `command_listening_active = true`
+- `PAUSED`: playback is paused but the session remains active and the runtime may still be listening for commands
+- `LISTENING_FOR_COMMAND`: reserved explicit capture state; it is no longer the primary Alpha 0.1 runtime mode
 - `RECORDING_NOTE`: note capture is in progress
 - `PROCESSING_REWRITE`: a rewrite request is running
 - `READING_REWRITE`: reserved for playing back a rewrite draft
@@ -54,21 +54,19 @@ flows:
 - `restart-chapter`
 - `next-chapter`
 - `stop`
-- `listen`
-- `control-loop`
 - `note-start`
 - `note-stop`
 - `rewrite-current`
 
 Implemented transition behavior:
 
-- `play` creates a session for the explicitly requested document, the active
-  session document, or the latest ingested document
+- `play` ingests or selects a document, starts playback automatically, opens
+  command listening automatically, and keeps both active until completion or
+  explicit stop
 - `pause` moves `READING -> PAUSED`
 - `resume` moves `PAUSED -> READING`
-- `stop` moves `READING`, `PAUSED`, or `LISTENING_FOR_COMMAND -> IDLE`
-- `listen` moves `READING` or `PAUSED -> LISTENING_FOR_COMMAND`, recognizes one
-  command, then dispatches back into the regular lifecycle
+- `stop` moves the active runtime to `IDLE` and stops both playback and the
+  continuous command listener
 - `note-start` moves `PAUSED` or `READING -> RECORDING_NOTE`
 - `note-stop` persists a note and returns the session to `PAUSED`
 - `rewrite-current` moves `PAUSED` or `READING -> PROCESSING_REWRITE -> PAUSED`
