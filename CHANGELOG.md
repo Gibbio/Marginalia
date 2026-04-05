@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is inspired by Keep a Changelog and this project aims to follow
 semantic versioning once public releases begin.
 
+## [Unreleased]
+
+### Added
+
+- `HELP` voice command intent with Italian (`aiuto`, `comandi`) and English
+  (`help`, `commands`) phrases
+- stop aliases: `fermati` (Italian) and `halt` (English)
+- `READING_COMPLETED` domain event emitted when the entire document finishes
+  playing, distinguishable from `PLAYBACK_STOPPED` on explicit stop
+- `COMMAND_DISPATCHED` domain event emitted after every voice intent dispatch
+- structured logging in: `FileRuntimeSupervisor` (cleanup decisions),
+  bootstrap (provider selection and fallback), `ReaderService` (command
+  dispatch, play, stop, document completion), and `RuntimeLoop` (lifecycle)
+- 12 new tests: completion vs stop distinction, help intent dispatch, alias
+  resolution (`fermati`, `halt`), restart after completion, status
+  truthfulness, provider capability reporting, fallback visibility
+
+### Changed
+
+- refactored voice command dispatch from hardcoded if/elif chain to a
+  dict-driven table — adding a new intent requires only an enum member, a TOML
+  entry, and a dispatch table entry
+- unhandled voice intents now return an explicit error instead of silently
+  falling through to stop — this was a real bug where any new intent added to
+  the enum but not to the dispatch chain would stop the reading session
+
 ## [0.2.0a0] - 2026-04-05
 
 ### Added

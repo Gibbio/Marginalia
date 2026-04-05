@@ -46,6 +46,10 @@ loop:
 - fake provider fallbacks for testing and development
 - event-driven application services for ingestion, sessioning, notes, rewrite,
   summary, search, and voice control
+- dict-driven voice command dispatch with file-driven lexicons per language
+- `HELP` voice command intent reporting available commands
+- `READING_COMPLETED` and `COMMAND_DISPATCHED` domain events for observability
+- structured logging for provider selection, process cleanup, and command dispatch
 - CI, devcontainer, smoke flow, and updated architecture documentation
 
 ## Non-Goals For Now
@@ -208,13 +212,26 @@ The repeatable manual verification flow lives in
 - normalized document persistence for documents, sections, and chunks
 - persisted reading session state changes across separate CLI invocations
 - persisted provider metadata, audio references, and playback process metadata
-- persisted runtime metadata for command listening, command language, runtime pid, and startup cleanup summary
+- persisted runtime metadata for command listening, command language, runtime
+  pid, and startup cleanup summary
 - real local Kokoro synthesis to WAV artifacts when configured
 - optional real local Piper synthesis to WAV artifacts when configured
-- real local Vosk command recognition with a constrained language-specific command lexicon when configured
-- local subprocess-backed playback control through the continuous `play` runtime plus manual `pause`, `resume`, and `stop`
-- automatic chunk and chapter progression during the supported read+listen runtime
-- startup cleanup of stale foreground runtime records before a new session begins
+- real local Vosk command recognition with a constrained language-specific
+  command lexicon when configured
+- local subprocess-backed playback control through the continuous `play`
+  runtime plus manual `pause`, `resume`, and `stop`
+- automatic chunk and chapter progression during the supported read+listen
+  runtime
+- startup cleanup of stale foreground runtime records before a new session
+  begins
+- dict-driven voice command dispatch — adding a new intent requires only an
+  enum member, a TOML phrase entry, and a dispatch table entry
+- `HELP` voice command intent reporting available commands in the active
+  language
+- `READING_COMPLETED` and `COMMAND_DISPATCHED` domain events for lifecycle
+  observability
+- structured logging for provider selection, process cleanup, command dispatch,
+  and session start/stop/completion
 - anchored note capture via explicit text or a fake dictation provider
 - deterministic rewrite draft generation with source anchor and provider
   metadata

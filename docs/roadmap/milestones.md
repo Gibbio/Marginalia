@@ -58,6 +58,34 @@ Status on April 5, 2026: implemented.
 - `ReadingPosition.from_anchor()` deduplication across adapters
 - dead code removal (StorageCoordinator, inline schema constant, duplicated helpers)
 
+## Pre-Alpha-0.3 Hardening
+
+Goal: make the runtime trustworthy enough for Alpha 0.3 by reducing risk in
+session lifecycle, process cleanup, command extensibility, provider
+swappability, and observability.
+
+Status on April 5, 2026: implemented.
+
+- fixed implicit fallback-to-stop in voice command dispatch — unhandled intents
+  now return an explicit error instead of silently stopping playback
+- refactored voice command dispatch from if/elif chain to a dict-driven table —
+  adding a new intent requires only an enum member, a TOML entry, and a dict
+  entry
+- added `HELP` voice command intent with Italian (`aiuto`, `comandi`) and
+  English (`help`, `commands`) phrases
+- added stop aliases: `fermati` (Italian) and `halt` (English)
+- added `READING_COMPLETED` and `COMMAND_DISPATCHED` domain events so
+  completion is distinguishable from stop in the event stream
+- added structured logging to: process cleanup (supervisor), provider selection
+  (bootstrap), command dispatch (reader service), session start/stop/completion
+  (reader service and runtime loop)
+- added logging to bootstrap provider selection so fallback decisions are
+  visible and auditable
+- added 12 new tests covering: completion vs stop distinction, help intent,
+  alias resolution, restart after completion, status truthfulness, provider
+  capability reporting, fallback visibility
+- total test count: 60
+
 Remaining hardening before V1:
 
 - richer chunking and progress semantics

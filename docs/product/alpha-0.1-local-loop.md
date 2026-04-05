@@ -127,15 +127,16 @@ Manual command equivalents remain available:
 .venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml status --json
 ```
 
-## Supported Voice Commands
+## Supported Voice Commands (Italian)
 
 - `pausa`
-- `continua`
+- `continua` / `riprendi`
 - `ripeti`
 - `capitolo successivo`
 - `ricomincia capitolo`
 - `stato`
-- `stop`
+- `stop` / `ferma` / `fermati`
+- `aiuto` / `comandi`
 
 ## Limitations
 

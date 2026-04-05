@@ -24,20 +24,6 @@ current baseline, not as open bootstrap work:
 - language-specific command lexicon files
 - stale runtime cleanup before new foreground sessions start
 
-## Next: Introduce explicit SQLite migrations
-
-Purpose: move from schema bootstrap to deliberate schema evolution.
-
-Suggested labels: `type:feature`, `area:storage`, `area:infra`, `size:m`
-
-Context: `office`
-
-Acceptance criteria:
-
-- migration files or a lightweight migration runner exist
-- schema version updates are deliberate
-- docs explain how migrations run locally and in CI
-
 ## Next: Add document inspection commands
 
 Purpose: let users inspect local documents, notes, and drafts without opening
@@ -185,6 +171,10 @@ Acceptance criteria:
 - command normalization supports a few safe spoken variants
 - Vosk grammar remains intentionally small
 - docs stay explicit about what commands are actually supported
+
+Note: as of pre-0.3 hardening, the dispatch model is dict-driven and aliases
+have been added (fermati, halt, aiuto, comandi). Further alias work should
+build on this foundation.
 
 ## Next: Evolve note search beyond substring matching
 

@@ -90,3 +90,23 @@ class that exposes a `step()` function returning a `StepStatus`:
 The caller owns the loop driver. The CLI uses a `while` loop with signal
 handlers; a desktop shell would use a timer; an async wrapper would use
 `asyncio`. The core does not assume any specific concurrency model.
+
+### Voice Command Dispatch
+
+Voice command dispatch uses a dict-driven table mapping `VoiceCommandIntent`
+enum members to handler callables. Adding a new intent requires:
+
+1. a new member in `VoiceCommandIntent`
+2. at least one phrase in each language TOML file
+3. a new entry in the dispatch table
+
+Unhandled intents return an explicit error instead of silently falling through
+to `stop`.
+
+### Completion vs Stop Events
+
+Document completion emits a `READING_COMPLETED` event and sets
+`runtime_status = "completed"` with `last_command = "document-complete"`.
+Explicit stop sets `runtime_status = "stopped"` with `last_command = "stop"`.
+This distinction is tested and can be relied upon by future desktop or API
+callers.

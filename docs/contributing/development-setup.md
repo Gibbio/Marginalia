@@ -99,7 +99,7 @@ environment variables, then verify readiness with `doctor`.
 
 ## Single Runtime Verification
 
-The supported Alpha 0.1 runtime is a single flow:
+The supported runtime is a single flow:
 
 ```bash
 .venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml play path/to/document.md --json
