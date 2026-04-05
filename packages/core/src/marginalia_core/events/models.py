@@ -33,6 +33,8 @@ class EventName(str, Enum):
     PLAYBACK_PAUSED = "playback.paused"
     PLAYBACK_RESUMED = "playback.resumed"
     PLAYBACK_STOPPED = "playback.stopped"
+    READING_COMPLETED = "reading.completed"
+    COMMAND_DISPATCHED = "command.dispatched"
     ERROR_RAISED = "error.raised"
 
 

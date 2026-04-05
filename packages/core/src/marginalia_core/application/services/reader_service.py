@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from uuid import uuid4
 
 from marginalia_core.application.command_router import (
@@ -24,6 +26,8 @@ from marginalia_core.ports.playback import PlaybackEngine, PlaybackSnapshot
 from marginalia_core.ports.storage import DocumentRepository, SessionRepository
 from marginalia_core.ports.stt import CommandRecognition, CommandRecognizer
 from marginalia_core.ports.tts import SpeechSynthesizer, SynthesisRequest
+
+logger = logging.getLogger(__name__)
 
 
 class ReaderService:
@@ -61,6 +65,7 @@ class ReaderService:
         command_source: str = "cli",
         recognized_command: str | None = None,
     ) -> OperationResult:
+        logger.info("Play requested for document %s (source=%s)", document_id, command_source)
         session = self._session_repository.get_active_session()
         latest_documents = self._document_repository.list_documents()
         target_document_id = document_id or (session.document_id if session else None)
@@ -137,6 +142,7 @@ class ReaderService:
         session.command_stt_provider = recognition.provider_name
         intent = resolve_voice_command(recognition.command, self._command_lexicon)
         if intent is None:
+            logger.warning("Unrecognized command phrase: %r", recognition.command)
             session.touch()
             self._session_repository.save_session(session)
             return OperationResult.error(
@@ -145,6 +151,14 @@ class ReaderService:
             )
 
         result = self._dispatch_voice_intent(intent, recognition)
+        self._publish(
+            EventName.COMMAND_DISPATCHED,
+            session_id=session.session_id,
+            document_id=session.document_id,
+            intent=intent.value,
+            phrase=recognition.command,
+            status=result.status.value,
+        )
         response_factory = (
             OperationResult.error if result.status is OperationStatus.ERROR else OperationResult.ok
         )
@@ -225,11 +239,22 @@ class ReaderService:
             recognized_command=None,
         )
         self._session_repository.save_session(session)
+        logger.info(
+            "Document %s completed at section %d",
+            session.document_id,
+            session.position.section_index,
+        )
         self._publish(
             EventName.PLAYBACK_STOPPED,
             session_id=session.session_id,
             document_id=session.document_id,
             playback_state=playback_snapshot.state.value,
+        )
+        self._publish(
+            EventName.READING_COMPLETED,
+            session_id=session.session_id,
+            document_id=session.document_id,
+            final_anchor=session.position.anchor,
         )
         return OperationResult.ok(
             "Document playback completed.",
@@ -496,6 +521,9 @@ class ReaderService:
         if session is None:
             return OperationResult.error("No active reading session exists.")
 
+        logger.info(
+            "Stop requested for session %s (source=%s)", session.session_id, command_source
+        )
         self._synchronize_session_playback(session)
         playback_snapshot = self._playback_engine.stop()
         session.state = ReaderState.IDLE
@@ -526,33 +554,46 @@ class ReaderService:
 
         return self._voice_status(recognized_command=recognized_command)
 
+    def _build_intent_dispatch_table(
+        self,
+    ) -> dict[VoiceCommandIntent, Callable[[CommandRecognition], OperationResult]]:
+        """Return a mapping from each voice command intent to a handler callable."""
+
+        def _wrap(
+            method: Callable[..., OperationResult],
+        ) -> Callable[[CommandRecognition], OperationResult]:
+            def handler(r: CommandRecognition) -> OperationResult:
+                return method(command_source="voice", recognized_command=r.command)
+
+            return handler
+
+        return {
+            VoiceCommandIntent.PAUSE: _wrap(self.pause),
+            VoiceCommandIntent.RESUME: _wrap(self.resume),
+            VoiceCommandIntent.REPEAT: _wrap(self.repeat_current_chunk),
+            VoiceCommandIntent.NEXT_CHAPTER: _wrap(self.next_chapter),
+            VoiceCommandIntent.RESTART_CHAPTER: _wrap(self.restart_chapter),
+            VoiceCommandIntent.STATUS: lambda r: self._voice_status(
+                recognized_command=r.command
+            ),
+            VoiceCommandIntent.STOP: _wrap(self.stop),
+            VoiceCommandIntent.HELP: lambda r: self._handle_help(recognized_command=r.command),
+        }
+
     def _dispatch_voice_intent(
         self,
         intent: VoiceCommandIntent,
         recognition: CommandRecognition,
     ) -> OperationResult:
-        if intent is VoiceCommandIntent.PAUSE:
-            return self.pause(command_source="voice", recognized_command=recognition.command)
-        if intent is VoiceCommandIntent.RESUME:
-            return self.resume(command_source="voice", recognized_command=recognition.command)
-        if intent is VoiceCommandIntent.REPEAT:
-            return self.repeat_current_chunk(
-                command_source="voice",
-                recognized_command=recognition.command,
+        dispatch_table = self._build_intent_dispatch_table()
+        handler = dispatch_table.get(intent)
+        if handler is None:
+            logger.error("No handler registered for intent %s", intent.value)
+            return OperationResult.error(
+                f"Intent '{intent.value}' is recognized but not handled.",
             )
-        if intent is VoiceCommandIntent.NEXT_CHAPTER:
-            return self.next_chapter(
-                command_source="voice",
-                recognized_command=recognition.command,
-            )
-        if intent is VoiceCommandIntent.RESTART_CHAPTER:
-            return self.restart_chapter(
-                command_source="voice",
-                recognized_command=recognition.command,
-            )
-        if intent is VoiceCommandIntent.STATUS:
-            return self._voice_status(recognized_command=recognition.command)
-        return self.stop(command_source="voice", recognized_command=recognition.command)
+        logger.info("Dispatching intent %s from phrase %r", intent.value, recognition.command)
+        return handler(recognition)
 
     def _voice_status(self, *, recognized_command: str | None = None) -> OperationResult:
         session = self._session_repository.get_active_session()
@@ -579,6 +620,32 @@ class ReaderService:
                     "chunk_text": chunk.text,
                 },
                 "playback": playback_snapshot,
+            },
+        )
+
+    def _handle_help(self, *, recognized_command: str | None = None) -> OperationResult:
+        """Return available voice commands in the current language."""
+
+        session = self._session_repository.get_active_session()
+        if session is None:
+            return OperationResult.error("No active reading session exists.")
+
+        session.last_command = "help"
+        session.last_command_source = "voice"
+        session.last_recognized_command = recognized_command
+        session.touch()
+        self._session_repository.save_session(session)
+        available_commands = {
+            intent.value: list(phrases)
+            for intent, phrases in self._command_lexicon.phrases_by_intent.items()
+        }
+        logger.info("Help requested: returning %d command intents", len(available_commands))
+        return OperationResult.ok(
+            "Available voice commands reported.",
+            data={
+                "session": session,
+                "language": self._command_lexicon.language,
+                "available_commands": available_commands,
             },
         )
 

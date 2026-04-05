@@ -19,6 +19,7 @@ class VoiceCommandIntent(str, Enum):
     RESTART_CHAPTER = "restart-chapter"
     STATUS = "status"
     STOP = "stop"
+    HELP = "help"
 
     @property
     def config_key(self) -> str:
