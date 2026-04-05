@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _remove_local_adapter_path()
     try:
-        import numpy as np
+        import numpy as np  # type: ignore[import-not-found]
         import soundfile as sf  # type: ignore[import-not-found]
         from kokoro import KPipeline  # type: ignore[import-not-found]
     except ImportError as exc:

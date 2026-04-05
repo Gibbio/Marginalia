@@ -605,7 +605,7 @@ def _probe_audio_input_devices(
     requested_name: str | None = None,
 ) -> dict[str, Any]:
     try:
-        import sounddevice  # type: ignore[import-untyped]
+        import sounddevice  # type: ignore[import-not-found]
     except ImportError:
         return {
             "available": False,

@@ -101,8 +101,8 @@ class VoskCommandRecognizer:
             raise RuntimeError("Vosk model path is not configured or does not exist.")
 
         try:
-            import sounddevice  # type: ignore[import-untyped]
-            from vosk import KaldiRecognizer, Model  # type: ignore[import-untyped]
+            import sounddevice  # type: ignore[import-not-found]
+            from vosk import KaldiRecognizer, Model  # type: ignore[import-not-found]
         except ImportError as exc:
             raise RuntimeError(
                 "Vosk command recognition requires the 'vosk' and 'sounddevice' packages."
