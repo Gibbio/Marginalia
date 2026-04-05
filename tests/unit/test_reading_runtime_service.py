@@ -147,6 +147,124 @@ def test_step_driven_loop_stops_on_shutdown_request(tmp_path: Path) -> None:
     assert result.data["runtime"]["outcome"] == "stopped"
 
 
+def test_runtime_service_completion_is_distinguishable_from_stop(tmp_path: Path) -> None:
+    """Completed sessions have runtime_status='completed' and last_command='document-complete'."""
+
+    runtime_service, session_repository, _, event_bus = _build_runtime_services(
+        tmp_path,
+        playback_auto_complete_after_snapshots=0,
+    )
+
+    result = runtime_service.play(str(Path("tests/fixtures/sample_document.txt").resolve()))
+
+    assert result.status.value == "ok"
+    assert result.data["runtime"]["outcome"] == "completed"
+    session = session_repository.get_active_session()
+    assert session is not None
+    assert session.runtime_status == "completed"
+    assert session.last_command == "document-complete"
+    assert session.last_command_source == "runtime"
+    assert any(
+        event.name.value == "reading.completed" for event in event_bus.published_events
+    )
+
+
+def test_runtime_service_stop_is_distinguishable_from_completion(tmp_path: Path) -> None:
+    """Stopped sessions have runtime_status='stopped' and last_command='stop'."""
+
+    runtime_service, session_repository, _, event_bus = _build_runtime_services(
+        tmp_path,
+        commands=("stop",),
+        playback_auto_complete_after_snapshots=2,
+    )
+
+    result = runtime_service.play(str(Path("tests/fixtures/sample_document.txt").resolve()))
+
+    assert result.status.value == "ok"
+    assert result.data["runtime"]["outcome"] == "stopped"
+    session = session_repository.get_active_session()
+    assert session is not None
+    assert session.runtime_status == "stopped"
+    assert session.last_command == "stop"
+    assert not any(
+        event.name.value == "reading.completed" for event in event_bus.published_events
+    )
+
+
+def test_runtime_service_dispatches_help_intent(tmp_path: Path) -> None:
+    runtime_service, session_repository, _, _ = _build_runtime_services(
+        tmp_path,
+        commands=("aiuto", "stop"),
+        playback_auto_complete_after_snapshots=2,
+    )
+
+    result = runtime_service.play(str(Path("tests/fixtures/sample_document.txt").resolve()))
+
+    assert result.status.value == "ok"
+    assert result.data["runtime"]["handled_command_count"] == 2
+    assert result.data["runtime"]["handled_commands"][0]["handled_command"] == "help"
+    assert result.data["runtime"]["handled_commands"][1]["handled_command"] == "stop"
+
+
+def test_runtime_service_dispatches_stop_alias(tmp_path: Path) -> None:
+    runtime_service, session_repository, _, _ = _build_runtime_services(
+        tmp_path,
+        commands=("fermati",),
+        playback_auto_complete_after_snapshots=2,
+    )
+
+    result = runtime_service.play(str(Path("tests/fixtures/sample_document.txt").resolve()))
+
+    assert result.status.value == "ok"
+    assert result.data["runtime"]["handled_commands"][0]["handled_command"] == "stop"
+    session = session_repository.get_active_session()
+    assert session is not None
+    assert session.last_command == "stop"
+
+
+def test_runtime_service_restart_after_completed_session(tmp_path: Path) -> None:
+    """A second play() after document completion starts a new clean session."""
+
+    runtime_service, session_repository, _, _ = _build_runtime_services(
+        tmp_path,
+        playback_auto_complete_after_snapshots=0,
+    )
+    fixture = str(Path("tests/fixtures/sample_document.txt").resolve())
+
+    first_result = runtime_service.play(fixture)
+    assert first_result.data["runtime"]["outcome"] == "completed"
+
+    second_result = runtime_service.play(fixture)
+    assert second_result.data["runtime"]["outcome"] == "completed"
+    second_session = session_repository.get_active_session()
+    assert second_session is not None
+    assert second_session.runtime_status == "completed"
+    assert second_session.startup_cleanup_summary is not None
+    assert (
+        "Stopped the previously persisted reading session"
+        in second_session.startup_cleanup_summary
+    )
+
+
+def test_status_truthfulness_after_completion(tmp_path: Path) -> None:
+    """Status correctly reports IDLE/stopped/completed after document finishes."""
+
+    runtime_service, session_repository, _, _ = _build_runtime_services(
+        tmp_path,
+        playback_auto_complete_after_snapshots=0,
+    )
+    runtime_service.play(str(Path("tests/fixtures/sample_document.txt").resolve()))
+
+    session = session_repository.get_active_session()
+    assert session is not None
+    assert session.state is ReaderState.IDLE
+    assert session.playback_state is PlaybackState.STOPPED
+    assert session.runtime_status == "completed"
+    assert session.command_listening_active is False
+    assert session.runtime_process_id is None
+    assert session.runtime_error is None
+
+
 def _build_runtime_services(
     tmp_path: Path,
     *,

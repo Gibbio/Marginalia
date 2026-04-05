@@ -50,3 +50,48 @@ def test_load_command_lexicon_supports_english_variants() -> None:
     assert resolve_voice_command("pause", lexicon) is VoiceCommandIntent.PAUSE
     assert resolve_voice_command("continue", lexicon) is VoiceCommandIntent.RESUME
     assert resolve_voice_command("next chapter", lexicon) is VoiceCommandIntent.NEXT_CHAPTER
+
+
+def test_italian_stop_alias_fermati_resolves() -> None:
+    lexicon = load_command_lexicon(
+        Path("packages/infra/src/marginalia_infra/config/commands/it.toml")
+    )
+
+    assert resolve_voice_command("fermati", lexicon) is VoiceCommandIntent.STOP
+    assert resolve_voice_command("ferma", lexicon) is VoiceCommandIntent.STOP
+    assert resolve_voice_command("stop", lexicon) is VoiceCommandIntent.STOP
+
+
+def test_english_stop_alias_halt_resolves() -> None:
+    lexicon = load_command_lexicon(
+        Path("packages/infra/src/marginalia_infra/config/commands/en.toml")
+    )
+
+    assert resolve_voice_command("halt", lexicon) is VoiceCommandIntent.STOP
+    assert resolve_voice_command("stop", lexicon) is VoiceCommandIntent.STOP
+
+
+def test_help_intent_resolves_in_both_languages() -> None:
+    it_lexicon = load_command_lexicon(
+        Path("packages/infra/src/marginalia_infra/config/commands/it.toml")
+    )
+    en_lexicon = load_command_lexicon(
+        Path("packages/infra/src/marginalia_infra/config/commands/en.toml")
+    )
+
+    assert resolve_voice_command("aiuto", it_lexicon) is VoiceCommandIntent.HELP
+    assert resolve_voice_command("comandi", it_lexicon) is VoiceCommandIntent.HELP
+    assert resolve_voice_command("help", en_lexicon) is VoiceCommandIntent.HELP
+    assert resolve_voice_command("commands", en_lexicon) is VoiceCommandIntent.HELP
+
+
+def test_lexicon_grammar_includes_all_phrases() -> None:
+    lexicon = load_command_lexicon(
+        Path("packages/infra/src/marginalia_infra/config/commands/it.toml")
+    )
+
+    grammar = lexicon.grammar
+    assert "pausa" in grammar
+    assert "fermati" in grammar
+    assert "aiuto" in grammar
+    assert "comandi" in grammar
