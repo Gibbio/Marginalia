@@ -23,6 +23,9 @@ def test_ingest_play_note_and_search_flow(tmp_path: Path) -> None:
     play_result = runner.invoke(app, ["play", document_id, "--json"], env=env)
     assert play_result.exit_code == 0
 
+    pause_result = runner.invoke(app, ["pause", "--json"], env=env)
+    assert pause_result.exit_code == 0
+
     note_start_result = runner.invoke(app, ["note-start", "--json"], env=env)
     assert note_start_result.exit_code == 0
 
@@ -37,3 +40,25 @@ def test_ingest_play_note_and_search_flow(tmp_path: Path) -> None:
     assert search_result.exit_code == 0
     payload = json.loads(search_result.stdout)
     assert len(payload["data"]["results"]) == 1
+
+    rewrite_result = runner.invoke(app, ["rewrite-current", "--json"], env=env)
+    assert rewrite_result.exit_code == 0
+    rewrite_payload = json.loads(rewrite_result.stdout)
+    assert rewrite_payload["data"]["draft"]["draft_id"]
+
+    summary_result = runner.invoke(app, ["summarize-topic", "local", "--json"], env=env)
+    assert summary_result.exit_code == 0
+    summary_payload = json.loads(summary_result.stdout)
+    assert summary_payload["data"]["summary"]["topic"] == "local"
+
+    document_search_result = runner.invoke(app, ["search-document", "local", "--json"], env=env)
+    assert document_search_result.exit_code == 0
+    document_search_payload = json.loads(document_search_result.stdout)
+    assert len(document_search_payload["data"]["results"]) == 1
+
+    status_result = runner.invoke(app, ["status", "--json"], env=env)
+    assert status_result.exit_code == 0
+    status_payload = json.loads(status_result.stdout)
+    assert status_payload["data"]["counts"]["notes"] == 1
+    assert status_payload["data"]["counts"]["drafts"] == 1
+    assert status_payload["data"]["session"]["state"] == "PAUSED"

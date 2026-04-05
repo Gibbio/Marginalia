@@ -21,6 +21,7 @@ def test_doctor_command_returns_json(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "ok"
+    assert payload["data"]["database"]["schema_version"] == "1"
 
 
 def test_ingest_command_returns_document_id(tmp_path: Path) -> None:
@@ -35,3 +36,4 @@ def test_ingest_command_returns_document_id(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["data"]["document"]["document_id"]
+    assert payload["data"]["stats"]["chapter_count"] == 2
