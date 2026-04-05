@@ -1,9 +1,9 @@
 # Marginalia
 
 Marginalia is a local AI-first voice reading and annotation engine. It is meant
-to read long-form text aloud, react to voice-oriented controls, capture dictated
-notes anchored to the current reading location, and later help rewrite or
-summarize sections of a document.
+to read long-form text aloud, react to voice-oriented controls, capture notes
+anchored to the current reading location, and later help rewrite or summarize
+sections of a document.
 
 The repository is intentionally structured as a production-minded monorepo. The
 first usable interface is a CLI, the core is Python, storage starts with
@@ -12,8 +12,8 @@ SQLite, and speech plus LLM capabilities stay behind replaceable ports.
 ## Why It Exists
 
 Reading, listening, annotating, and revising are still split across too many
-tools. Marginalia is meant to collapse those workflows into a local-first engine
-that can:
+tools. Marginalia is meant to collapse those workflows into a local-first
+engine that can:
 
 - read a document like an audiobook
 - react to simple spoken control commands later
@@ -22,18 +22,20 @@ that can:
 
 ## Current Scope
 
-As of April 4, 2026, the repository covers a real Foundation plus V0 CLI
-skeleton:
+As of April 5, 2026, the repository covers a hardened Foundation plus a serious
+V0 CLI skeleton:
 
 - monorepo structure for long-term product development
 - Python core packages with clean architecture boundaries
 - CLI as the first usable interface
-- SQLite-backed local persistence with schema bootstrap and health checks
-- fake STT, TTS, playback, and LLM adapters behind ports
+- SQLite-backed local persistence with a stable schema v1 foundation
+- normalized document storage for documents, sections, and chunks
+- fake STT, TTS, playback, rewrite, and summary adapters behind ports
+- structured provider capability reporting
 - event-driven application services for ingestion, sessioning, notes, rewrite,
   summary, and search
-- architecture, roadmap, ADR, and contribution documentation
 - CI, devcontainer, and engineering hygiene
+- updated architecture, roadmap, ADR, and contribution documentation
 
 ## Non-Goals For Now
 
@@ -47,15 +49,16 @@ skeleton:
 
 Marginalia is structured as a lightweight modular monolith:
 
-- `packages/core` contains domain models, state machine, application services,
-  events, and ports
-- `packages/adapters` contains replaceable fake provider implementations
+- `packages/core` contains domain models, the session state machine,
+  application services, events, and provider/storage ports
+- `packages/adapters` contains deterministic fake provider implementations and
+  later real provider adapters
 - `packages/infra` contains configuration, logging, event bus wiring, and
-  SQLite storage
-- `apps/cli` contains the user-facing command-line application
+  SQLite repositories
+- `apps/cli` contains the Typer CLI and the composition root
 
-The core never depends on editor APIs, concrete speech providers, or remote
-services. Those concerns sit behind ports and can be added later without
+The core never depends on editor APIs, concrete speech SDKs, or remote service
+contracts. Those concerns sit behind ports and can be replaced later without
 distorting the domain model.
 
 ## Repository Layout
@@ -117,6 +120,13 @@ Example:
 .venv/bin/python -m marginalia_cli --config examples/local-config.toml doctor --json
 ```
 
+`doctor` reports:
+
+- resolved local paths
+- active provider names
+- provider capability metadata
+- SQLite schema version, profile, tables, and row counts
+
 ## Current CLI Commands
 
 The CLI surface currently includes:
@@ -142,6 +152,8 @@ Example V0 flow:
 ```bash
 .venv/bin/python -m marginalia_cli ingest examples/sample-document.txt --json
 .venv/bin/python -m marginalia_cli play --json
+.venv/bin/python -m marginalia_cli repeat --json
+.venv/bin/python -m marginalia_cli next-chapter --json
 .venv/bin/python -m marginalia_cli pause --json
 .venv/bin/python -m marginalia_cli note-start --json
 .venv/bin/python -m marginalia_cli note-stop --text "Review the opening paragraph." --json
@@ -153,19 +165,24 @@ Example V0 flow:
 ## What Is Real Now
 
 - document ingestion into SQLite with section and chunk parsing
-- persisted reading session state changes
+- normalized document persistence for documents, sections, and chunks
+- persisted reading session state changes across separate CLI invocations
 - anchored note capture via explicit text or a fake dictation provider
-- deterministic rewrite draft generation through a fake provider
-- deterministic topic summarization through a fake provider
+- deterministic rewrite draft generation with source anchor and provider
+  metadata
+- deterministic topic summarization with highlights and provider metadata
 - document and note search over local storage
-- doctor and status reporting with schema and database details
-- end-to-end smoke flow covering ingest, play, pause, note, rewrite, summary,
-  search, and status
+- `doctor` reporting for config, provider capabilities, and schema health
+- `status` reporting for session, playback projection, note counts, and latest
+  draft/note context
+- end-to-end smoke flow covering ingest, play, navigation, note capture,
+  rewrite, summary, search, and status
 
 ## What Is Still Stubbed
 
 - actual audio playback
-- microphone capture and speech recognition
+- microphone capture and real speech recognition
+- a bounded command-listening runtime loop
 - production rewrite and summarization providers
 - persistent event history outside the current process
 - desktop UI and editor adapters
@@ -174,10 +191,10 @@ Example V0 flow:
 
 Near term:
 
-- extend the SQLite bootstrap into explicit migrations
+- extend schema bootstrap into explicit migrations
 - improve chunking and reading progress heuristics
-- add richer note and draft inspection commands
-- prepare the core for a thin desktop shell without changing boundaries
+- add document, note, and draft inspection commands
+- define a bounded command-STT loop for `LISTENING_FOR_COMMAND`
 
 Later:
 

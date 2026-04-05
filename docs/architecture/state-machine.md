@@ -24,6 +24,18 @@
 | `READING_REWRITE` | `PAUSED`, `READING`, `ERROR` |
 | `ERROR` | `IDLE` |
 
+## Playback Projection
+
+The high-level reader state maps to a projected playback state:
+
+- `READING` and `READING_REWRITE` project to `playing`
+- `IDLE` projects to `stopped`
+- all other active workflow states project to `paused`
+
+This matters because the CLI is currently a one-shot process model. The fake
+playback engine is re-created on each invocation, so the persisted session state
+remains the source of truth for coherent status reporting.
+
 ## Why Explicit State Matters
 
 - voice-driven tools become confusing when note capture and playback overlap
@@ -38,11 +50,12 @@ flows:
 - `play`
 - `pause`
 - `resume`
+- `repeat`
+- `restart-chapter`
+- `next-chapter`
 - `note-start`
 - `note-stop`
 - `rewrite-current`
-- `restart-chapter`
-- `next-chapter`
 
 Implemented transition behavior:
 
@@ -54,6 +67,8 @@ Implemented transition behavior:
 - `note-stop` persists a note and returns the session to `PAUSED`
 - `rewrite-current` moves `PAUSED` or `READING -> PROCESSING_REWRITE -> PAUSED`
 - `restart-chapter` and `next-chapter` update the persisted reading position
+  without inventing new lifecycle states
+- `repeat` is a read-only query against the current persisted position
 
 `LISTENING_FOR_COMMAND` and `READING_REWRITE` remain intentionally defined but
 only partially exercised. They are reserved so later voice-command and

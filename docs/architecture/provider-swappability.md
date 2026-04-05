@@ -8,7 +8,7 @@ user constraints will vary.
 
 ## Port Boundaries
 
-Current ports cover:
+Current ports intentionally separate:
 
 - command STT recognizer
 - dictation STT transcriber
@@ -19,6 +19,59 @@ Current ports cover:
 - storage repositories
 - event publisher and subscriber
 
+Command STT and dictation STT are not treated as one generic voice interface.
+They have different latency, transcript-shape, and future streaming needs.
+
+## Capability Model
+
+Providers now expose explicit capabilities so the core does not need to infer
+behavior from provider names later.
+
+Current capability fields include:
+
+- provider name
+- interface kind
+- supported languages
+- supports streaming
+- supports partial results
+- supports timestamps
+- low-latency suitability
+- offline capability
+- execution mode: local, hybrid, or remote
+
+This is intentionally small but realistic enough for future provider selection
+without changing core service contracts.
+
+## Structured Provider Results
+
+Ports no longer return only primitive strings or bytes.
+
+Current structured outputs include:
+
+- `CommandRecognition` for command STT
+- `DictationTranscript` and `DictationSegment` for dictation STT
+- `SynthesisRequest` and `SynthesisResult` for TTS
+- `PlaybackSnapshot` for playback state
+- `RewriteInstruction` and `RewriteOutput` for rewrite generation
+- `SummaryInstruction` and `SummaryOutput` for summarization
+
+This keeps future provider-specific richness behind port-shaped models rather
+than leaking SDK details into domain services.
+
+## Current Fake Providers
+
+The repository intentionally ships deterministic development adapters:
+
+- command STT returns scripted commands
+- dictation STT returns stable transcripts with timestamp-like segments
+- TTS returns stable synthesis metadata and fake audio references
+- playback returns snapshots and deterministic state transitions
+- rewrite returns explicit section-aware drafts
+- summary returns structured local summaries with highlights
+
+They are not mocks hidden inside tests. They are first-class development
+adapters meant to exercise the architecture honestly.
+
 ## Rules
 
 - the core depends only on ports
@@ -26,22 +79,10 @@ Current ports cover:
 - CLI code composes concrete implementations but does not become business logic
 - future providers may be local, hybrid, or remote, but the domain model stays
   unchanged
-
-## Why This Matters Early
-
-If provider swappability is delayed, fake adapters quickly harden into hidden
-product assumptions. By defining ports now, the repository can support later
-experiments with:
-
-- local whisper-style transcription
-- local or OS-native TTS
-- higher-quality playback stacks
-- different rewrite and summarization backends
-
-without reworking the core application services.
+- provider configuration must remain explicit and local-first
 
 ## Deferred Work
 
-Provider quality, latency, device access, and model lifecycle management are all
-future concerns. This repository only establishes the shape required to support
-them safely later.
+Provider quality, latency tuning, device access, model lifecycle management,
+and real streaming loops are all future concerns. This repository establishes
+the shape required to support them safely later.

@@ -9,16 +9,18 @@ current baseline, not as open bootstrap work:
 - core domain skeleton
 - reading session state model
 - standardized in-process event model
-- SQLite schema v0 bootstrap
+- SQLite schema v1 foundation
+- normalized document storage for sections and chunks
 - runnable CLI command surface
-- fake providers behind ports
+- deterministic fake providers behind ports
+- provider capability model and diagnostics
 - configuration and logging setup
 - unit tests, integration tests, and smoke flow
 - devcontainer and local development tooling
 
 ## Next: Introduce explicit SQLite migrations
 
-Purpose: move from schema bootstrap to durable schema evolution.
+Purpose: move from schema bootstrap to deliberate schema evolution.
 
 Suggested labels: `type:feature`, `area:storage`, `area:infra`, `size:m`
 
@@ -26,9 +28,24 @@ Context: `office`
 
 Acceptance criteria:
 
-- migration files or a lightweight migration mechanism exist
+- migration files or a lightweight migration runner exist
 - schema version updates are deliberate
 - docs explain how migrations run locally and in CI
+
+## Next: Add document inspection commands
+
+Purpose: let users inspect local documents, notes, and drafts without opening
+SQLite manually.
+
+Suggested labels: `type:feature`, `area:cli`, `area:storage`, `size:s`
+
+Context: `office`
+
+Acceptance criteria:
+
+- CLI can list stored documents
+- CLI can inspect notes and rewrite drafts for a document
+- output remains structured and script-friendly
 
 ## Next: Improve chunking and reading progress semantics
 
@@ -44,34 +61,20 @@ Acceptance criteria:
 - progress-related events remain stable
 - repeat output reflects a more precise reading unit
 
-## Next: Add session inspection commands
+## Next: Add a bounded command-STT listening loop
 
-Purpose: let users inspect local documents, drafts, and notes without opening
-SQLite manually.
+Purpose: validate how `LISTENING_FOR_COMMAND` should behave before real STT
+integration.
 
-Suggested labels: `type:feature`, `area:cli`, `area:storage`, `size:s`
-
-Context: `office`
-
-Acceptance criteria:
-
-- CLI can list stored documents
-- CLI can inspect notes and rewrite drafts for a document
-- output remains structured and script-friendly
-
-## Next: Add draft review workflow
-
-Purpose: make rewrite output more actionable than a single generated blob.
-
-Suggested labels: `type:feature`, `area:llm`, `area:cli`, `size:m`
+Suggested labels: `type:research`, `area:voice`, `area:core`, `size:m`
 
 Context: `home`
 
 Acceptance criteria:
 
-- drafts can be listed and retrieved
-- draft status transitions are explicit
-- docs explain what remains fake versus real
+- fake command recognizer participates in a bounded loop or demo flow
+- state transitions for command listening are explicit
+- no real microphone capture is required
 
 ## Next: Strengthen event payload contracts
 
@@ -88,6 +91,20 @@ Acceptance criteria:
 - service tests cover critical emitted events
 - no event names are ambiguous about lifecycle intent
 
+## Next: Add draft review workflow
+
+Purpose: make rewrite output more actionable than a single generated blob.
+
+Suggested labels: `type:feature`, `area:llm`, `area:cli`, `size:m`
+
+Context: `home`
+
+Acceptance criteria:
+
+- drafts can be listed and retrieved
+- draft status transitions are explicit
+- docs explain what remains fake versus real
+
 ## Next: Improve doctor diagnostics
 
 Purpose: make local environment failures easier to diagnose.
@@ -102,38 +119,10 @@ Acceptance criteria:
 - doctor reports writable path issues clearly
 - doctor output stays useful in JSON mode
 
-## Next: Add more CLI flow coverage
+## Next: Add summary persistence or review design
 
-Purpose: keep the V0 skeleton trustworthy as commands evolve.
-
-Suggested labels: `type:feature`, `area:ci`, `area:cli`, `size:s`
-
-Context: `office`
-
-Acceptance criteria:
-
-- tests cover restart-chapter and next-chapter
-- tests cover play-without-document-id using latest document fallback
-- smoke coverage remains deterministic
-
-## Next: Spike local command recognition loop
-
-Purpose: validate how `LISTENING_FOR_COMMAND` should behave before real STT
-integration.
-
-Suggested labels: `type:research`, `area:voice`, `area:core`, `size:m`
-
-Context: `home`
-
-Acceptance criteria:
-
-- fake command recognizer participates in a bounded loop or demo flow
-- state transitions for command listening are explicit
-- no real microphone capture is required
-
-## Next: Spike topic summarization pipeline
-
-Purpose: clarify persistence and review behavior for summaries.
+Purpose: clarify whether summaries should remain transient or become stored
+artifacts.
 
 Suggested labels: `type:research`, `area:llm`, `area:core`, `size:m`
 
@@ -145,7 +134,21 @@ Acceptance criteria:
 - persistence expectations are explicit
 - provider contract changes are documented if needed
 
-## Next: Spike search-notes design
+## Next: Expand CLI flow coverage
+
+Purpose: keep the V0 skeleton trustworthy as commands evolve.
+
+Suggested labels: `type:feature`, `area:ci`, `area:cli`, `size:s`
+
+Context: `office`
+
+Acceptance criteria:
+
+- tests cover play-without-document-id using latest document fallback
+- tests cover planned and error paths for rewrite and note capture
+- smoke coverage remains deterministic
+
+## Next: Evolve note search beyond substring matching
 
 Purpose: determine whether note search should remain SQLite substring search or
 grow into indexing later.

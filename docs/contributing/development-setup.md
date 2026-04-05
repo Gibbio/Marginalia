@@ -53,6 +53,37 @@ Example:
 .venv/bin/python -m marginalia_cli --config examples/local-config.toml doctor --json
 ```
 
+`doctor` is currently the fastest way to validate:
+
+- resolved paths
+- writable database location
+- active provider names
+- provider capabilities
+- SQLite schema version, profile, and current table counts
+
+## Smoke Flow
+
+`make smoke` exercises the current reference workflow:
+
+- doctor
+- ingest
+- play
+- repeat
+- next-chapter
+- restart-chapter
+- pause
+- resume
+- note-start
+- note-stop
+- rewrite-current
+- summarize-topic
+- search-document
+- search-notes
+- status
+
+This flow is deterministic and should stay that way until real providers are
+introduced behind the existing ports.
+
 ## Devcontainer
 
 A lightweight devcontainer is included so work can resume quickly on another

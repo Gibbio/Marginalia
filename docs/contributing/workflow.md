@@ -6,13 +6,14 @@
 - update docs and ADRs alongside architecture changes
 - keep the core independent from UI and editor concerns
 - prefer explicit placeholders over fake completeness
+- keep fake providers deterministic and clearly identified
 
 ## Typical Change Flow
 
 1. identify the relevant package boundary first
 2. update or add tests for implemented behavior
 3. make the code change
-4. update docs if scope, structure, or workflow changed
+4. update docs if scope, structure, workflow, or diagnostics changed
 5. update an ADR if the architectural decision changed
 6. run `make lint`, `make test`, and `make smoke`
 
@@ -23,10 +24,10 @@ unit-level behavior.
 
 Use small, intention-revealing commits such as:
 
-- `refactor: solidify core domain and service layout`
-- `feat: add runnable cli skeleton and fake providers`
-- `feat: add sqlite schema and repositories`
-- `test: add cli and state model coverage`
+- `refactor: refine provider ports and capabilities`
+- `feat: stabilize sqlite schema and repositories`
+- `feat: harden cli note and rewrite flow`
+- `test: expand cli and provider coverage`
 - `docs: align architecture and roadmap with implementation`
 
 ## ADR Expectations
@@ -49,9 +50,20 @@ Real provider integrations are welcome later, but they must:
 - avoid leaking provider SDK details into the core
 - keep network assumptions explicit
 - preserve local-first operation where possible
+- update `docs/architecture/provider-swappability.md` if the contract surface changes
 
 Until then, fake providers are acceptable and expected. They should remain
-deterministic and clearly identified as fake in user-facing output.
+deterministic, capability-declared, and clearly identified as fake in
+user-facing output.
+
+## Schema Work
+
+SQLite changes should remain lightweight, but not casual.
+
+- keep schema bootstrap idempotent
+- prefer additive compatibility updates over silent breakage
+- document schema changes in roadmap or architecture docs
+- do not introduce an ORM unless the tradeoff is justified explicitly
 
 ## Editor Integrations
 
