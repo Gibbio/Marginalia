@@ -1,11 +1,11 @@
-# Introduction
+# Introduzione
 
-Marginalia reads text locally and preserves context.
+Marginalia legge il testo in locale e mantiene il contesto.
 
-# Notes
+# Note
 
-The user can pause, resume, and attach notes to a reading position.
+L'utente puo mettere in pausa, riprendere e aggiungere note a una posizione di lettura.
 
-# Rewrite
+# Rielaborazione
 
-Later iterations will rewrite or summarize sections using anchored notes.
+Nelle iterazioni successive il sistema potra rielaborare o riassumere le sezioni usando note ancorate.

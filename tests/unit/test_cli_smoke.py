@@ -15,7 +15,11 @@ def test_doctor_command_returns_json(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         ["doctor", "--json"],
-        env={"MARGINALIA_DB_PATH": str(tmp_path / "doctor.sqlite3")},
+        env={
+            "MARGINALIA_DB_PATH": str(tmp_path / "doctor.sqlite3"),
+            "MARGINALIA_TTS_PROVIDER": "fake",
+            "MARGINALIA_PLAYBACK_PROVIDER": "fake",
+        },
     )
 
     assert result.exit_code == 0
@@ -36,7 +40,11 @@ def test_ingest_command_returns_document_id(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         ["ingest", str(source_path), "--json"],
-        env={"MARGINALIA_DB_PATH": str(tmp_path / "ingest.sqlite3")},
+        env={
+            "MARGINALIA_DB_PATH": str(tmp_path / "ingest.sqlite3"),
+            "MARGINALIA_TTS_PROVIDER": "fake",
+            "MARGINALIA_PLAYBACK_PROVIDER": "fake",
+        },
     )
 
     assert result.exit_code == 0
@@ -48,7 +56,11 @@ def test_ingest_command_returns_document_id(tmp_path: Path) -> None:
 def test_play_command_returns_synthesis_and_playback(tmp_path: Path) -> None:
     runner = CliRunner()
     source_path = Path("tests/fixtures/sample_document.txt").resolve()
-    env = {"MARGINALIA_DB_PATH": str(tmp_path / "play.sqlite3")}
+    env = {
+        "MARGINALIA_DB_PATH": str(tmp_path / "play.sqlite3"),
+        "MARGINALIA_TTS_PROVIDER": "fake",
+        "MARGINALIA_PLAYBACK_PROVIDER": "fake",
+    }
 
     ingest_result = runner.invoke(app, ["ingest", str(source_path), "--json"], env=env)
     document_id = json.loads(ingest_result.stdout)["data"]["document"]["document_id"]
@@ -64,7 +76,11 @@ def test_play_command_returns_synthesis_and_playback(tmp_path: Path) -> None:
 def test_repeat_resume_and_navigation_commands(tmp_path: Path) -> None:
     runner = CliRunner()
     source_path = Path("tests/fixtures/sample_document.txt").resolve()
-    env = {"MARGINALIA_DB_PATH": str(tmp_path / "navigation.sqlite3")}
+    env = {
+        "MARGINALIA_DB_PATH": str(tmp_path / "navigation.sqlite3"),
+        "MARGINALIA_TTS_PROVIDER": "fake",
+        "MARGINALIA_PLAYBACK_PROVIDER": "fake",
+    }
 
     ingest_result = runner.invoke(app, ["ingest", str(source_path), "--json"], env=env)
     document_id = json.loads(ingest_result.stdout)["data"]["document"]["document_id"]
@@ -97,6 +113,8 @@ def test_listen_command_dispatches_fake_voice_command(tmp_path: Path) -> None:
     env = {
         "MARGINALIA_DB_PATH": str(tmp_path / "listen.sqlite3"),
         "MARGINALIA_FAKE_COMMANDS": "pausa",
+        "MARGINALIA_TTS_PROVIDER": "fake",
+        "MARGINALIA_PLAYBACK_PROVIDER": "fake",
     }
 
     ingest_result = runner.invoke(app, ["ingest", str(source_path), "--json"], env=env)
@@ -117,6 +135,8 @@ def test_control_loop_processes_multiple_fake_commands(tmp_path: Path) -> None:
     env = {
         "MARGINALIA_DB_PATH": str(tmp_path / "control-loop.sqlite3"),
         "MARGINALIA_FAKE_COMMANDS": "pausa,continua",
+        "MARGINALIA_TTS_PROVIDER": "fake",
+        "MARGINALIA_PLAYBACK_PROVIDER": "fake",
     }
 
     ingest_result = runner.invoke(app, ["ingest", str(source_path), "--json"], env=env)

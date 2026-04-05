@@ -4,12 +4,16 @@ VENV_PYTHON := $(VENV_DIR)/bin/python
 VENV_PIP := $(VENV_PYTHON) -m pip
 PYTHONPATH_LOCAL := apps/cli/src:packages/core/src:packages/adapters/src:packages/infra/src
 
-.PHONY: bootstrap format lint test smoke run-cli-help
+.PHONY: bootstrap bootstrap-kokoro format lint test smoke run-cli-help
 
 bootstrap:
 	$(PYTHON) -m venv $(VENV_DIR)
 	$(VENV_PIP) install --upgrade pip
 	$(VENV_PIP) install -e ".[dev]"
+
+bootstrap-kokoro:
+	uv venv .venv-kokoro --python 3.12 --seed --clear
+	uv pip install --python .venv-kokoro/bin/python "kokoro>=0.9.4,<1.0" soundfile
 
 format:
 	$(VENV_DIR)/bin/ruff format .

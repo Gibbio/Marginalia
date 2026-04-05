@@ -2,25 +2,30 @@ environment = "local"
 log_level = "INFO"
 database_path = ".marginalia/alpha.sqlite3"
 audio_cache_dir = ".marginalia/audio-cache"
-default_voice = "it-local-alpha"
+default_voice = "if_sara"
 
 [providers]
 command_stt = "vosk"
 dictation_stt = "fake"
-tts = "piper"
+tts = "kokoro"
 playback = "subprocess"
 llm = "fake"
 allow_fallback = false
 
+[kokoro]
+python_executable = "/Users/mauriziogobbo/Marginalia/.venv-kokoro/bin/python"
+lang_code = "i"
+speed = 1.0
+
 [piper]
-executable = "piper"
-model_path = "/absolute/path/to/piper-model.onnx"
+executable = "/Users/mauriziogobbo/Marginalia/.venv/bin/piper"
+model_path = "/Users/mauriziogobbo/Marginalia/.models/piper/it_IT-riccardo-x_low.onnx"
 speaker_id = 0
 length_scale = 1.0
 noise_scale = 0.667
 
 [vosk]
-model_path = "/absolute/path/to/vosk-model-small-it"
+model_path = "/Users/mauriziogobbo/Marginalia/.models/vosk/vosk-model-small-it-0.22"
 sample_rate = 16000
 timeout_seconds = 4.0
 commands = [
@@ -38,4 +43,4 @@ command = "afplay"
 
 [fake_providers]
 commands = ["pausa", "continua"]
-dictation_text = "Remember to sharpen the transition in this section."
+dictation_text = "Ricordati di rendere piu netto il passaggio in questa sezione."

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
+import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +43,9 @@ class AppSettings:
     fake_command_script: tuple[str, ...]
     fake_dictation_text: str
     default_voice: str
+    kokoro_python_executable: str
+    kokoro_lang_code: str
+    kokoro_speed: float
     piper_executable: str
     piper_model_path: Path | None
     piper_speaker_id: int | None
@@ -59,6 +64,7 @@ class AppSettings:
         config_data = _load_toml_file(resolved_config) if resolved_config else {}
         providers = _as_dict(config_data.get("providers"))
         fake_providers = _as_dict(config_data.get("fake_providers"))
+        kokoro = _as_dict(config_data.get("kokoro"))
         piper = _as_dict(config_data.get("piper"))
         vosk = _as_dict(config_data.get("vosk"))
         playback = _as_dict(config_data.get("playback"))
@@ -100,7 +106,7 @@ class AppSettings:
         )
 
         requested_tts_provider = os.getenv(
-            "MARGINALIA_TTS_PROVIDER", str(providers.get("tts", "fake"))
+            "MARGINALIA_TTS_PROVIDER", str(providers.get("tts", "kokoro"))
         )
         return cls(
             app_name="Marginalia",
@@ -121,11 +127,7 @@ class AppSettings:
             tts_provider=requested_tts_provider,
             playback_provider=os.getenv(
                 "MARGINALIA_PLAYBACK_PROVIDER",
-                str(
-                    providers.get(
-                        "playback", "subprocess" if requested_tts_provider == "piper" else "fake"
-                    )
-                ),
+                str(providers.get("playback", "fake")),
             ),
             llm_provider=os.getenv("MARGINALIA_LLM_PROVIDER", str(providers.get("llm", "fake"))),
             allow_provider_fallback=_bool_setting(
@@ -145,7 +147,21 @@ class AppSettings:
             ),
             default_voice=os.getenv(
                 "MARGINALIA_DEFAULT_VOICE",
-                str(config_data.get("default_voice", "marginalia-default")),
+                str(config_data.get("default_voice", "if_sara")),
+            ),
+            kokoro_python_executable=os.getenv(
+                "MARGINALIA_KOKORO_PYTHON_EXECUTABLE",
+                str(kokoro.get("python_executable", ".venv-kokoro/bin/python")),
+            ),
+            kokoro_lang_code=os.getenv(
+                "MARGINALIA_KOKORO_LANG_CODE",
+                str(kokoro.get("lang_code", "i")),
+            ),
+            kokoro_speed=_float_setting(
+                env_key="MARGINALIA_KOKORO_SPEED",
+                config_data=kokoro,
+                config_key="speed",
+                fallback=1.0,
             ),
             piper_executable=os.getenv(
                 "MARGINALIA_PIPER_EXECUTABLE",
@@ -217,10 +233,26 @@ class AppSettings:
         audio_cache_dir.mkdir(parents=True, exist_ok=True)
 
     def doctor_report(self) -> dict[str, Any]:
+        kokoro_runtime = _probe_external_python_modules(
+            self.kokoro_python_executable,
+            ("kokoro", "soundfile"),
+        )
         piper_available = shutil.which(self.piper_executable) is not None
         playback_command_available = shutil.which(self.playback_command) is not None
+        espeak_ng_available = shutil.which("espeak-ng") is not None
         vosk_package_available = importlib.util.find_spec("vosk") is not None
         sounddevice_package_available = importlib.util.find_spec("sounddevice") is not None
+        audio_input_probe = (
+            _probe_audio_input_devices()
+            if sounddevice_package_available
+            else {
+                "available": False,
+                "default_input_device": None,
+                "device_count": 0,
+                "devices": [],
+                "error": None,
+            }
+        )
         return {
             "app_name": self.app_name,
             "environment": self.environment,
@@ -249,6 +281,19 @@ class AppSettings:
                 "vosk_command_grammar": self.vosk_command_grammar,
             },
             "provider_checks": {
+                "kokoro": {
+                    "python_executable": self.kokoro_python_executable,
+                    "python_available": kokoro_runtime["python_available"],
+                    "kokoro_package_available": kokoro_runtime["modules"]["kokoro"],
+                    "soundfile_package_available": kokoro_runtime["modules"]["soundfile"],
+                    "lang_code": self.kokoro_lang_code,
+                    "speed": self.kokoro_speed,
+                    "espeak_ng_available": espeak_ng_available,
+                    "probe_error": kokoro_runtime["error"],
+                    "ready": kokoro_runtime["python_available"]
+                    and kokoro_runtime["modules"]["kokoro"]
+                    and kokoro_runtime["modules"]["soundfile"],
+                },
                 "piper": {
                     "executable": self.piper_executable,
                     "executable_available": piper_available,
@@ -263,11 +308,17 @@ class AppSettings:
                     "model_exists": bool(self.vosk_model_path and self.vosk_model_path.exists()),
                     "python_package_available": vosk_package_available,
                     "sounddevice_package_available": sounddevice_package_available,
+                    "default_input_device": audio_input_probe["default_input_device"],
+                    "input_device_available": audio_input_probe["available"],
+                    "input_device_count": audio_input_probe["device_count"],
+                    "input_devices": audio_input_probe["devices"],
+                    "input_device_error": audio_input_probe["error"],
                     "sample_rate": self.vosk_sample_rate,
                     "timeout_seconds": self.vosk_listen_timeout_seconds,
                     "ready": bool(self.vosk_model_path and self.vosk_model_path.exists())
                     and vosk_package_available
-                    and sounddevice_package_available,
+                    and sounddevice_package_available
+                    and bool(audio_input_probe["available"]),
                 },
                 "playback": {
                     "command": self.playback_command,
@@ -405,3 +456,133 @@ def _bool_setting(
 
 def _as_dict(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _probe_external_python_modules(
+    python_executable: str,
+    modules: tuple[str, ...],
+) -> dict[str, Any]:
+    module_state = {module_name: False for module_name in modules}
+    resolved_python = shutil.which(python_executable)
+    if resolved_python is None:
+        return {
+            "python_available": False,
+            "modules": module_state,
+            "error": None,
+        }
+
+    command = [
+        resolved_python,
+        "-c",
+        (
+            "import importlib.util, json; "
+            f"modules = {list(modules)!r}; "
+            "payload = {name: importlib.util.find_spec(name) is not None for name in modules}; "
+            "print(json.dumps(payload))"
+        ),
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        stderr = getattr(exc, "stderr", None)
+        stdout = getattr(exc, "stdout", None)
+        error_message = (stderr or stdout or str(exc)).strip()
+        return {
+            "python_available": True,
+            "modules": module_state,
+            "error": error_message,
+        }
+
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return {
+            "python_available": True,
+            "modules": module_state,
+            "error": completed.stdout.strip() or "invalid module probe response",
+        }
+    return {
+        "python_available": True,
+        "modules": {module_name: bool(payload.get(module_name)) for module_name in modules},
+        "error": None,
+    }
+
+
+def _probe_audio_input_devices() -> dict[str, Any]:
+    try:
+        import sounddevice  # type: ignore[import-untyped]
+    except ImportError:
+        return {
+            "available": False,
+            "default_input_device": None,
+            "device_count": 0,
+            "devices": [],
+            "error": None,
+        }
+
+    try:
+        raw_devices = list(sounddevice.query_devices())
+        default_input_device = _normalize_default_input_device(sounddevice.default.device)
+    except Exception as exc:  # pragma: no cover - delegated to PortAudio
+        return {
+            "available": False,
+            "default_input_device": None,
+            "device_count": 0,
+            "devices": [],
+            "error": str(exc),
+        }
+
+    devices: list[dict[str, Any]] = []
+    for index, device in enumerate(raw_devices):
+        max_input_channels = _device_int_field(device, "max_input_channels")
+        if max_input_channels <= 0:
+            continue
+        devices.append(
+            {
+                "index": index,
+                "name": _device_name(device),
+                "max_input_channels": max_input_channels,
+                "is_default": index == default_input_device,
+            }
+        )
+
+    return {
+        "available": bool(devices),
+        "default_input_device": default_input_device,
+        "device_count": len(devices),
+        "devices": devices,
+        "error": None,
+    }
+
+
+def _normalize_default_input_device(value: object) -> int | None:
+    if isinstance(value, list | tuple):
+        if not value:
+            return None
+        value = value[0]
+    if value is None:
+        return None
+    try:
+        normalized = int(str(value))
+    except ValueError:
+        return None
+    return normalized if normalized >= 0 else None
+
+
+def _device_int_field(device: object, field_name: str) -> int:
+    if isinstance(device, dict):
+        value = device.get(field_name, 0)
+    else:
+        value = getattr(device, field_name, 0)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _device_name(device: object) -> str:
+    if isinstance(device, dict):
+        value = device.get("name", "")
+    else:
+        value = getattr(device, "name", "")
+    return str(value)

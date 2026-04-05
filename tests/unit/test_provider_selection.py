@@ -15,7 +15,8 @@ def test_container_falls_back_to_fake_real_providers_when_not_ready(
 ) -> None:
     monkeypatch.setenv("MARGINALIA_DB_PATH", str(tmp_path / "fallback.sqlite3"))
     monkeypatch.setenv("MARGINALIA_COMMAND_STT_PROVIDER", "vosk")
-    monkeypatch.setenv("MARGINALIA_TTS_PROVIDER", "piper")
+    monkeypatch.setenv("MARGINALIA_TTS_PROVIDER", "kokoro")
+    monkeypatch.setenv("MARGINALIA_KOKORO_PYTHON_EXECUTABLE", "missing-kokoro-python")
     monkeypatch.setenv("MARGINALIA_PLAYBACK_PROVIDER", "subprocess")
     monkeypatch.setenv("MARGINALIA_PLAYBACK_COMMAND", "missing-playback-command")
 
@@ -32,12 +33,13 @@ def test_container_can_select_unready_real_providers_when_fallback_disabled(
 ) -> None:
     monkeypatch.setenv("MARGINALIA_DB_PATH", str(tmp_path / "providers.sqlite3"))
     monkeypatch.setenv("MARGINALIA_COMMAND_STT_PROVIDER", "vosk")
-    monkeypatch.setenv("MARGINALIA_TTS_PROVIDER", "piper")
+    monkeypatch.setenv("MARGINALIA_TTS_PROVIDER", "kokoro")
+    monkeypatch.setenv("MARGINALIA_KOKORO_PYTHON_EXECUTABLE", "missing-kokoro-python")
     monkeypatch.setenv("MARGINALIA_PLAYBACK_PROVIDER", "subprocess")
     monkeypatch.setenv("MARGINALIA_ALLOW_PROVIDER_FALLBACK", "false")
 
     container = build_container()
 
     assert container.command_stt.describe_capabilities().provider_name == "vosk-command-stt"
-    assert container.speech_synthesizer.describe_capabilities().provider_name == "piper"
+    assert container.speech_synthesizer.describe_capabilities().provider_name == "kokoro"
     assert container.playback_engine.describe_capabilities().provider_name == "subprocess-playback"

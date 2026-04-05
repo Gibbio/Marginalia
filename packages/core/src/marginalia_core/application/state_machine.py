@@ -10,7 +10,11 @@ class InvalidTransitionError(ValueError):
 
 
 ALLOWED_TRANSITIONS: dict[ReaderState, set[ReaderState]] = {
-    ReaderState.IDLE: {ReaderState.READING, ReaderState.ERROR},
+    ReaderState.IDLE: {
+        ReaderState.READING,
+        ReaderState.LISTENING_FOR_COMMAND,
+        ReaderState.ERROR,
+    },
     ReaderState.READING: {
         ReaderState.IDLE,
         ReaderState.PAUSED,

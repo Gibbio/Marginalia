@@ -47,3 +47,12 @@ def test_reader_state_machine_allows_stopping_from_paused() -> None:
 
     assert session.state is ReaderState.IDLE
     assert session.playback_state is PlaybackState.STOPPED
+
+
+def test_reader_state_machine_allows_listening_from_idle() -> None:
+    session = ReadingSession(session_id="session-1", document_id="doc-1", state=ReaderState.IDLE)
+
+    ReaderStateMachine().transition(session, ReaderState.LISTENING_FOR_COMMAND)
+
+    assert session.state is ReaderState.LISTENING_FOR_COMMAND
+    assert session.playback_state is PlaybackState.PAUSED

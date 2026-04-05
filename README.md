@@ -30,7 +30,7 @@ loop:
 - CLI as the first usable interface
 - SQLite-backed local persistence with schema v2 compatibility bootstrap
 - normalized document storage for documents, sections, and chunks
-- real local Piper TTS and Vosk command-STT adapters behind ports
+- real local Kokoro TTS by default, optional Piper TTS, and Vosk command-STT adapters behind ports
 - local subprocess-backed playback for generated audio artifacts
 - fake provider fallbacks for testing and development
 - event-driven application services for ingestion, sessioning, notes, rewrite,
@@ -93,8 +93,9 @@ Prerequisites:
 
 - Python 3.12+
 - `make`
-- for the real alpha path on macOS: a local `piper` executable, a Piper model
-  file, a Vosk model directory, and Python packages `vosk` plus `sounddevice`
+- for the real alpha path on macOS: a Kokoro Python runtime compatible with
+  Python `<3.13`, `afplay`, a Vosk model directory, and Python packages `vosk`
+  plus `sounddevice`
 
 Bootstrap a local environment:
 
@@ -121,7 +122,7 @@ Marginalia can run from environment variables or from an explicit TOML file.
 
 - `examples/local-config.toml` keeps the deterministic fake-provider setup
 - `examples/alpha-local-config.toml` shows the real local alpha path with
-  Piper, `afplay`, and Vosk
+  Kokoro, `afplay`, and Vosk
 
 Example:
 
@@ -134,7 +135,7 @@ Example:
 - resolved local paths
 - configured provider names
 - provider capability metadata
-- readiness checks for Piper, Vosk, and playback
+- readiness checks for Kokoro, Piper, Vosk, and playback
 - SQLite schema version, profile, tables, and row counts
 
 ## Current CLI Commands
@@ -193,7 +194,8 @@ Example Alpha 0.1 real-provider flow:
 - normalized document persistence for documents, sections, and chunks
 - persisted reading session state changes across separate CLI invocations
 - persisted provider metadata, audio references, and playback process metadata
-- real local Piper synthesis to WAV artifacts when configured
+- real local Kokoro synthesis to WAV artifacts when configured
+- optional real local Piper synthesis to WAV artifacts when configured
 - real local Vosk command recognition with a constrained Italian vocabulary when configured
 - local subprocess-backed playback control through `play`, `pause`, `resume`, and `stop`
 - bounded CLI voice command handling through `listen` and `control-loop`

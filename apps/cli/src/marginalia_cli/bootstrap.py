@@ -10,6 +10,7 @@ from marginalia_adapters.fake.llm import FakeRewriteGenerator, FakeTopicSummariz
 from marginalia_adapters.fake.playback import FakePlaybackEngine
 from marginalia_adapters.fake.stt import FakeCommandRecognizer, FakeDictationTranscriber
 from marginalia_adapters.fake.tts import FakeSpeechSynthesizer
+from marginalia_adapters.real.kokoro import KokoroSpeechSynthesizer
 from marginalia_adapters.real.piper import PiperSpeechSynthesizer
 from marginalia_adapters.real.playback import SubprocessPlaybackEngine
 from marginalia_adapters.real.vosk import VoskCommandRecognizer
@@ -161,6 +162,14 @@ def _build_speech_synthesizer(
     provider_checks: dict[str, Any],
 ) -> SpeechSynthesizer:
     provider_name = settings.tts_provider
+    if provider_name == "kokoro":
+        if provider_checks["kokoro"]["ready"] or not settings.allow_provider_fallback:
+            return KokoroSpeechSynthesizer(
+                python_executable=settings.kokoro_python_executable,
+                output_dir=settings.audio_cache_dir,
+                lang_code=settings.kokoro_lang_code,
+                speed=settings.kokoro_speed,
+            )
     if provider_name == "piper":
         if provider_checks["piper"]["ready"] or not settings.allow_provider_fallback:
             return PiperSpeechSynthesizer(

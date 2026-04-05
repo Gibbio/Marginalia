@@ -4,6 +4,8 @@ set -euo pipefail
 export PYTHONPATH="apps/cli/src:packages/core/src:packages/adapters/src:packages/infra/src"
 export MARGINALIA_DB_PATH="${MARGINALIA_DB_PATH:-$(mktemp -t marginalia-smoke)}"
 export MARGINALIA_FAKE_COMMANDS="${MARGINALIA_FAKE_COMMANDS:-pausa,continua}"
+export MARGINALIA_TTS_PROVIDER="${MARGINALIA_TTS_PROVIDER:-fake}"
+export MARGINALIA_PLAYBACK_PROVIDER="${MARGINALIA_PLAYBACK_PROVIDER:-fake}"
 
 .venv/bin/python -m marginalia_cli doctor --json
 .venv/bin/python -m marginalia_cli ingest examples/sample-document.txt --json

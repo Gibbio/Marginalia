@@ -6,6 +6,7 @@ import json
 import queue
 import time
 from pathlib import Path
+from typing import Any
 
 from marginalia_core.ports.capabilities import ProviderCapabilities
 from marginalia_core.ports.stt import CommandRecognition
@@ -47,8 +48,8 @@ class VoskCommandRecognizer:
             raise RuntimeError("Vosk model path is not configured or does not exist.")
 
         try:
-            import sounddevice  # type: ignore[import-not-found]
-            from vosk import KaldiRecognizer, Model  # type: ignore[import-not-found]
+            import sounddevice  # type: ignore[import-untyped]
+            from vosk import KaldiRecognizer, Model  # type: ignore[import-untyped]
         except ImportError as exc:
             raise RuntimeError(
                 "Vosk command recognition requires the 'vosk' and 'sounddevice' packages."
@@ -71,8 +72,10 @@ class VoskCommandRecognizer:
             audio_queue.put(bytes(indata))
 
         started_at = time.monotonic()
+        input_device = _resolve_input_device(sounddevice)
         try:
             with sounddevice.RawInputStream(
+                device=input_device,
                 samplerate=self._sample_rate,
                 blocksize=8_000,
                 dtype="int16",
@@ -115,3 +118,50 @@ def _result_text(raw_result: str) -> str:
     except json.JSONDecodeError:
         return ""
     return str(payload.get("text", "")).strip().lower()
+
+
+def _resolve_input_device(sounddevice: Any) -> int:
+    try:
+        devices = list(sounddevice.query_devices())
+    except Exception as exc:  # pragma: no cover - delegated to PortAudio
+        raise RuntimeError(f"Unable to query audio input devices: {exc}") from exc
+
+    default_input_device = _default_input_device_index(sounddevice)
+    if default_input_device is not None and default_input_device < len(devices):
+        if _device_input_channels(devices[default_input_device]) > 0:
+            return default_input_device
+
+    for index, device in enumerate(devices):
+        if _device_input_channels(device) > 0:
+            return index
+
+    raise RuntimeError(
+        "No input audio device is available for Vosk command capture. "
+        "Connect or enable a microphone in macOS Sound settings."
+    )
+
+
+def _default_input_device_index(sounddevice: Any) -> int | None:
+    default = getattr(getattr(sounddevice, "default", None), "device", None)
+    if isinstance(default, list | tuple):
+        if not default:
+            return None
+        default = default[0]
+    if default is None:
+        return None
+    try:
+        value = int(str(default))
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _device_input_channels(device: Any) -> int:
+    if isinstance(device, dict):
+        value = device.get("max_input_channels", 0)
+    else:
+        value = getattr(device, "max_input_channels", 0)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

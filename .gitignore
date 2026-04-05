@@ -16,6 +16,8 @@ htmlcov/
 
 # Local state
 .marginalia/
+.models/
+.venv-kokoro/
 *.sqlite
 *.sqlite3
 *.db

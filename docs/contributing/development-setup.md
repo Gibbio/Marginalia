@@ -49,6 +49,9 @@ Useful environment variables:
 - `MARGINALIA_FAKE_DICTATION_TEXT`
 - `MARGINALIA_DEFAULT_VOICE`
 - `MARGINALIA_TTS_PROVIDER`
+- `MARGINALIA_KOKORO_PYTHON_EXECUTABLE`
+- `MARGINALIA_KOKORO_LANG_CODE`
+- `MARGINALIA_KOKORO_SPEED`
 - `MARGINALIA_COMMAND_STT_PROVIDER`
 - `MARGINALIA_PLAYBACK_PROVIDER`
 - `MARGINALIA_ALLOW_PROVIDER_FALLBACK`
@@ -70,14 +73,17 @@ Example:
 - writable database location
 - active provider names
 - provider capabilities
-- Piper, Vosk, and playback readiness
+- Kokoro, Piper, Vosk, and playback readiness
 - SQLite schema version, profile, and current table counts
 
 ## Real Provider Setup
 
 Alpha 0.1 targets macOS Apple Silicon and expects:
 
-- a local `piper` executable plus a Piper `.onnx` voice model
+- a dedicated Python 3.12 or 3.11 runtime for Kokoro
+- `kokoro` and `soundfile` installed in that runtime
+- optionally `espeak-ng` on `PATH` for better non-English coverage
+- optionally a local `piper` executable plus a Piper `.onnx` voice model
 - a local Vosk Italian model directory
 - Python packages `vosk` and `sounddevice`
 - microphone permission for the terminal app
