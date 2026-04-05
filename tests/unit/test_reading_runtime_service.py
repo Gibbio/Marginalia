@@ -17,6 +17,7 @@ from marginalia_core.application.services.document_ingestion_service import (
 )
 from marginalia_core.application.services.reader_service import ReaderService
 from marginalia_core.application.services.reading_runtime_service import ReadingRuntimeService
+from marginalia_core.application.services.runtime_loop import StepStatus
 from marginalia_core.domain.reading_session import PlaybackState, ReaderState
 from marginalia_core.events.models import EventName
 from marginalia_core.ports.runtime import RuntimeSessionRecord
@@ -105,6 +106,45 @@ def test_runtime_service_cleans_stale_runtime_record_before_start(tmp_path: Path
     assert cleanup["cleaned_up"] is True
     assert cleanup["runtime_report"].runtime_found is True
     assert cleanup["runtime_report"].record_removed is True
+
+
+def test_step_driven_loop_completes_document(tmp_path: Path) -> None:
+    runtime_service, session_repository, _, _ = _build_runtime_services(
+        tmp_path,
+        playback_auto_complete_after_snapshots=0,
+    )
+    loop = runtime_service.create_loop()
+    start_result = loop.start(str(Path("tests/fixtures/sample_document.txt").resolve()))
+
+    assert start_result.status.value == "ok"
+
+    steps = 0
+    with loop:
+        while loop.step() is StepStatus.CONTINUE:
+            steps += 1
+            assert steps < 200, "loop did not terminate"
+
+    result = loop.finalize()
+    assert result.status.value == "ok"
+    assert result.data["runtime"]["outcome"] == "completed"
+
+
+def test_step_driven_loop_stops_on_shutdown_request(tmp_path: Path) -> None:
+    runtime_service, session_repository, _, _ = _build_runtime_services(
+        tmp_path,
+        playback_auto_complete_after_snapshots=100,
+    )
+    loop = runtime_service.create_loop()
+    loop.start(str(Path("tests/fixtures/sample_document.txt").resolve()))
+
+    with loop:
+        loop.step()
+        loop.request_shutdown()
+        status = loop.step()
+
+    assert status is StepStatus.STOPPED
+    result = loop.finalize()
+    assert result.data["runtime"]["outcome"] == "stopped"
 
 
 def _build_runtime_services(

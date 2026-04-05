@@ -25,8 +25,8 @@ def test_doctor_command_reports_command_lexicon_and_schema(tmp_path: Path) -> No
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "ok"
-    assert payload["data"]["database"]["schema_version"] == "3"
-    assert payload["data"]["database"]["schema_profile"] == "sqlite-v3"
+    assert payload["data"]["database"]["schema_version"] == "4"
+    assert payload["data"]["database"]["schema_profile"] == "sqlite-v4-migrated"
     assert payload["data"]["command_lexicon"]["language"] == "it"
 
 

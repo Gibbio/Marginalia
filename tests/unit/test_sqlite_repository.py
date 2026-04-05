@@ -73,8 +73,8 @@ def test_sqlite_database_health_report(tmp_path: Path) -> None:
 
     report = database.health_report()
 
-    assert report["schema_version"] == "3"
-    assert report["schema_profile"] == "sqlite-v3"
+    assert report["schema_version"] == "4"
+    assert report["schema_profile"] == "sqlite-v4-migrated"
     assert "documents" in report["tables"]
     assert "document_sections" in report["tables"]
     assert "document_chunks" in report["tables"]
