@@ -12,6 +12,7 @@ class InvalidTransitionError(ValueError):
 ALLOWED_TRANSITIONS: dict[ReaderState, set[ReaderState]] = {
     ReaderState.IDLE: {ReaderState.READING, ReaderState.ERROR},
     ReaderState.READING: {
+        ReaderState.IDLE,
         ReaderState.PAUSED,
         ReaderState.LISTENING_FOR_COMMAND,
         ReaderState.RECORDING_NOTE,
@@ -19,6 +20,7 @@ ALLOWED_TRANSITIONS: dict[ReaderState, set[ReaderState]] = {
         ReaderState.ERROR,
     },
     ReaderState.PAUSED: {
+        ReaderState.IDLE,
         ReaderState.READING,
         ReaderState.LISTENING_FOR_COMMAND,
         ReaderState.RECORDING_NOTE,
@@ -26,6 +28,7 @@ ALLOWED_TRANSITIONS: dict[ReaderState, set[ReaderState]] = {
         ReaderState.ERROR,
     },
     ReaderState.LISTENING_FOR_COMMAND: {
+        ReaderState.IDLE,
         ReaderState.READING,
         ReaderState.PAUSED,
         ReaderState.RECORDING_NOTE,

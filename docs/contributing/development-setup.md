@@ -20,7 +20,10 @@ This creates `.venv`, upgrades `pip`, and installs the project plus development
 dependencies in editable mode.
 
 If you want a persistent local configuration file instead of environment
-variables, start from `examples/local-config.toml`.
+variables:
+
+- start from `examples/local-config.toml` for the deterministic fake-provider path
+- start from `examples/alpha-local-config.toml` for the real Alpha 0.1 local loop
 
 ## Daily Commands
 
@@ -39,11 +42,19 @@ Useful environment variables:
 - `MARGINALIA_HOME`
 - `MARGINALIA_DATA_DIR`
 - `MARGINALIA_DB_PATH`
+- `MARGINALIA_AUDIO_CACHE_DIR`
 - `MARGINALIA_LOG_LEVEL`
 - `MARGINALIA_CONFIG`
 - `MARGINALIA_FAKE_COMMANDS`
 - `MARGINALIA_FAKE_DICTATION_TEXT`
 - `MARGINALIA_DEFAULT_VOICE`
+- `MARGINALIA_TTS_PROVIDER`
+- `MARGINALIA_COMMAND_STT_PROVIDER`
+- `MARGINALIA_PLAYBACK_PROVIDER`
+- `MARGINALIA_ALLOW_PROVIDER_FALLBACK`
+- `MARGINALIA_PIPER_EXECUTABLE`
+- `MARGINALIA_PIPER_MODEL_PATH`
+- `MARGINALIA_VOSK_MODEL_PATH`
 
 The CLI `doctor` command reports the effective local configuration.
 
@@ -59,7 +70,21 @@ Example:
 - writable database location
 - active provider names
 - provider capabilities
+- Piper, Vosk, and playback readiness
 - SQLite schema version, profile, and current table counts
+
+## Real Provider Setup
+
+Alpha 0.1 targets macOS Apple Silicon and expects:
+
+- a local `piper` executable plus a Piper `.onnx` voice model
+- a local Vosk Italian model directory
+- Python packages `vosk` and `sounddevice`
+- microphone permission for the terminal app
+
+The repository does not download these assets automatically. Configure them
+explicitly through `examples/alpha-local-config.toml` or equivalent
+environment variables, then verify readiness with `doctor`.
 
 ## Smoke Flow
 
@@ -73,6 +98,7 @@ Example:
 - restart-chapter
 - pause
 - resume
+- control-loop
 - note-start
 - note-stop
 - rewrite-current
@@ -81,8 +107,8 @@ Example:
 - search-notes
 - status
 
-This flow is deterministic and should stay that way until real providers are
-introduced behind the existing ports.
+This flow is deterministic and uses fake providers by default, including a
+scripted voice-command loop.
 
 ## Devcontainer
 

@@ -43,6 +43,12 @@ NOTE_TEXT_OPTION = typer.Option(
     "--text",
     help="Optional explicit note content. If omitted, the fake dictation adapter is used.",
 )
+MAX_COMMANDS_OPTION = typer.Option(
+    5,
+    "--max-commands",
+    min=1,
+    help="Maximum number of voice commands to process before exiting the control loop.",
+)
 
 
 def _json_default(value: object) -> object:
@@ -148,7 +154,7 @@ def repeat_current(
     ctx: typer.Context,
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Return the current chunk anchor and text."""
+    """Replay the current reading chunk."""
 
     container = _container_from_context(ctx)
     result = container.reader_service.repeat_current_chunk()
@@ -178,6 +184,46 @@ def next_chapter(
 
     container = _container_from_context(ctx)
     result = container.reader_service.next_chapter()
+    _emit_result(result, as_json=as_json)
+    raise typer.Exit(code=_exit_code(result))
+
+
+@app.command()
+def stop(
+    ctx: typer.Context,
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Stop local playback and move the active session to IDLE."""
+
+    container = _container_from_context(ctx)
+    result = container.reader_service.stop()
+    _emit_result(result, as_json=as_json)
+    raise typer.Exit(code=_exit_code(result))
+
+
+@app.command("listen")
+def listen_for_command(
+    ctx: typer.Context,
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Listen once for a local voice command and dispatch it."""
+
+    container = _container_from_context(ctx)
+    result = container.reader_service.listen_for_command()
+    _emit_result(result, as_json=as_json)
+    raise typer.Exit(code=_exit_code(result))
+
+
+@app.command("control-loop")
+def control_loop(
+    ctx: typer.Context,
+    max_commands: int = MAX_COMMANDS_OPTION,
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Process a bounded local voice-control loop."""
+
+    container = _container_from_context(ctx)
+    result = container.reader_service.run_control_loop(max_commands=max_commands)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=_exit_code(result))
 
@@ -282,18 +328,22 @@ def doctor(
     ctx: typer.Context,
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Report local configuration and placeholder provider wiring."""
+    """Report local configuration, database health, and provider readiness."""
 
     container = _container_from_context(ctx)
     report: dict[str, Any] = container.settings.doctor_report()
     report["database"] = container.database.health_report()
-    report["provider_capabilities"] = {
+    provider_capabilities = {
         "command_stt": container.command_stt.describe_capabilities(),
         "dictation_stt": container.dictation_stt.describe_capabilities(),
         "tts": container.speech_synthesizer.describe_capabilities(),
         "playback": container.playback_engine.describe_capabilities(),
         "rewrite": container.rewrite_provider.describe_capabilities(),
         "summary": container.summary_provider.describe_capabilities(),
+    }
+    report["provider_capabilities"] = provider_capabilities
+    report["resolved_providers"] = {
+        key: value.provider_name for key, value in provider_capabilities.items()
     }
     result = OperationResult.ok("Marginalia CLI environment looks coherent.", data=report)
     _emit_result(result, as_json=as_json)

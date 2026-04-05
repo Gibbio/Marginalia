@@ -56,6 +56,14 @@ class ReadingSession:
     position: ReadingPosition = field(default_factory=ReadingPosition)
     active_note_id: str | None = None
     last_command: str | None = None
+    last_command_source: str | None = None
+    last_recognized_command: str | None = None
+    voice: str | None = None
+    tts_provider: str | None = None
+    command_stt_provider: str | None = None
+    playback_provider: str | None = None
+    audio_reference: str | None = None
+    playback_process_id: int | None = None
     updated_at: datetime = field(default_factory=_utc_now)
 
     def touch(self) -> None:

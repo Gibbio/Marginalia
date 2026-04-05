@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from marginalia_adapters.fake.llm import FakeRewriteGenerator, FakeTopicSummarizer
 from marginalia_adapters.fake.playback import FakePlaybackEngine
 from marginalia_adapters.fake.stt import FakeCommandRecognizer, FakeDictationTranscriber
 from marginalia_adapters.fake.tts import FakeSpeechSynthesizer
+from marginalia_adapters.real.piper import PiperSpeechSynthesizer
+from marginalia_adapters.real.playback import SubprocessPlaybackEngine
+from marginalia_adapters.real.vosk import VoskCommandRecognizer
 from marginalia_core.application.services.document_ingestion_service import (
     DocumentIngestionService,
 )
@@ -72,10 +76,11 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
     note_repository = SQLiteNoteRepository(database)
     draft_repository = SQLiteRewriteDraftRepository(database)
 
-    command_stt = FakeCommandRecognizer(commands=settings.fake_command_script)
+    provider_checks = settings.doctor_report()["provider_checks"]
+    command_stt = _build_command_recognizer(settings, provider_checks)
     dictation_stt = FakeDictationTranscriber(transcript=settings.fake_dictation_text)
-    tts = FakeSpeechSynthesizer()
-    playback = FakePlaybackEngine()
+    tts = _build_speech_synthesizer(settings, provider_checks)
+    playback = _build_playback_engine(settings, provider_checks)
     rewrite_generator = FakeRewriteGenerator()
     topic_summarizer = FakeTopicSummarizer()
 
@@ -133,3 +138,48 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
             playback_engine=playback,
         ),
     )
+
+
+def _build_command_recognizer(
+    settings: AppSettings,
+    provider_checks: dict[str, Any],
+) -> CommandRecognizer:
+    provider_name = settings.command_stt_provider
+    if provider_name == "vosk":
+        if provider_checks["vosk"]["ready"] or not settings.allow_provider_fallback:
+            return VoskCommandRecognizer(
+                model_path=settings.vosk_model_path,
+                commands=settings.vosk_command_grammar,
+                sample_rate=settings.vosk_sample_rate,
+                timeout_seconds=settings.vosk_listen_timeout_seconds,
+            )
+    return FakeCommandRecognizer(commands=settings.fake_command_script)
+
+
+def _build_speech_synthesizer(
+    settings: AppSettings,
+    provider_checks: dict[str, Any],
+) -> SpeechSynthesizer:
+    provider_name = settings.tts_provider
+    if provider_name == "piper":
+        if provider_checks["piper"]["ready"] or not settings.allow_provider_fallback:
+            return PiperSpeechSynthesizer(
+                executable=settings.piper_executable,
+                model_path=settings.piper_model_path,
+                output_dir=settings.audio_cache_dir,
+                speaker_id=settings.piper_speaker_id,
+                length_scale=settings.piper_length_scale,
+                noise_scale=settings.piper_noise_scale,
+            )
+    return FakeSpeechSynthesizer()
+
+
+def _build_playback_engine(
+    settings: AppSettings,
+    provider_checks: dict[str, Any],
+) -> PlaybackEngine:
+    provider_name = settings.playback_provider
+    if provider_name == "subprocess":
+        if provider_checks["playback"]["ready"] or not settings.allow_provider_fallback:
+            return SubprocessPlaybackEngine(command=settings.playback_command)
+    return FakePlaybackEngine()

@@ -38,3 +38,12 @@ def test_reader_state_machine_sets_paused_playback_for_rewrite_processing() -> N
 
 def test_playback_state_for_reading_rewrite_is_playing() -> None:
     assert playback_state_for(ReaderState.READING_REWRITE) is PlaybackState.PLAYING
+
+
+def test_reader_state_machine_allows_stopping_from_paused() -> None:
+    session = ReadingSession(session_id="session-1", document_id="doc-1", state=ReaderState.PAUSED)
+
+    ReaderStateMachine().transition(session, ReaderState.IDLE)
+
+    assert session.state is ReaderState.IDLE
+    assert session.playback_state is PlaybackState.STOPPED

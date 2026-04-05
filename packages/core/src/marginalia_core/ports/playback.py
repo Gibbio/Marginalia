@@ -21,6 +21,8 @@ class PlaybackSnapshot:
     anchor: str | None = None
     progress_units: int = 0
     audio_reference: str | None = None
+    provider_name: str | None = None
+    process_id: int | None = None
 
 
 class PlaybackEngine(Protocol):
@@ -28,6 +30,10 @@ class PlaybackEngine(Protocol):
 
     def describe_capabilities(self) -> ProviderCapabilities:
         """Describe playback behavior and constraints."""
+        ...
+
+    def hydrate(self, snapshot: PlaybackSnapshot | None) -> None:
+        """Restore persisted playback context into a fresh engine instance."""
         ...
 
     def start(

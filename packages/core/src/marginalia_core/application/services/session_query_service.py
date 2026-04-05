@@ -35,6 +35,7 @@ class SessionQueryService:
         session = self._session_repository.get_active_session()
         documents = self._document_repository.list_documents()
         if session is None:
+            self._playback_engine.hydrate(None)
             playback_snapshot = self._playback_engine.snapshot()
             return OperationResult.ok(
                 "No active session. Marginalia is idle.",
@@ -57,10 +58,7 @@ class SessionQueryService:
         )
         notes = list(self._note_repository.list_notes_for_document(document.document_id))
         drafts = list(self._draft_repository.list_drafts_for_document(document.document_id))
-        playback_snapshot = self._playback_snapshot_for_session(
-            session,
-            self._playback_engine.snapshot(),
-        )
+        playback_snapshot = self._hydrated_playback_snapshot(session)
         latest_note = notes[-1] if notes else None
         latest_draft = drafts[0] if drafts else None
 
@@ -80,6 +78,12 @@ class SessionQueryService:
                     "chunk_text": current_chunk.text,
                 },
                 "playback": playback_snapshot,
+                "providers": {
+                    "tts": session.tts_provider,
+                    "command_stt": session.command_stt_provider,
+                    "playback": session.playback_provider,
+                    "voice": session.voice,
+                },
                 "counts": {
                     "notes": len(notes),
                     "drafts": len(drafts),
@@ -102,10 +106,41 @@ class SessionQueryService:
         snapshot: PlaybackSnapshot,
     ) -> PlaybackSnapshot:
         return PlaybackSnapshot(
-            state=session.playback_state,
+            state=snapshot.state,
             last_action=session.last_command or snapshot.last_action or "session-state",
             document_id=session.document_id,
             anchor=session.position.anchor,
             progress_units=snapshot.progress_units,
-            audio_reference=snapshot.audio_reference,
+            audio_reference=snapshot.audio_reference or session.audio_reference,
+            provider_name=snapshot.provider_name or session.playback_provider,
+            process_id=(
+                snapshot.process_id
+                if snapshot.process_id is not None
+                else session.playback_process_id
+            ),
         )
+
+    def _hydrated_playback_snapshot(self, session: ReadingSession) -> PlaybackSnapshot:
+        self._playback_engine.hydrate(
+            PlaybackSnapshot(
+                state=session.playback_state,
+                last_action=session.last_command or "session-state",
+                document_id=session.document_id,
+                anchor=session.position.anchor,
+                audio_reference=session.audio_reference,
+                provider_name=session.playback_provider,
+                process_id=session.playback_process_id,
+            )
+        )
+        snapshot = self._playback_engine.snapshot()
+        session.playback_state = snapshot.state
+        session.audio_reference = snapshot.audio_reference or session.audio_reference
+        session.playback_provider = snapshot.provider_name or session.playback_provider
+        session.playback_process_id = (
+            snapshot.process_id if snapshot.process_id is not None else session.playback_process_id
+        )
+        if snapshot.state.value == "stopped" and session.state is ReaderState.READING:
+            session.state = ReaderState.PAUSED
+        session.touch()
+        self._session_repository.save_session(session)
+        return self._playback_snapshot_for_session(session, snapshot)

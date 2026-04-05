@@ -32,12 +32,12 @@ The current runtime is simple but real:
    `SessionQueryService` coordinate domain workflows
 3. ports abstract command STT, dictation STT, synthesis, playback, rewrite,
    summarization, storage, and event publishing
-4. `SQLiteDatabase` bootstraps a stable SQLite v1 schema and applies
+4. `SQLiteDatabase` bootstraps a stable SQLite v2 schema and applies
    compatibility upgrades for older bootstrap databases
 5. SQLite repositories persist documents, normalized sections and chunks,
-   sessions, notes, and rewrite drafts
-6. fake adapters stand in for real providers with deterministic outputs and
-   declared capabilities
+   sessions, notes, rewrite drafts, and playback-related session metadata
+6. real local Piper, Vosk, and subprocess playback adapters can be selected
+   through config, while deterministic fake adapters remain available
 7. an in-process event bus publishes standardized domain events
 
 ## What Is Implemented Now
@@ -46,8 +46,14 @@ The current runtime is simple but real:
 - normalized document persistence plus fallback support for older outline-only
   rows
 - session creation and persistence
+- persisted provider metadata and playback runtime metadata for the active
+  session
+- real local Piper synthesis to WAV artifacts when configured
+- real local command recognition through Vosk when configured
+- real local playback through `afplay` when configured
 - pause and resume state transitions
-- repeat, chapter restart, and chapter advance commands
+- repeat, chapter restart, chapter advance, stop, and bounded voice-command
+  loop commands
 - note capture lifecycle with anchored notes
 - rewrite draft generation through a deterministic fake provider
 - topic summary generation through a deterministic fake provider
@@ -57,11 +63,10 @@ The current runtime is simple but real:
 
 ## What Is Still Stubbed
 
-- actual audio playback
-- microphone capture and real speech recognition
-- a runtime loop for `LISTENING_FOR_COMMAND`
+- real note dictation STT
 - persistent event history or out-of-process subscribers
 - draft review workflows beyond generation
+- sentence-level playback tracking and automatic chapter progression
 - an explicit migration runner beyond the current schema bootstrap and
   compatibility logic
 

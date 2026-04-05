@@ -17,6 +17,10 @@ current baseline, not as open bootstrap work:
 - configuration and logging setup
 - unit tests, integration tests, and smoke flow
 - devcontainer and local development tooling
+- real local Piper TTS adapter behind the speech port
+- real local Vosk command recognizer behind the command-STT port
+- local subprocess playback adapter
+- bounded CLI voice control loop with deterministic fake smoke coverage
 
 ## Next: Introduce explicit SQLite migrations
 
@@ -61,20 +65,19 @@ Acceptance criteria:
 - progress-related events remain stable
 - repeat output reflects a more precise reading unit
 
-## Next: Add a bounded command-STT listening loop
+## Next: Harden real provider packaging and setup
 
-Purpose: validate how `LISTENING_FOR_COMMAND` should behave before real STT
-integration.
+Purpose: reduce friction for macOS local alpha runs with Piper and Vosk.
 
-Suggested labels: `type:research`, `area:voice`, `area:core`, `size:m`
+Suggested labels: `type:feature`, `area:voice`, `area:infra`, `size:m`
 
-Context: `home`
+Context: `office`
 
 Acceptance criteria:
 
-- fake command recognizer participates in a bounded loop or demo flow
-- state transitions for command listening are explicit
-- no real microphone capture is required
+- setup docs clearly cover provider installation pitfalls
+- `doctor` offers clearer remediation hints for missing real providers
+- local config examples stay accurate as provider requirements evolve
 
 ## Next: Strengthen event payload contracts
 
@@ -118,6 +121,7 @@ Acceptance criteria:
 - doctor checks config readability
 - doctor reports writable path issues clearly
 - doctor output stays useful in JSON mode
+- doctor reports whether real provider requests resolved to fake fallbacks
 
 ## Next: Add summary persistence or review design
 
@@ -147,6 +151,22 @@ Acceptance criteria:
 - tests cover play-without-document-id using latest document fallback
 - tests cover planned and error paths for rewrite and note capture
 - smoke coverage remains deterministic
+- tests cover real-provider fallback and voice command routing
+
+## Next: Improve command recognition robustness
+
+Purpose: make the local command loop less brittle without broadening scope into
+full dictation.
+
+Suggested labels: `type:feature`, `area:voice`, `area:core`, `size:m`
+
+Context: `home`
+
+Acceptance criteria:
+
+- command normalization supports a few safe spoken variants
+- Vosk grammar remains intentionally small
+- docs stay explicit about what commands are actually supported
 
 ## Next: Evolve note search beyond substring matching
 

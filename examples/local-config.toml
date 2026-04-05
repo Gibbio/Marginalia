@@ -7,7 +7,9 @@ database_path = ".marginalia/local.sqlite3"
 command_stt = "fake"
 dictation_stt = "fake"
 tts = "fake"
+playback = "fake"
 llm = "fake"
+allow_fallback = true
 
 [fake_providers]
 commands = ["pause", "resume", "note-start", "note-stop"]

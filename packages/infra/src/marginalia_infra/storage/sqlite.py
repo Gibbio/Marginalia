@@ -20,8 +20,8 @@ from marginalia_core.domain.reading_session import (
 from marginalia_core.domain.rewrite import RewriteDraft, RewriteStatus
 from marginalia_core.domain.search import SearchQuery, SearchResult
 
-SCHEMA_VERSION = "1"
-SCHEMA_PROFILE = "sqlite-v1"
+SCHEMA_VERSION = "2"
+SCHEMA_PROFILE = "sqlite-v2"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -66,6 +66,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     char_offset INTEGER NOT NULL,
     active_note_id TEXT,
     last_command TEXT,
+    last_command_source TEXT,
+    last_recognized_command TEXT,
+    voice TEXT,
+    tts_provider TEXT,
+    command_stt_provider TEXT,
+    playback_provider TEXT,
+    audio_reference TEXT,
+    playback_process_id INTEGER,
     updated_at TEXT NOT NULL
 );
 
@@ -150,6 +158,54 @@ class SQLiteDatabase:
                 table_name="drafts",
                 column_name="provider_name",
                 definition="TEXT NOT NULL DEFAULT 'unknown'",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="last_command_source",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="last_recognized_command",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="voice",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="tts_provider",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="command_stt_provider",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="playback_provider",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="audio_reference",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                connection,
+                table_name="sessions",
+                column_name="playback_process_id",
+                definition="INTEGER",
             )
             connection.execute(
                 """
@@ -420,9 +476,17 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     char_offset,
                     active_note_id,
                     last_command,
+                    last_command_source,
+                    last_recognized_command,
+                    voice,
+                    tts_provider,
+                    command_stt_provider,
+                    playback_provider,
+                    audio_reference,
+                    playback_process_id,
                     updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     document_id = excluded.document_id,
                     state = excluded.state,
@@ -432,6 +496,14 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     char_offset = excluded.char_offset,
                     active_note_id = excluded.active_note_id,
                     last_command = excluded.last_command,
+                    last_command_source = excluded.last_command_source,
+                    last_recognized_command = excluded.last_recognized_command,
+                    voice = excluded.voice,
+                    tts_provider = excluded.tts_provider,
+                    command_stt_provider = excluded.command_stt_provider,
+                    playback_provider = excluded.playback_provider,
+                    audio_reference = excluded.audio_reference,
+                    playback_process_id = excluded.playback_process_id,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -444,6 +516,14 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     session.position.char_offset,
                     session.active_note_id,
                     session.last_command,
+                    session.last_command_source,
+                    session.last_recognized_command,
+                    session.voice,
+                    session.tts_provider,
+                    session.command_stt_provider,
+                    session.playback_provider,
+                    session.audio_reference,
+                    session.playback_process_id,
                     session.updated_at.isoformat(),
                 ),
             )
@@ -472,6 +552,22 @@ class SQLiteSessionRepository(_SQLiteRepository):
             ),
             active_note_id=str(row["active_note_id"]) if row["active_note_id"] else None,
             last_command=str(row["last_command"]) if row["last_command"] else None,
+            last_command_source=(
+                str(row["last_command_source"]) if row["last_command_source"] else None
+            ),
+            last_recognized_command=(
+                str(row["last_recognized_command"]) if row["last_recognized_command"] else None
+            ),
+            voice=str(row["voice"]) if row["voice"] else None,
+            tts_provider=str(row["tts_provider"]) if row["tts_provider"] else None,
+            command_stt_provider=(
+                str(row["command_stt_provider"]) if row["command_stt_provider"] else None
+            ),
+            playback_provider=str(row["playback_provider"]) if row["playback_provider"] else None,
+            audio_reference=str(row["audio_reference"]) if row["audio_reference"] else None,
+            playback_process_id=(
+                int(row["playback_process_id"]) if row["playback_process_id"] is not None else None
+            ),
             updated_at=datetime.fromisoformat(str(row["updated_at"])),
         )
 

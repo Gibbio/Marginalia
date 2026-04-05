@@ -51,7 +51,7 @@ Current structured outputs include:
 - `CommandRecognition` for command STT
 - `DictationTranscript` and `DictationSegment` for dictation STT
 - `SynthesisRequest` and `SynthesisResult` for TTS
-- `PlaybackSnapshot` for playback state
+- `PlaybackSnapshot` for playback state, provider name, and subprocess metadata
 - `RewriteInstruction` and `RewriteOutput` for rewrite generation
 - `SummaryInstruction` and `SummaryOutput` for summarization
 
@@ -72,6 +72,17 @@ The repository intentionally ships deterministic development adapters:
 They are not mocks hidden inside tests. They are first-class development
 adapters meant to exercise the architecture honestly.
 
+## Current Real Local Providers
+
+Alpha 0.1 adds a narrow real local path without changing the port shape:
+
+- Piper CLI synthesizes text to local WAV artifacts
+- a subprocess playback adapter runs those artifacts through `afplay`
+- Vosk recognizes a constrained Italian command grammar from the microphone
+
+The core still sees only ports plus structured results. It does not know about
+Piper flags, Vosk model loading, or subprocess signaling details.
+
 ## Rules
 
 - the core depends only on ports
@@ -83,6 +94,7 @@ adapters meant to exercise the architecture honestly.
 
 ## Deferred Work
 
-Provider quality, latency tuning, device access, model lifecycle management,
-and real streaming loops are all future concerns. This repository establishes
-the shape required to support them safely later.
+Provider quality, latency tuning, device access, sentence-accurate progress,
+model lifecycle management, and richer streaming loops are still future
+concerns. This repository establishes the shape required to support them safely
+later.

@@ -5,7 +5,7 @@
 - `IDLE`: no active reading session
 - `READING`: session is actively reading the current document location
 - `PAUSED`: playback is paused but the session remains active
-- `LISTENING_FOR_COMMAND`: reserved for future spoken command capture
+- `LISTENING_FOR_COMMAND`: active spoken command capture is in progress
 - `RECORDING_NOTE`: note capture is in progress
 - `PROCESSING_REWRITE`: a rewrite request is running
 - `READING_REWRITE`: reserved for playing back a rewrite draft
@@ -16,9 +16,9 @@
 | From | To |
 | --- | --- |
 | `IDLE` | `READING`, `ERROR` |
-| `READING` | `PAUSED`, `LISTENING_FOR_COMMAND`, `RECORDING_NOTE`, `PROCESSING_REWRITE`, `ERROR` |
-| `PAUSED` | `READING`, `LISTENING_FOR_COMMAND`, `RECORDING_NOTE`, `PROCESSING_REWRITE`, `ERROR` |
-| `LISTENING_FOR_COMMAND` | `READING`, `PAUSED`, `RECORDING_NOTE`, `ERROR` |
+| `READING` | `IDLE`, `PAUSED`, `LISTENING_FOR_COMMAND`, `RECORDING_NOTE`, `PROCESSING_REWRITE`, `ERROR` |
+| `PAUSED` | `IDLE`, `READING`, `LISTENING_FOR_COMMAND`, `RECORDING_NOTE`, `PROCESSING_REWRITE`, `ERROR` |
+| `LISTENING_FOR_COMMAND` | `IDLE`, `READING`, `PAUSED`, `RECORDING_NOTE`, `ERROR` |
 | `RECORDING_NOTE` | `PAUSED`, `READING`, `ERROR` |
 | `PROCESSING_REWRITE` | `READING_REWRITE`, `PAUSED`, `ERROR` |
 | `READING_REWRITE` | `PAUSED`, `READING`, `ERROR` |
@@ -32,9 +32,9 @@ The high-level reader state maps to a projected playback state:
 - `IDLE` projects to `stopped`
 - all other active workflow states project to `paused`
 
-This matters because the CLI is currently a one-shot process model. The fake
-playback engine is re-created on each invocation, so the persisted session state
-remains the source of truth for coherent status reporting.
+This matters because the CLI is currently a one-shot process model. Playback
+state is therefore synchronized from persisted session metadata plus the current
+playback adapter snapshot on each invocation.
 
 ## Why Explicit State Matters
 
@@ -42,7 +42,7 @@ remains the source of truth for coherent status reporting.
 - future desktop and API clients will need a single state vocabulary
 - tests can assert lifecycle transitions before real speech providers exist
 
-## V0 Implementation Notes
+## Alpha 0.1 Implementation Notes
 
 The repository currently implements the state graph and uses it in real CLI
 flows:
@@ -53,6 +53,9 @@ flows:
 - `repeat`
 - `restart-chapter`
 - `next-chapter`
+- `stop`
+- `listen`
+- `control-loop`
 - `note-start`
 - `note-stop`
 - `rewrite-current`
@@ -63,13 +66,15 @@ Implemented transition behavior:
   session document, or the latest ingested document
 - `pause` moves `READING -> PAUSED`
 - `resume` moves `PAUSED -> READING`
+- `stop` moves `READING`, `PAUSED`, or `LISTENING_FOR_COMMAND -> IDLE`
+- `listen` moves `READING` or `PAUSED -> LISTENING_FOR_COMMAND`, recognizes one
+  command, then dispatches back into the regular lifecycle
 - `note-start` moves `PAUSED` or `READING -> RECORDING_NOTE`
 - `note-stop` persists a note and returns the session to `PAUSED`
 - `rewrite-current` moves `PAUSED` or `READING -> PROCESSING_REWRITE -> PAUSED`
 - `restart-chapter` and `next-chapter` update the persisted reading position
-  without inventing new lifecycle states
-- `repeat` is a read-only query against the current persisted position
-
-`LISTENING_FOR_COMMAND` and `READING_REWRITE` remain intentionally defined but
-only partially exercised. They are reserved so later voice-command and
-rewrite-playback work does not invent incompatible state names.
+  and replay audio when the session is actively reading
+- `repeat` re-synthesizes and replays the current reading chunk
+`READING_REWRITE` remains intentionally defined but only partially exercised.
+It stays reserved so later rewrite-playback work does not invent incompatible
+state names.

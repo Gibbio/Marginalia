@@ -1,0 +1,41 @@
+environment = "local"
+log_level = "INFO"
+database_path = ".marginalia/alpha.sqlite3"
+audio_cache_dir = ".marginalia/audio-cache"
+default_voice = "it-local-alpha"
+
+[providers]
+command_stt = "vosk"
+dictation_stt = "fake"
+tts = "piper"
+playback = "subprocess"
+llm = "fake"
+allow_fallback = false
+
+[piper]
+executable = "piper"
+model_path = "/absolute/path/to/piper-model.onnx"
+speaker_id = 0
+length_scale = 1.0
+noise_scale = 0.667
+
+[vosk]
+model_path = "/absolute/path/to/vosk-model-small-it"
+sample_rate = 16000
+timeout_seconds = 4.0
+commands = [
+  "pausa",
+  "continua",
+  "ripeti",
+  "capitolo successivo",
+  "ricomincia capitolo",
+  "stato",
+  "stop",
+]
+
+[playback]
+command = "afplay"
+
+[fake_providers]
+commands = ["pausa", "continua"]
+dictation_text = "Remember to sharpen the transition in this section."

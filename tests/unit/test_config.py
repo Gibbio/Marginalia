@@ -20,3 +20,12 @@ def test_settings_respect_environment_paths(tmp_path: Path, monkeypatch: MonkeyP
     assert settings.home_dir == home_path
     assert settings.database_path == database_path
     assert settings.data_dir == home_path / "data"
+    assert settings.audio_cache_dir == home_path / "data" / "audio-cache"
+
+
+def test_settings_default_playback_provider_tracks_piper(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("MARGINALIA_TTS_PROVIDER", "piper")
+
+    settings = AppSettings.load()
+
+    assert settings.playback_provider == "subprocess"

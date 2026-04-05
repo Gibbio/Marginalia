@@ -52,9 +52,10 @@ Real provider integrations are welcome later, but they must:
 - preserve local-first operation where possible
 - update `docs/architecture/provider-swappability.md` if the contract surface changes
 
-Until then, fake providers are acceptable and expected. They should remain
-deterministic, capability-declared, and clearly identified as fake in
-user-facing output.
+The repository now includes real local Piper, Vosk, and subprocess playback
+adapters for Alpha 0.1. Fake providers remain acceptable and expected for CI,
+tests, and fallback behavior. They should remain deterministic,
+capability-declared, and clearly identified as fake in user-facing output.
 
 ## Schema Work
 
@@ -63,6 +64,7 @@ SQLite changes should remain lightweight, but not casual.
 - keep schema bootstrap idempotent
 - prefer additive compatibility updates over silent breakage
 - document schema changes in roadmap or architecture docs
+- keep session persistence honest about provider/runtime metadata
 - do not introduce an ORM unless the tradeoff is justified explicitly
 
 ## Editor Integrations

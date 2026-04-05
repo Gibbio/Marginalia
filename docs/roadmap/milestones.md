@@ -15,14 +15,18 @@ Status on April 5, 2026: complete.
 - schema and provider health reporting
 - unit and integration test baseline
 
-## V0 CLI Skeleton
+## Alpha 0.1 Local Reading Loop
 
-Goal: cover the intended command surface with explicit local behavior.
+Goal: prove a narrow but real local reading loop on macOS Apple Silicon.
 
-Status on April 5, 2026: implemented and hardened.
+Status on April 5, 2026: implemented.
 
 - document ingestion
-- session lifecycle commands
+- session lifecycle commands with persisted provider/runtime metadata
+- real local Piper synthesis path
+- real local Vosk command-recognition path
+- local subprocess playback path
+- bounded `listen` and `control-loop` CLI flows
 - note anchoring
 - rewrite draft placeholder generation
 - topic summarization placeholder generation
@@ -30,14 +34,14 @@ Status on April 5, 2026: implemented and hardened.
 - doctor and status diagnostics
 - deterministic provider capability reporting
 - normalized SQLite storage for documents, sections, and chunks
-- end-to-end smoke flow including navigation and note flow
+- end-to-end smoke flow including navigation, note flow, and scripted command loop
 
 Remaining hardening before V1:
 
 - explicit migrations beyond schema bootstrap
 - richer chunking and progress semantics
 - better document, note, and draft inspection commands
-- a bounded command-listening loop for `LISTENING_FOR_COMMAND`
+- stronger real-provider install ergonomics and compatibility guidance
 - optional event persistence if it becomes operationally useful
 
 ## V1 Usable CLI
@@ -46,7 +50,7 @@ Goal: make the CLI practical for a single-user local workflow.
 
 - stronger document inspection and review commands
 - more robust document chunking and progress semantics
-- better note capture ergonomics
+- better real note capture ergonomics
 - explicit local schema migration strategy
 - clearer rewrite and summary review flow
 

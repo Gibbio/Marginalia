@@ -34,6 +34,17 @@ class FakePlaybackEngine:
     def describe_capabilities(self) -> ProviderCapabilities:
         return PLAYBACK_CAPABILITIES
 
+    def hydrate(self, snapshot: PlaybackSnapshot | None) -> None:
+        if snapshot is None:
+            return
+        self.state = snapshot.state
+        self.last_document_id = snapshot.document_id
+        if snapshot.anchor is not None:
+            self.last_position = _position_from_anchor(snapshot.anchor)
+        self.last_action = snapshot.last_action
+        self.progress_units = snapshot.progress_units
+        self.audio_reference = snapshot.audio_reference
+
     def start(
         self,
         document: Document,
@@ -80,4 +91,18 @@ class FakePlaybackEngine:
             anchor=self.last_position.anchor,
             progress_units=self.progress_units,
             audio_reference=self.audio_reference,
+            provider_name=PLAYBACK_CAPABILITIES.provider_name,
+            process_id=None,
         )
+
+
+def _position_from_anchor(anchor: str) -> ReadingPosition:
+    section_index = 0
+    chunk_index = 0
+    for item in anchor.split("/"):
+        key, _, raw_value = item.partition(":")
+        if key == "section":
+            section_index = int(raw_value)
+        elif key == "chunk":
+            chunk_index = int(raw_value)
+    return ReadingPosition(section_index=section_index, chunk_index=chunk_index)
