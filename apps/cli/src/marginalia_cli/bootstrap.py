@@ -34,6 +34,7 @@ from marginalia_infra.config.settings import AppSettings
 from marginalia_infra.events import InMemoryEventBus
 from marginalia_infra.logging.setup import configure_logging
 from marginalia_infra.runtime.session_supervisor import FileRuntimeSupervisor
+from marginalia_infra.storage.cache import cleanup_audio_cache
 from marginalia_infra.storage.sqlite import (
     SQLiteDatabase,
     SQLiteDocumentRepository,
@@ -73,8 +74,12 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
 
     settings = AppSettings.load(config_path=config_path)
     settings.ensure_directories()
-    configure_logging(level="DEBUG" if verbose else settings.log_level)
+    configure_logging(
+        level="DEBUG" if verbose else settings.log_level,
+        log_file=settings.log_file,
+    )
 
+    cleanup_audio_cache(settings.audio_cache_dir, max_age_hours=settings.audio_cache_max_age_hours)
     event_bus = InMemoryEventBus()
     database = SQLiteDatabase(settings.database_path)
     database.initialize()

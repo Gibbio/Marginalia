@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import signal
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import Enum
@@ -13,6 +14,7 @@ import typer
 
 from marginalia_cli.bootstrap import CliContainer, build_container
 from marginalia_core.application.result import OperationResult, OperationStatus
+from marginalia_core.application.services.runtime_loop import StepStatus
 
 app = typer.Typer(
     name="marginalia",
@@ -155,7 +157,32 @@ def play(
     """Ingest or select a document, then start the continuous read+listen runtime."""
 
     container = _container_from_context(ctx)
-    result = container.reading_runtime_service.play(target)
+    loop = container.reading_runtime_service.create_loop()
+
+    start_result = loop.start(target)
+    if start_result.status is OperationStatus.ERROR:
+        _augment_runtime_details(container, start_result)
+        _emit_result(start_result, as_json=as_json)
+        raise typer.Exit(code=1)
+
+    prev_sigint = signal.getsignal(signal.SIGINT)
+    prev_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def _handle_signal(signum: int, frame: object) -> None:
+        loop.request_shutdown()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
+    try:
+        with loop:
+            while loop.step() is StepStatus.CONTINUE:
+                pass
+    finally:
+        signal.signal(signal.SIGINT, prev_sigint)
+        signal.signal(signal.SIGTERM, prev_sigterm)
+
+    result = loop.finalize()
     _augment_runtime_details(container, result)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=_exit_code(result))
