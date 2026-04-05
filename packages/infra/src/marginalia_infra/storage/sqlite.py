@@ -20,105 +20,9 @@ from marginalia_core.domain.reading_session import (
 from marginalia_core.domain.rewrite import RewriteDraft, RewriteStatus
 from marginalia_core.domain.search import SearchQuery, SearchResult
 
-SCHEMA_VERSION = "3"
-SCHEMA_PROFILE = "sqlite-v3"
-
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS schema_metadata (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS documents (
-    document_id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    source_path TEXT NOT NULL,
-    imported_at TEXT NOT NULL,
-    outline_json TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS document_sections (
-    document_id TEXT NOT NULL,
-    section_index INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    source_anchor TEXT,
-    PRIMARY KEY(document_id, section_index)
-);
-
-CREATE TABLE IF NOT EXISTS document_chunks (
-    document_id TEXT NOT NULL,
-    section_index INTEGER NOT NULL,
-    chunk_index INTEGER NOT NULL,
-    anchor TEXT NOT NULL,
-    text TEXT NOT NULL,
-    char_start INTEGER NOT NULL,
-    char_end INTEGER NOT NULL,
-    PRIMARY KEY(document_id, section_index, chunk_index)
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    session_id TEXT PRIMARY KEY,
-    document_id TEXT NOT NULL,
-    state TEXT NOT NULL,
-    playback_state TEXT NOT NULL,
-    section_index INTEGER NOT NULL,
-    chunk_index INTEGER NOT NULL,
-    char_offset INTEGER NOT NULL,
-    active_note_id TEXT,
-    last_command TEXT,
-    last_command_source TEXT,
-    last_recognized_command TEXT,
-    voice TEXT,
-    tts_provider TEXT,
-    command_stt_provider TEXT,
-    playback_provider TEXT,
-    command_listening_active INTEGER NOT NULL DEFAULT 0,
-    command_language TEXT,
-    audio_reference TEXT,
-    playback_process_id INTEGER,
-    runtime_process_id INTEGER,
-    runtime_status TEXT,
-    runtime_error TEXT,
-    startup_cleanup_summary TEXT,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS notes (
-    note_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    document_id TEXT NOT NULL,
-    section_index INTEGER NOT NULL,
-    chunk_index INTEGER NOT NULL,
-    char_offset INTEGER NOT NULL,
-    transcript TEXT NOT NULL,
-    transcription_provider TEXT NOT NULL DEFAULT 'unknown',
-    language TEXT NOT NULL DEFAULT 'en',
-    raw_audio_path TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS drafts (
-    draft_id TEXT PRIMARY KEY,
-    document_id TEXT NOT NULL,
-    section_index INTEGER NOT NULL,
-    source_anchor TEXT NOT NULL DEFAULT 'section:0/chunk:0',
-    source_excerpt TEXT NOT NULL,
-    note_transcripts_json TEXT NOT NULL,
-    rewritten_text TEXT NOT NULL,
-    provider_name TEXT NOT NULL DEFAULT 'unknown',
-    status TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_documents_imported_at ON documents(imported_at DESC);
-CREATE INDEX IF NOT EXISTS idx_document_sections_document_id
-    ON document_sections(document_id, section_index);
-CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id
-    ON document_chunks(document_id, section_index, chunk_index);
-CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_notes_document_id ON notes(document_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_drafts_document_id ON drafts(document_id, created_at DESC);
-"""
+SCHEMA_VERSION = "4"
+SCHEMA_PROFILE = "sqlite-v4-migrated"
+_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 
 class SQLiteDatabase:
@@ -126,145 +30,86 @@ class SQLiteDatabase:
 
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
+        self._connection: sqlite3.Connection | None = None
 
     @property
     def database_path(self) -> Path:
         return self._database_path
 
     def connect(self) -> sqlite3.Connection:
+        if self._connection is not None:
+            return self._connection
         self._database_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self._database_path)
+        connection = sqlite3.connect(
+            self._database_path,
+            check_same_thread=False,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA busy_timeout = 5000")
+        self._connection = connection
         return connection
+
+    def close(self) -> None:
+        """Close the cached connection if open."""
+
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
 
     def initialize(self) -> None:
         with self.connect() as connection:
-            connection.executescript(SCHEMA_SQL)
-            self._ensure_column(
-                connection,
-                table_name="notes",
-                column_name="transcription_provider",
-                definition="TEXT NOT NULL DEFAULT 'unknown'",
+            self._run_migrations(connection)
+
+    def _run_migrations(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                migration_id TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
             )
-            self._ensure_column(
-                connection,
-                table_name="notes",
-                column_name="language",
-                definition="TEXT NOT NULL DEFAULT 'en'",
-            )
-            self._ensure_column(
-                connection,
-                table_name="drafts",
-                column_name="source_anchor",
-                definition="TEXT NOT NULL DEFAULT 'section:0/chunk:0'",
-            )
-            self._ensure_column(
-                connection,
-                table_name="drafts",
-                column_name="provider_name",
-                definition="TEXT NOT NULL DEFAULT 'unknown'",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="last_command_source",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="last_recognized_command",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="voice",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="tts_provider",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="command_stt_provider",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="playback_provider",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="command_listening_active",
-                definition="INTEGER NOT NULL DEFAULT 0",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="command_language",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="audio_reference",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="playback_process_id",
-                definition="INTEGER",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="runtime_process_id",
-                definition="INTEGER",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="runtime_status",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="runtime_error",
-                definition="TEXT",
-            )
-            self._ensure_column(
-                connection,
-                table_name="sessions",
-                column_name="startup_cleanup_summary",
-                definition="TEXT",
-            )
+            """
+        )
+        applied = {
+            str(row["migration_id"])
+            for row in connection.execute("SELECT migration_id FROM schema_migrations").fetchall()
+        }
+        migration_files = sorted(_MIGRATIONS_DIR.glob("*.sql"))
+        for migration_file in migration_files:
+            migration_id = migration_file.stem
+            if migration_id in applied:
+                continue
+            sql = migration_file.read_text(encoding="utf-8")
+            connection.executescript(sql)
             connection.execute(
-                """
-                INSERT INTO schema_metadata(key, value)
-                VALUES('schema_version', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (SCHEMA_VERSION,),
+                "INSERT INTO schema_migrations(migration_id, applied_at) VALUES(?, ?)",
+                (migration_id, datetime.now().isoformat()),
             )
-            connection.execute(
-                """
-                INSERT INTO schema_metadata(key, value)
-                VALUES('schema_profile', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (SCHEMA_PROFILE,),
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO schema_metadata(key, value)
+            VALUES('schema_version', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (SCHEMA_VERSION,),
+        )
+        connection.execute(
+            """
+            INSERT INTO schema_metadata(key, value)
+            VALUES('schema_profile', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (SCHEMA_PROFILE,),
+        )
 
     def schema_version(self) -> str:
         self.initialize()
@@ -317,21 +162,6 @@ class SQLiteDatabase:
                 counts[table_name] = int(row["row_count"]) if row is not None else 0
         return counts
 
-    def _ensure_column(
-        self,
-        connection: sqlite3.Connection,
-        *,
-        table_name: str,
-        column_name: str,
-        definition: str,
-    ) -> None:
-        existing = {
-            str(row["name"])
-            for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
-        }
-        if column_name in existing:
-            return
-        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 class _SQLiteRepository:
@@ -506,6 +336,11 @@ class SQLiteSessionRepository(_SQLiteRepository):
 
     def save_session(self, session: ReadingSession) -> None:
         with self._connect() as connection:
+            if session.is_active:
+                connection.execute(
+                    "UPDATE sessions SET is_active = 0 WHERE session_id != ? AND is_active = 1",
+                    (session.session_id,),
+                )
             connection.execute(
                 """
                 INSERT INTO sessions(
@@ -532,9 +367,10 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     runtime_status,
                     runtime_error,
                     startup_cleanup_summary,
+                    is_active,
                     updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
                     document_id = excluded.document_id,
                     state = excluded.state,
@@ -558,6 +394,7 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     runtime_status = excluded.runtime_status,
                     runtime_error = excluded.runtime_error,
                     startup_cleanup_summary = excluded.startup_cleanup_summary,
+                    is_active = excluded.is_active,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -584,6 +421,7 @@ class SQLiteSessionRepository(_SQLiteRepository):
                     session.runtime_status,
                     session.runtime_error,
                     session.startup_cleanup_summary,
+                    int(session.is_active),
                     session.updated_at.isoformat(),
                 ),
             )
@@ -594,6 +432,7 @@ class SQLiteSessionRepository(_SQLiteRepository):
                 """
                 SELECT *
                 FROM sessions
+                WHERE is_active = 1
                 ORDER BY updated_at DESC
                 LIMIT 1
                 """
@@ -640,6 +479,7 @@ class SQLiteSessionRepository(_SQLiteRepository):
                 if row["startup_cleanup_summary"]
                 else None
             ),
+            is_active=bool(int(row["is_active"] or 0)),
             updated_at=datetime.fromisoformat(str(row["updated_at"])),
         )
 

@@ -51,6 +51,8 @@ class AppSettings:
     vosk_input_device_index: int | None
     vosk_input_device_name: str | None
     playback_command: str
+    log_file: Path | None = None
+    audio_cache_max_age_hours: int = 72
     config_path: Path | None = None
 
     @classmethod
@@ -241,6 +243,18 @@ class AppSettings:
             playback_command=os.getenv(
                 "MARGINALIA_PLAYBACK_COMMAND",
                 str(playback.get("command", "afplay")),
+            ),
+            log_file=_optional_path_setting(
+                env_key="MARGINALIA_LOG_FILE",
+                config_data=config_data,
+                config_key="log_file",
+                base_dir=resolved_config.parent if resolved_config else None,
+            ),
+            audio_cache_max_age_hours=_int_setting(
+                env_key="MARGINALIA_AUDIO_CACHE_MAX_AGE_HOURS",
+                config_data=config_data,
+                config_key="audio_cache_max_age_hours",
+                fallback=72,
             ),
             config_path=resolved_config,
         )
