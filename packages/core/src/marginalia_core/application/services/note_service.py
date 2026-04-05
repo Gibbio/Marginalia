@@ -11,7 +11,7 @@ from marginalia_core.domain.reading_session import ReaderState
 from marginalia_core.events.models import DomainEvent, EventName
 from marginalia_core.ports.events import EventPublisher
 from marginalia_core.ports.storage import NoteRepository, SessionRepository
-from marginalia_core.ports.stt import DictationTranscriber
+from marginalia_core.ports.stt import DictationTranscriber, DictationTranscript
 
 
 class NoteService:
@@ -62,13 +62,24 @@ class NoteService:
         if session.active_note_id is None:
             return OperationResult.error("No note capture is currently active.")
 
-        note_text = transcript or self._dictation_transcriber.transcribe()
+        transcript_result = (
+            self._manual_transcript(transcript)
+            if transcript
+            else self._dictation_transcriber.transcribe(
+                session_id=session.session_id,
+                note_id=session.active_note_id,
+            )
+        )
+        if not transcript_result.text.strip():
+            return OperationResult.error("Captured note text is empty.")
         note = VoiceNote(
             note_id=session.active_note_id,
             session_id=session.session_id,
             document_id=session.document_id,
             position=session.position,
-            transcript=note_text,
+            transcript=transcript_result.text,
+            transcription_provider=transcript_result.provider_name,
+            language=transcript_result.language,
         )
         self._note_repository.save_note(note)
 
@@ -85,6 +96,7 @@ class NoteService:
                     "session_id": session.session_id,
                     "document_id": session.document_id,
                     "note_id": note.note_id,
+                    "provider_name": transcript_result.provider_name,
                 },
             )
         )
@@ -99,10 +111,22 @@ class NoteService:
                     "document_id": session.document_id,
                     "note_id": note.note_id,
                     "anchor": note.anchor,
+                    "language": note.language,
                 },
             )
         )
         return OperationResult.ok(
             "Anchored voice note saved.",
-            data={"note": note, "session": session},
+            data={"note": note, "session": session, "transcript": transcript_result},
+        )
+
+    def _manual_transcript(self, transcript: str) -> DictationTranscript:
+        cleaned = transcript.strip()
+        return DictationTranscript(
+            text=cleaned,
+            provider_name="cli-manual",
+            language="en",
+            segments=(),
+            raw_text=cleaned,
+            is_final=True,
         )

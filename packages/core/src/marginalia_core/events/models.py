@@ -20,6 +20,8 @@ class EventName(str, Enum):
     READING_PAUSED = "reading.paused"
     READING_RESUMED = "reading.resumed"
     READING_PROGRESSED = "reading.progressed"
+    CHAPTER_RESTARTED = "chapter.restarted"
+    CHAPTER_ADVANCED = "chapter.advanced"
     NOTE_RECORDING_STARTED = "note.recording.started"
     NOTE_RECORDING_STOPPED = "note.recording.stopped"
     NOTE_SAVED = "note.saved"

@@ -10,12 +10,14 @@ from marginalia_core.application.services.document_ingestion_service import (
 from marginalia_core.domain.document import build_document_outline
 from marginalia_core.domain.note import VoiceNote
 from marginalia_core.domain.reading_session import ReadingPosition
+from marginalia_core.domain.rewrite import RewriteDraft, RewriteStatus
 from marginalia_core.events.models import EventName
 from marginalia_infra.events import InMemoryEventBus
 from marginalia_infra.storage.sqlite import (
     SQLiteDatabase,
     SQLiteDocumentRepository,
     SQLiteNoteRepository,
+    SQLiteRewriteDraftRepository,
 )
 
 
@@ -35,6 +37,7 @@ def test_sqlite_document_round_trip(tmp_path: Path) -> None:
     assert restored is not None
     assert restored.document_id == document.document_id
     assert restored.chapter_count == 2
+    assert restored.get_chunk(1, 0).text == "More text."
 
 
 def test_sqlite_note_search(tmp_path: Path) -> None:
@@ -56,6 +59,7 @@ def test_sqlite_note_search(tmp_path: Path) -> None:
 
     assert len(results) == 1
     assert results[0].entity_id == "note-1"
+    assert repository.list_notes_for_document("doc-1")[0].transcription_provider == "unknown"
 
 
 def test_sqlite_database_health_report(tmp_path: Path) -> None:
@@ -64,7 +68,10 @@ def test_sqlite_database_health_report(tmp_path: Path) -> None:
     report = database.health_report()
 
     assert report["schema_version"] == "1"
+    assert report["schema_profile"] == "sqlite-v1"
     assert "documents" in report["tables"]
+    assert "document_sections" in report["tables"]
+    assert "document_chunks" in report["tables"]
 
 
 def test_document_ingestion_publishes_event(tmp_path: Path) -> None:
@@ -81,3 +88,29 @@ def test_document_ingestion_publishes_event(tmp_path: Path) -> None:
 
     assert result.status.value == "ok"
     assert event_bus.published_events[0].name is EventName.DOCUMENT_INGESTED
+
+
+def test_sqlite_rewrite_draft_round_trip(tmp_path: Path) -> None:
+    database_path = tmp_path / "marginalia.sqlite3"
+    repository = SQLiteRewriteDraftRepository(database_path)
+    repository.ensure_schema()
+
+    repository.save_draft(
+        RewriteDraft(
+            draft_id="draft-1",
+            document_id="doc-1",
+            section_index=0,
+            source_anchor="section:0/chunk:0",
+            source_excerpt="Original text.",
+            note_transcripts=("Clarify the argument.",),
+            rewritten_text="Rewritten text.",
+            provider_name="fake-rewrite-llm",
+            status=RewriteStatus.GENERATED,
+        )
+    )
+
+    drafts = repository.list_drafts_for_document("doc-1")
+
+    assert len(drafts) == 1
+    assert drafts[0].source_anchor == "section:0/chunk:0"
+    assert drafts[0].provider_name == "fake-rewrite-llm"

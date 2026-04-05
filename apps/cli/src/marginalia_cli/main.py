@@ -287,6 +287,14 @@ def doctor(
     container = _container_from_context(ctx)
     report: dict[str, Any] = container.settings.doctor_report()
     report["database"] = container.database.health_report()
+    report["provider_capabilities"] = {
+        "command_stt": container.command_stt.describe_capabilities(),
+        "dictation_stt": container.dictation_stt.describe_capabilities(),
+        "tts": container.speech_synthesizer.describe_capabilities(),
+        "playback": container.playback_engine.describe_capabilities(),
+        "rewrite": container.rewrite_provider.describe_capabilities(),
+        "summary": container.summary_provider.describe_capabilities(),
+    }
     result = OperationResult.ok("Marginalia CLI environment looks coherent.", data=report)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=0)

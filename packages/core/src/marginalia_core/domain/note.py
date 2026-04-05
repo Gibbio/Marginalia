@@ -22,6 +22,8 @@ class VoiceNote:
     document_id: str
     position: ReadingPosition
     transcript: str
+    transcription_provider: str = "unknown"
+    language: str = "en"
     raw_audio_path: Path | None = None
     created_at: datetime = field(default_factory=_utc_now)
 

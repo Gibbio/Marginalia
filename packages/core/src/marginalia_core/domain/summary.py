@@ -26,4 +26,6 @@ class SummaryResult:
     topic: str
     summary_text: str
     matched_document_ids: tuple[str, ...] = ()
+    highlights: tuple[str, ...] = ()
+    provider_name: str = "unknown"
     generated_at: datetime = field(default_factory=_utc_now)

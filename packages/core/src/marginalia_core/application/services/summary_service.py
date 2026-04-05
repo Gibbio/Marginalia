@@ -6,7 +6,7 @@ from marginalia_core.application.result import OperationResult
 from marginalia_core.domain.summary import SummaryRequest, SummaryResult
 from marginalia_core.events.models import DomainEvent, EventName
 from marginalia_core.ports.events import EventPublisher
-from marginalia_core.ports.llm import TopicSummarizer
+from marginalia_core.ports.llm import SummaryInstruction, TopicSummarizer
 from marginalia_core.ports.storage import DocumentRepository
 
 
@@ -33,11 +33,21 @@ class SummaryService:
             )
         )
         documents = self._document_repository.search_documents(request.topic)
-        matched_document_ids = tuple(result.entity_id for result in documents)
+        matched_document_ids = tuple(dict.fromkeys(result.entity_id for result in documents))
+        context_excerpt = "\n".join(result.excerpt for result in documents[:3])
+        summary_output = self._topic_summarizer.summarize_topic(
+            SummaryInstruction(
+                topic=request.topic,
+                matched_document_ids=matched_document_ids,
+                context_excerpt=context_excerpt,
+            )
+        )
         summary = SummaryResult(
             topic=request.topic,
-            summary_text=self._topic_summarizer.summarize_topic(request.topic),
+            summary_text=summary_output.summary_text,
             matched_document_ids=matched_document_ids,
+            highlights=summary_output.highlights,
+            provider_name=summary_output.provider_name,
         )
         self._event_publisher.publish(
             DomainEvent(
@@ -45,10 +55,11 @@ class SummaryService:
                 payload={
                     "topic": request.topic,
                     "matched_document_ids": matched_document_ids,
+                    "provider_name": summary_output.provider_name,
                 },
             )
         )
         return OperationResult.ok(
             "Placeholder topic summary generated through the fake provider.",
-            data={"summary": summary},
+            data={"summary": summary, "summary_output": summary_output},
         )

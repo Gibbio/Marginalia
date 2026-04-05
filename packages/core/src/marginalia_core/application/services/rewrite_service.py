@@ -10,7 +10,7 @@ from marginalia_core.domain.reading_session import ReaderState
 from marginalia_core.domain.rewrite import RewriteDraft, RewriteStatus
 from marginalia_core.events.models import DomainEvent, EventName
 from marginalia_core.ports.events import EventPublisher
-from marginalia_core.ports.llm import RewriteGenerator
+from marginalia_core.ports.llm import RewriteGenerator, RewriteInstruction
 from marginalia_core.ports.storage import (
     DocumentRepository,
     NoteRepository,
@@ -74,17 +74,28 @@ class RewriteService:
                     "document_id": session.document_id,
                     "section_index": section.index,
                     "note_count": len(section_notes),
+                    "anchor": session.position.anchor,
                 },
             )
         )
-        rewritten_text = self._rewrite_generator.rewrite_section(section.text, section_notes)
+        rewrite_output = self._rewrite_generator.rewrite_section(
+            RewriteInstruction(
+                document_title=document.title,
+                section_title=section.title,
+                source_anchor=session.position.anchor,
+                section_text=section.text,
+                note_texts=section_notes,
+            )
+        )
         draft = RewriteDraft(
             draft_id=str(uuid4()),
             document_id=document.document_id,
             section_index=section.index,
+            source_anchor=session.position.anchor,
             source_excerpt=section.text[:600],
             note_transcripts=section_notes,
-            rewritten_text=rewritten_text,
+            rewritten_text=rewrite_output.rewritten_text,
+            provider_name=rewrite_output.provider_name,
             status=RewriteStatus.GENERATED,
         )
         self._draft_repository.save_draft(draft)
@@ -99,10 +110,11 @@ class RewriteService:
                     "document_id": session.document_id,
                     "draft_id": draft.draft_id,
                     "section_index": section.index,
+                    "provider_name": rewrite_output.provider_name,
                 },
             )
         )
         return OperationResult.ok(
             "Placeholder rewrite draft generated through the fake provider.",
-            data={"draft": draft},
+            data={"draft": draft, "rewrite_output": rewrite_output},
         )

@@ -26,8 +26,10 @@ class RewriteDraft:
     draft_id: str
     document_id: str
     section_index: int
+    source_anchor: str
     source_excerpt: str
     note_transcripts: tuple[str, ...]
     rewritten_text: str
+    provider_name: str = "unknown"
     status: RewriteStatus = RewriteStatus.REQUESTED
     created_at: datetime = field(default_factory=_utc_now)

@@ -7,6 +7,11 @@ export MARGINALIA_DB_PATH="${MARGINALIA_DB_PATH:-$(mktemp -t marginalia-smoke)}"
 .venv/bin/python -m marginalia_cli doctor --json
 .venv/bin/python -m marginalia_cli ingest examples/sample-document.txt --json
 .venv/bin/python -m marginalia_cli play --json
+.venv/bin/python -m marginalia_cli repeat --json
+.venv/bin/python -m marginalia_cli next-chapter --json
+.venv/bin/python -m marginalia_cli restart-chapter --json
+.venv/bin/python -m marginalia_cli pause --json
+.venv/bin/python -m marginalia_cli resume --json
 .venv/bin/python -m marginalia_cli pause --json
 .venv/bin/python -m marginalia_cli note-start --json
 .venv/bin/python -m marginalia_cli note-stop --text "Review the opening paragraph." --json

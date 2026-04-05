@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from marginalia_core.application.result import OperationResult
-from marginalia_core.domain.reading_session import ReaderState
+from marginalia_core.domain.reading_session import ReaderState, ReadingSession
+from marginalia_core.ports.playback import PlaybackEngine, PlaybackSnapshot
 from marginalia_core.ports.storage import (
     DocumentRepository,
     NoteRepository,
@@ -22,22 +23,26 @@ class SessionQueryService:
         document_repository: DocumentRepository,
         note_repository: NoteRepository,
         draft_repository: RewriteDraftRepository,
+        playback_engine: PlaybackEngine,
     ) -> None:
         self._session_repository = session_repository
         self._document_repository = document_repository
         self._note_repository = note_repository
         self._draft_repository = draft_repository
+        self._playback_engine = playback_engine
 
     def current_status(self) -> OperationResult:
         session = self._session_repository.get_active_session()
         documents = self._document_repository.list_documents()
         if session is None:
+            playback_snapshot = self._playback_engine.snapshot()
             return OperationResult.ok(
                 "No active session. Marginalia is idle.",
                 data={
                     "state": ReaderState.IDLE.value,
                     "document_count": len(documents),
                     "latest_document_id": documents[0].document_id if documents else None,
+                    "playback": playback_snapshot,
                 },
             )
 
@@ -50,8 +55,14 @@ class SessionQueryService:
             session.position.section_index,
             session.position.chunk_index,
         )
-        note_count = len(self._note_repository.list_notes_for_document(document.document_id))
-        draft_count = len(self._draft_repository.list_drafts_for_document(document.document_id))
+        notes = list(self._note_repository.list_notes_for_document(document.document_id))
+        drafts = list(self._draft_repository.list_drafts_for_document(document.document_id))
+        playback_snapshot = self._playback_snapshot_for_session(
+            session,
+            self._playback_engine.snapshot(),
+        )
+        latest_note = notes[-1] if notes else None
+        latest_draft = drafts[0] if drafts else None
 
         return OperationResult.ok(
             "Active session located.",
@@ -68,9 +79,33 @@ class SessionQueryService:
                     "section_title": current_section.title,
                     "chunk_text": current_chunk.text,
                 },
+                "playback": playback_snapshot,
                 "counts": {
-                    "notes": note_count,
-                    "drafts": draft_count,
+                    "notes": len(notes),
+                    "drafts": len(drafts),
+                    "notes_in_current_section": len(
+                        [
+                            note
+                            for note in notes
+                            if note.position.section_index == session.position.section_index
+                        ]
+                    ),
                 },
+                "latest_note": latest_note,
+                "latest_draft": latest_draft,
             },
+        )
+
+    def _playback_snapshot_for_session(
+        self,
+        session: ReadingSession,
+        snapshot: PlaybackSnapshot,
+    ) -> PlaybackSnapshot:
+        return PlaybackSnapshot(
+            state=session.playback_state,
+            last_action=session.last_command or snapshot.last_action or "session-state",
+            document_id=session.document_id,
+            anchor=session.position.anchor,
+            progress_units=snapshot.progress_units,
+            audio_reference=snapshot.audio_reference,
         )
