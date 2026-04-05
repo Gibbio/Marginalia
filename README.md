@@ -22,19 +22,27 @@ engine that can:
 
 ## Current Scope
 
-As of April 5, 2026, the repository delivers Alpha 0.1 of the local reading
+As of April 5, 2026, the repository delivers Alpha 0.2 of the local reading
 loop:
 
 - monorepo structure for long-term product development
 - Python core packages with clean architecture boundaries
 - CLI as the first usable interface
-- SQLite-backed local persistence with schema v3 compatibility bootstrap
+- SQLite-backed local persistence with sequential file-based migrations (v4)
 - normalized document storage for documents, sections, and chunks
 - real local Kokoro TTS by default, optional Piper TTS, and Vosk command-STT adapters behind ports
 - local subprocess-backed playback for generated audio artifacts
-- one supported runtime mode: `play` ingests or selects a file, starts reading automatically, opens the microphone automatically, and keeps command listening active until completion or explicit stop
+- step-driven runtime loop: `play` ingests or selects a file, starts reading
+  automatically, opens the microphone automatically, and keeps command
+  listening active until completion or explicit stop — the loop can be driven
+  by a CLI, a desktop timer, or an async wrapper
 - language-specific voice command lexicons loaded from TOML files
 - stale runtime/process cleanup before a new foreground reading session starts
+- signal handling (SIGINT/SIGTERM) for graceful shutdown during playback
+- explicit active session flag instead of implicit ordering
+- SQLite WAL mode and busy timeout for concurrent reader/writer safety
+- audio cache cleanup with configurable max age
+- structured logging with optional file output
 - fake provider fallbacks for testing and development
 - event-driven application services for ingestion, sessioning, notes, rewrite,
   summary, search, and voice control

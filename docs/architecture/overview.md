@@ -32,43 +32,52 @@ The current runtime is simple but real:
    `SessionQueryService` coordinate domain workflows
 3. ports abstract command STT, dictation STT, synthesis, playback, rewrite,
    summarization, storage, and event publishing
-4. `SQLiteDatabase` bootstraps a stable SQLite v2 schema and applies
-   compatibility upgrades for older bootstrap databases
+4. `SQLiteDatabase` runs sequential file-based migrations (numbered `.sql`
+   files tracked in a `schema_migrations` table), uses WAL mode, and applies
+   a busy timeout for concurrent reader/writer safety
 5. SQLite repositories persist documents, normalized sections and chunks,
    sessions, notes, rewrite drafts, and playback-related session metadata
-6. real local Piper, Vosk, and subprocess playback adapters can be selected
-   through config, while deterministic fake adapters remain available
+6. real local Kokoro (default) or Piper TTS, Vosk command STT, and subprocess
+   playback adapters can be selected through config, while deterministic fake
+   adapters remain available
 7. an in-process event bus publishes standardized domain events
+8. the read-while-listen runtime is driven by a step-driven `RuntimeLoop`
+   whose `step()` function returns a `StepStatus` — the caller owns the loop
+   driver (CLI `while` loop, desktop timer, or async wrapper)
 
 ## What Is Implemented Now
 
 - document ingestion with markdown heading and paragraph chunk parsing
-- normalized document persistence plus fallback support for older outline-only
-  rows
-- session creation and persistence
+- normalized document persistence for documents, sections, and chunks
+- session creation and persistence with explicit `is_active` flag
 - persisted provider metadata and playback runtime metadata for the active
   session
-- real local Piper synthesis to WAV artifacts when configured
+- real local Kokoro synthesis to WAV artifacts by default, Piper as optional
+  alternate adapter
 - real local command recognition through Vosk when configured
 - real local playback through `afplay` when configured
+- step-driven runtime loop decoupled from the CLI
+- signal handling for graceful shutdown during playback
 - pause and resume state transitions
 - repeat, chapter restart, chapter advance, stop, and bounded voice-command
   loop commands
+- automatic chunk and chapter progression until completion or stop
 - note capture lifecycle with anchored notes
 - rewrite draft generation through a deterministic fake provider
 - topic summary generation through a deterministic fake provider
 - local document and note search
 - database and provider diagnostics through `doctor`
 - session and playback projection reporting through `status`
+- sequential file-based SQLite migrations
+- audio cache cleanup with configurable max age
+- structured logging with optional file handler
 
 ## What Is Still Stubbed
 
 - real note dictation STT
 - persistent event history or out-of-process subscribers
 - draft review workflows beyond generation
-- sentence-level playback tracking and automatic chapter progression
-- an explicit migration runner beyond the current schema bootstrap and
-  compatibility logic
+- sentence-level playback tracking
 
 ## Why CLI First
 

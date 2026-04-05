@@ -42,10 +42,9 @@ playback adapter snapshot on each invocation.
 - future desktop and API clients will need a single state vocabulary
 - tests can assert lifecycle transitions before real speech providers exist
 
-## Alpha 0.1 Implementation Notes
+## Alpha 0.2 Implementation Notes
 
-The repository currently implements the state graph and uses it in real CLI
-flows:
+The repository implements the state graph and uses it in real CLI flows:
 
 - `play`
 - `pause`
@@ -73,6 +72,21 @@ Implemented transition behavior:
 - `restart-chapter` and `next-chapter` update the persisted reading position
   and replay audio when the session is actively reading
 - `repeat` re-synthesizes and replays the current reading chunk
+
 `READING_REWRITE` remains intentionally defined but only partially exercised.
 It stays reserved so later rewrite-playback work does not invent incompatible
 state names.
+
+### Step-Driven Runtime Model (Alpha 0.2)
+
+As of Alpha 0.2 the read-while-listen runtime is driven by a `RuntimeLoop`
+class that exposes a `step()` function returning a `StepStatus`:
+
+- `CONTINUE` — the caller should invoke `step()` again
+- `COMPLETED` — the document finished playing
+- `STOPPED` — the session was stopped by a command or signal
+- `ERROR` — a fatal runtime fault occurred
+
+The caller owns the loop driver. The CLI uses a `while` loop with signal
+handlers; a desktop shell would use a timer; an async wrapper would use
+`asyncio`. The core does not assume any specific concurrency model.

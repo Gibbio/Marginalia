@@ -19,7 +19,7 @@ Status on April 5, 2026: complete.
 
 Goal: prove a narrow but real local reading loop on macOS Apple Silicon.
 
-Status on April 5, 2026: implemented.
+Status on April 5, 2026: complete — superseded by Alpha 0.2.
 
 - document ingestion
 - session lifecycle commands with persisted provider/runtime metadata
@@ -38,13 +38,31 @@ Status on April 5, 2026: implemented.
 - normalized SQLite storage for documents, sections, and chunks
 - end-to-end smoke flow including navigation, note flow, and scripted command loop
 
+## Alpha 0.2 Desktop-Ready Infrastructure
+
+Goal: harden the runtime model, persistence layer, and infrastructure so the
+core is ready to drive a desktop shell without requiring further architectural
+rework.
+
+Status on April 5, 2026: implemented.
+
+- step-driven `RuntimeLoop` decoupled from the CLI — can be driven by a CLI
+  loop, a desktop timer, or an async wrapper
+- sequential file-based SQLite migration system replacing the old bootstrap-and-patch approach
+- explicit `is_active` session flag instead of implicit ordering
+- SQLite WAL mode and busy timeout for concurrent reader/writer safety
+- connection caching to avoid repeated open/close overhead
+- signal handling (SIGINT/SIGTERM) for graceful shutdown during playback
+- audio cache cleanup with configurable max age
+- structured logging with optional file handler
+- `ReadingPosition.from_anchor()` deduplication across adapters
+- dead code removal (StorageCoordinator, inline schema constant, duplicated helpers)
+
 Remaining hardening before V1:
 
-- explicit migrations beyond schema bootstrap
 - richer chunking and progress semantics
 - better document, note, and draft inspection commands
 - stronger real-provider install ergonomics and compatibility guidance
-- manual decision on whether the single read-while-listening runtime is acceptable enough to continue
 - optional event persistence if it becomes operationally useful
 
 ## V1 Usable CLI
