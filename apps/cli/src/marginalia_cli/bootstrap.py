@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,8 @@ from marginalia_infra.storage.sqlite import (
     SQLiteRewriteDraftRepository,
     SQLiteSessionRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -183,12 +186,16 @@ def _build_command_recognizer(
     provider_name = settings.command_stt_provider
     if provider_name == "vosk":
         if provider_checks["vosk"]["ready"] or not settings.allow_provider_fallback:
+            logger.info("Command STT: using real Vosk recognizer")
             return VoskCommandRecognizer(
                 model_path=settings.vosk_model_path,
                 commands=command_lexicon.grammar,
                 sample_rate=settings.vosk_sample_rate,
                 timeout_seconds=settings.vosk_listen_timeout_seconds,
             )
+        logger.warning("Command STT: Vosk requested but not ready, falling back to fake")
+    else:
+        logger.info("Command STT: using fake provider (configured=%s)", provider_name)
     return FakeCommandRecognizer(commands=settings.fake_command_script)
 
 
@@ -199,14 +206,17 @@ def _build_speech_synthesizer(
     provider_name = settings.tts_provider
     if provider_name == "kokoro":
         if provider_checks["kokoro"]["ready"] or not settings.allow_provider_fallback:
+            logger.info("TTS: using real Kokoro synthesizer")
             return KokoroSpeechSynthesizer(
                 python_executable=settings.kokoro_python_executable,
                 output_dir=settings.audio_cache_dir,
                 lang_code=settings.kokoro_lang_code,
                 speed=settings.kokoro_speed,
             )
+        logger.warning("TTS: Kokoro requested but not ready, falling back to fake")
     if provider_name == "piper":
         if provider_checks["piper"]["ready"] or not settings.allow_provider_fallback:
+            logger.info("TTS: using real Piper synthesizer")
             return PiperSpeechSynthesizer(
                 executable=settings.piper_executable,
                 model_path=settings.piper_model_path,
@@ -215,6 +225,9 @@ def _build_speech_synthesizer(
                 length_scale=settings.piper_length_scale,
                 noise_scale=settings.piper_noise_scale,
             )
+        logger.warning("TTS: Piper requested but not ready, falling back to fake")
+    if provider_name not in ("kokoro", "piper"):
+        logger.info("TTS: using fake provider (configured=%s)", provider_name)
     return FakeSpeechSynthesizer()
 
 
@@ -225,7 +238,14 @@ def _build_playback_engine(
     provider_name = settings.playback_provider
     if provider_name == "subprocess":
         if provider_checks["playback"]["ready"] or not settings.allow_provider_fallback:
+            logger.info(
+                "Playback: using real subprocess engine (command=%s)",
+                settings.playback_command,
+            )
             return SubprocessPlaybackEngine(command=settings.playback_command)
+        logger.warning("Playback: subprocess requested but not ready, falling back to fake")
+    else:
+        logger.info("Playback: using fake provider (configured=%s)", provider_name)
     return FakePlaybackEngine(
         auto_complete_after_snapshots=settings.fake_playback_auto_complete_polls
     )

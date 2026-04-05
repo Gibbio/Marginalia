@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -15,6 +16,8 @@ from marginalia_core.ports.runtime import (
     RuntimeCleanupReport,
     RuntimeSessionRecord,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FileRuntimeSupervisor:
@@ -31,6 +34,11 @@ class FileRuntimeSupervisor:
             str(record.working_directory) if record.working_directory is not None else None
         )
         self._runtime_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        logger.info(
+            "Runtime record activated: pid=%d session=%s",
+            record.process_id,
+            record.session_id,
+        )
 
     def current_runtime(self) -> RuntimeSessionRecord | None:
         if not self._runtime_file.exists():
@@ -60,12 +68,19 @@ class FileRuntimeSupervisor:
         record = self.current_runtime()
         if record is None:
             self.clear()
+            logger.debug("No existing runtime record found during cleanup")
             return RuntimeCleanupReport(runtime_found=False, record_removed=False)
 
+        logger.info(
+            "Cleanup: found runtime record pid=%d session=%s",
+            record.process_id,
+            record.session_id,
+        )
         notes: list[str] = []
         terminated_process_ids: list[int] = []
         record_removed = False
         if record.process_id == current_process_id:
+            logger.info("Cleanup: removing self-referential record for pid %d", record.process_id)
             self.clear(process_id=record.process_id)
             return RuntimeCleanupReport(
                 runtime_found=True,
@@ -74,6 +89,7 @@ class FileRuntimeSupervisor:
             )
 
         if not _process_exists(record.process_id):
+            logger.info("Cleanup: pid %d is no longer alive, removing record", record.process_id)
             notes.append("Removed a stale runtime record for a process that is no longer alive.")
             self.clear(process_id=record.process_id)
             return RuntimeCleanupReport(
@@ -84,18 +100,26 @@ class FileRuntimeSupervisor:
 
         command_line = _process_command_line(record.process_id)
         if command_line and "marginalia" not in command_line.lower():
+            logger.warning(
+                "Cleanup: pid %d is alive but not Marginalia (cmd: %s), skipping termination",
+                record.process_id,
+                command_line[:120],
+            )
             notes.append(
                 "Skipped terminating the recorded pid because it does not look like Marginalia."
             )
         else:
+            logger.info("Cleanup: terminating stale Marginalia pid %d", record.process_id)
             if _terminate_process(record.process_id):
                 terminated_process_ids.append(record.process_id)
                 notes.append(f"Terminated stale runtime pid {record.process_id}.")
+                logger.info("Cleanup: successfully terminated pid %d", record.process_id)
             else:
                 notes.append(
                     "Unable to terminate stale runtime pid "
                     f"{record.process_id}; manual cleanup may be required."
                 )
+                logger.error("Cleanup: failed to terminate pid %d", record.process_id)
 
         self.clear(process_id=record.process_id)
         record_removed = True
@@ -112,6 +136,7 @@ class FileRuntimeSupervisor:
             return
         try:
             self._runtime_file.unlink()
+            logger.debug("Runtime record file removed")
         except FileNotFoundError:
             return
 
