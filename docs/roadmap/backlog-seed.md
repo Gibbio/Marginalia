@@ -1,64 +1,24 @@
 # Backlog Seed
 
-## Repository foundation setup
+## Foundation And V0 Completed
 
-Purpose: keep the repository bootstrap coherent and repeatable.
+These slices are now present in the repository and should be treated as the
+current baseline, not as open bootstrap work:
 
-Suggested labels: `type:feature`, `area:infra`, `area:docs`, `size:m`
+- repository foundation and CI
+- core domain skeleton
+- reading session state model
+- standardized in-process event model
+- SQLite schema v0 bootstrap
+- runnable CLI command surface
+- fake providers behind ports
+- configuration and logging setup
+- unit tests, integration tests, and smoke flow
+- devcontainer and local development tooling
 
-Context: `either`
+## Next: Introduce explicit SQLite migrations
 
-Acceptance criteria:
-
-- root hygiene files stay current
-- local bootstrap flow remains documented
-- CI stays aligned with the actual toolchain
-
-## Establish core domain package skeleton
-
-Purpose: stabilize product vocabulary before deeper implementation work.
-
-Suggested labels: `type:feature`, `area:core`, `size:m`
-
-Context: `home`
-
-Acceptance criteria:
-
-- document, session, note, rewrite, summary, and search models exist
-- package boundaries remain clear
-- tests cover the main bootstrap-level invariants
-
-## Define reading session state model
-
-Purpose: prevent ad hoc lifecycle behavior as commands grow.
-
-Suggested labels: `type:feature`, `area:core`, `area:cli`, `size:s`
-
-Context: `home`
-
-Acceptance criteria:
-
-- state graph is documented and enforced
-- invalid transitions fail explicitly
-- CLI commands use the same state vocabulary
-
-## Define event model
-
-Purpose: make future observability and async expansion possible without guessing event names later.
-
-Suggested labels: `type:feature`, `area:core`, `area:infra`, `size:s`
-
-Context: `home`
-
-Acceptance criteria:
-
-- event names are standardized
-- payload expectations are documented
-- in-process publisher abstraction remains minimal and testable
-
-## Define SQLite schema v0
-
-Purpose: create a stable first storage contract for documents, sessions, notes, and drafts.
+Purpose: move from schema bootstrap to durable schema evolution.
 
 Suggested labels: `type:feature`, `area:storage`, `area:infra`, `size:m`
 
@@ -66,125 +26,114 @@ Context: `office`
 
 Acceptance criteria:
 
-- tables are documented
-- migration strategy is sketched
-- repositories round-trip the core models they claim to support
+- migration files or a lightweight migration mechanism exist
+- schema version updates are deliberate
+- docs explain how migrations run locally and in CI
 
-## Implement CLI scaffolding
+## Next: Improve chunking and reading progress semantics
 
-Purpose: provide a usable interface for early product learning.
+Purpose: make repeat, restart, and future progress tracking more realistic.
 
-Suggested labels: `type:feature`, `area:cli`, `size:m`
-
-Context: `office`
-
-Acceptance criteria:
-
-- required commands exist with coherent help text
-- CLI is thin and delegates to services
-- smoke tests cover the supported local paths
-
-## Add fake providers
-
-Purpose: unblock architectural progress without pretending real provider behavior exists.
-
-Suggested labels: `type:feature`, `area:voice`, `area:llm`, `size:s`
-
-Context: `office`
-
-Acceptance criteria:
-
-- fake adapters sit behind ports
-- outputs are explicit placeholders
-- no fake adapter leaks into the core as a concrete dependency
-
-## Add configuration system
-
-Purpose: standardize local paths and future provider selection.
-
-Suggested labels: `type:feature`, `area:infra`, `size:s`
-
-Context: `office`
-
-Acceptance criteria:
-
-- runtime paths are configurable
-- provider selections are explicit
-- doctor output reflects the active configuration
-
-## Add logging conventions
-
-Purpose: keep local troubleshooting consistent as the CLI grows.
-
-Suggested labels: `type:feature`, `area:infra`, `size:xs`
-
-Context: `office`
-
-Acceptance criteria:
-
-- logging setup is centralized
-- CLI verbose mode is supported
-- future providers can plug into the same conventions
-
-## Write unit tests for initial stubs
-
-Purpose: prove the skeleton is intentional rather than decorative.
-
-Suggested labels: `type:feature`, `area:ci`, `area:core`, `size:s`
-
-Context: `office`
-
-Acceptance criteria:
-
-- state machine tests exist
-- repository tests exist
-- CLI smoke tests exist
-
-## Document architecture
-
-Purpose: keep decisions visible and stable as implementation accelerates.
-
-Suggested labels: `type:docs`, `area:docs`, `type:adr`, `size:m`
+Suggested labels: `type:feature`, `area:core`, `area:cli`, `size:m`
 
 Context: `home`
 
 Acceptance criteria:
 
-- overview, state machine, domain model, and repository structure docs are current
-- ADR set covers the current hard decisions
-- docs explain what is intentionally deferred
+- chunking strategy is more deliberate than paragraph-only splitting
+- progress-related events remain stable
+- repeat output reflects a more precise reading unit
 
-## Add devcontainer
+## Next: Add session inspection commands
 
-Purpose: make it easier to continue work across machines without re-deriving the environment.
+Purpose: let users inspect local documents, drafts, and notes without opening
+SQLite manually.
 
-Suggested labels: `type:feature`, `area:infra`, `size:s`
+Suggested labels: `type:feature`, `area:cli`, `area:storage`, `size:s`
 
 Context: `office`
 
 Acceptance criteria:
 
-- devcontainer opens with the expected Python toolchain
-- local bootstrap command is part of container setup
-- recommended editor extensions remain minimal
+- CLI can list stored documents
+- CLI can inspect notes and rewrite drafts for a document
+- output remains structured and script-friendly
 
-## Spike future Obsidian adapter
+## Next: Add draft review workflow
 
-Purpose: explore editor integration only after the core contract is stable.
+Purpose: make rewrite output more actionable than a single generated blob.
 
-Suggested labels: `type:research`, `area:future-editor`, `size:m`
+Suggested labels: `type:feature`, `area:llm`, `area:cli`, `size:m`
 
 Context: `home`
 
 Acceptance criteria:
 
-- the spike produces a short decision memo
-- no core package depends on editor APIs
-- adapter boundaries are proposed, not merged into the domain
+- drafts can be listed and retrieved
+- draft status transitions are explicit
+- docs explain what remains fake versus real
 
-## Spike topic summarization pipeline
+## Next: Strengthen event payload contracts
 
-Purpose: clarify how summaries should be requested, cached, and reviewed.
+Purpose: prepare for future observability or background processing without
+changing event names again.
+
+Suggested labels: `type:feature`, `area:core`, `area:infra`, `size:s`
+
+Context: `home`
+
+Acceptance criteria:
+
+- event payload fields are documented in one place
+- service tests cover critical emitted events
+- no event names are ambiguous about lifecycle intent
+
+## Next: Improve doctor diagnostics
+
+Purpose: make local environment failures easier to diagnose.
+
+Suggested labels: `type:feature`, `area:infra`, `area:cli`, `size:s`
+
+Context: `office`
+
+Acceptance criteria:
+
+- doctor checks config readability
+- doctor reports writable path issues clearly
+- doctor output stays useful in JSON mode
+
+## Next: Add more CLI flow coverage
+
+Purpose: keep the V0 skeleton trustworthy as commands evolve.
+
+Suggested labels: `type:feature`, `area:ci`, `area:cli`, `size:s`
+
+Context: `office`
+
+Acceptance criteria:
+
+- tests cover restart-chapter and next-chapter
+- tests cover play-without-document-id using latest document fallback
+- smoke coverage remains deterministic
+
+## Next: Spike local command recognition loop
+
+Purpose: validate how `LISTENING_FOR_COMMAND` should behave before real STT
+integration.
+
+Suggested labels: `type:research`, `area:voice`, `area:core`, `size:m`
+
+Context: `home`
+
+Acceptance criteria:
+
+- fake command recognizer participates in a bounded loop or demo flow
+- state transitions for command listening are explicit
+- no real microphone capture is required
+
+## Next: Spike topic summarization pipeline
+
+Purpose: clarify persistence and review behavior for summaries.
 
 Suggested labels: `type:research`, `area:llm`, `area:core`, `size:m`
 
@@ -193,12 +142,13 @@ Context: `home`
 Acceptance criteria:
 
 - summary request and result lifecycle is described
-- provider contract changes are documented if needed
 - persistence expectations are explicit
+- provider contract changes are documented if needed
 
-## Spike search-notes design
+## Next: Spike search-notes design
 
-Purpose: determine whether note search should remain SQLite-only or add indexing later.
+Purpose: determine whether note search should remain SQLite substring search or
+grow into indexing later.
 
 Suggested labels: `type:research`, `area:storage`, `area:core`, `size:m`
 
@@ -209,3 +159,17 @@ Acceptance criteria:
 - ranking expectations are described
 - schema and query tradeoffs are captured
 - future migration options are documented
+
+## Next: Spike future editor adapter boundary
+
+Purpose: prepare for eventual editor integration without contaminating the core.
+
+Suggested labels: `type:research`, `area:future-editor`, `size:m`
+
+Context: `home`
+
+Acceptance criteria:
+
+- the spike produces a short decision memo
+- no core package depends on editor APIs
+- adapter boundaries are proposed rather than merged into the core

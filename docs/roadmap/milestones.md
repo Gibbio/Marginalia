@@ -4,22 +4,38 @@
 
 Goal: establish the repository and architectural baseline.
 
+Status on April 4, 2026: substantially complete.
+
 - monorepo structure
 - docs and ADRs
-- CLI scaffolding
-- SQLite placeholder storage
+- runnable CLI scaffolding
+- SQLite schema bootstrap and repositories
 - fake providers behind ports
 - CI and development environment
+- schema health reporting
+- unit and integration test baseline
 
 ## V0 CLI Skeleton
 
 Goal: cover the intended command surface with explicit local behavior.
 
+Status on April 4, 2026: implemented as a usable skeleton.
+
 - document ingestion
 - session lifecycle commands
 - note anchoring
+- rewrite draft placeholder generation
+- topic summarization placeholder generation
 - search commands
 - doctor and status diagnostics
+- end-to-end smoke flow
+
+Remaining hardening before V1:
+
+- migration strategy beyond schema bootstrap
+- richer chunking and progress semantics
+- better note review and draft inspection commands
+- persistent event history if it becomes operationally useful
 
 ## V1 Usable CLI
 

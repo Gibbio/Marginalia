@@ -11,7 +11,7 @@ playback, notes, and later rewrite or summary tasks.
 - section: user-meaningful subdivision, often a chapter
 - chunk: the smallest addressable playback or note anchor
 
-The bootstrap parser keeps this simple by deriving sections from markdown-style
+The current parser keeps this simple by deriving sections from markdown-style
 headings and chunks from paragraph breaks.
 
 ## Reading Session
@@ -24,6 +24,14 @@ Tracks:
 - current position
 - last command
 - active note capture id if one exists
+
+The current implementation persists:
+
+- reader state
+- playback state
+- current section and chunk
+- last command
+- active note capture id
 
 The reading session is the backbone for pause/resume, note anchoring, and later
 rewrite context.
@@ -56,7 +64,17 @@ Summaries are modeled explicitly so they can later support:
 - corpus-level topic summaries
 - cached or persisted summary outputs
 
-## Search Result
+The V0 implementation already models summary requests explicitly even though the
+provider remains fake.
+
+## Search Query / Result
+
+Search requests are modeled explicitly through `SearchQuery`, which currently
+supports:
+
+- free-text query text
+- optional document scoping
+- result limit
 
 A search result is intentionally generic. It can represent a hit from:
 

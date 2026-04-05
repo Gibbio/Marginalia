@@ -16,14 +16,18 @@
 5. update an ADR if the architectural decision changed
 6. run `make lint`, `make test`, and `make smoke`
 
+For CLI-facing changes, prefer verifying an actual command flow rather than only
+unit-level behavior.
+
 ## Commit Style
 
 Use small, intention-revealing commits such as:
 
-- `chore: bootstrap repository structure`
-- `docs: add product vision and architecture docs`
-- `feat: add cli and storage skeleton`
-- `ci: add validation workflow`
+- `refactor: solidify core domain and service layout`
+- `feat: add runnable cli skeleton and fake providers`
+- `feat: add sqlite schema and repositories`
+- `test: add cli and state model coverage`
+- `docs: align architecture and roadmap with implementation`
 
 ## ADR Expectations
 
@@ -45,6 +49,9 @@ Real provider integrations are welcome later, but they must:
 - avoid leaking provider SDK details into the core
 - keep network assumptions explicit
 - preserve local-first operation where possible
+
+Until then, fake providers are acceptable and expected. They should remain
+deterministic and clearly identified as fake in user-facing output.
 
 ## Editor Integrations
 

@@ -1,27 +1,37 @@
 # Marginalia
 
-Marginalia is a local AI-first voice reading and annotation engine. It is intended to read long-form text aloud, react to voice commands, capture dictated notes anchored to the current reading location, and later help rewrite or summarize sections of a document.
+Marginalia is a local AI-first voice reading and annotation engine. It is meant
+to read long-form text aloud, react to voice-oriented controls, capture dictated
+notes anchored to the current reading location, and later help rewrite or
+summarize sections of a document.
 
-The repository is intentionally bootstrapped as a production-minded monorepo rather than a prototype. The first usable interface is a CLI, the core is Python, storage starts with SQLite, and all speech and LLM capabilities are designed behind replaceable ports.
+The repository is intentionally structured as a production-minded monorepo. The
+first usable interface is a CLI, the core is Python, storage starts with
+SQLite, and speech plus LLM capabilities stay behind replaceable ports.
 
-## Why it exists
+## Why It Exists
 
-Reading, listening, annotating, and revising are still split across too many tools. Marginalia is meant to collapse those workflows into a local-first engine that can:
+Reading, listening, annotating, and revising are still split across too many
+tools. Marginalia is meant to collapse those workflows into a local-first engine
+that can:
 
 - read a document like an audiobook
-- react to simple spoken control commands
+- react to simple spoken control commands later
 - attach dictated notes to the exact place where they were spoken
-- later use those notes to rewrite or summarize relevant sections
+- turn those notes into rewrites or summaries later
 
 ## Current Scope
 
-The current repository focuses on foundation work:
+As of April 4, 2026, the repository covers a real Foundation plus V0 CLI
+skeleton:
 
 - monorepo structure for long-term product development
 - Python core packages with clean architecture boundaries
-- CLI as the first operational interface
-- SQLite-backed local persistence placeholders
+- CLI as the first usable interface
+- SQLite-backed local persistence with schema bootstrap and health checks
 - fake STT, TTS, playback, and LLM adapters behind ports
+- event-driven application services for ingestion, sessioning, notes, rewrite,
+  summary, and search
 - architecture, roadmap, ADR, and contribution documentation
 - CI, devcontainer, and engineering hygiene
 
@@ -37,12 +47,16 @@ The current repository focuses on foundation work:
 
 Marginalia is structured as a lightweight modular monolith:
 
-- `packages/core` contains domain models, state machine, application services, events, and ports
+- `packages/core` contains domain models, state machine, application services,
+  events, and ports
 - `packages/adapters` contains replaceable fake provider implementations
-- `packages/infra` contains configuration, logging, event bus, and SQLite storage
+- `packages/infra` contains configuration, logging, event bus wiring, and
+  SQLite storage
 - `apps/cli` contains the user-facing command-line application
 
-The core never depends on editor APIs, concrete speech providers, or remote services. Those concerns sit behind ports and can be added later without distorting the domain model.
+The core never depends on editor APIs, concrete speech providers, or remote
+services. Those concerns sit behind ports and can be added later without
+distorting the domain model.
 
 ## Repository Layout
 
@@ -67,7 +81,7 @@ The core never depends on editor APIs, concrete speech providers, or remote serv
 └── tests/
 ```
 
-More detail is documented in `docs/architecture/repository-structure.md`.
+More detail lives in `docs/architecture/repository-structure.md`.
 
 ## Local Setup
 
@@ -92,9 +106,20 @@ make smoke
 make run-cli-help
 ```
 
+## Configuration
+
+Marginalia can run from environment variables or from an explicit TOML file. A
+sample configuration is available at `examples/local-config.toml`.
+
+Example:
+
+```bash
+.venv/bin/python -m marginalia_cli --config examples/local-config.toml doctor --json
+```
+
 ## Current CLI Commands
 
-The CLI is intentionally small but installable and structured for growth:
+The CLI surface currently includes:
 
 - `ingest`
 - `play`
@@ -112,28 +137,47 @@ The CLI is intentionally small but installable and structured for growth:
 - `status`
 - `doctor`
 
-Implemented now:
+Example V0 flow:
 
-- document ingestion into SQLite
-- reading session state changes
-- anchored note capture via explicit text or fake dictation
-- document and note search
-- doctor and status reporting
+```bash
+.venv/bin/python -m marginalia_cli ingest examples/sample-document.txt --json
+.venv/bin/python -m marginalia_cli play --json
+.venv/bin/python -m marginalia_cli pause --json
+.venv/bin/python -m marginalia_cli note-start --json
+.venv/bin/python -m marginalia_cli note-stop --text "Review the opening paragraph." --json
+.venv/bin/python -m marginalia_cli rewrite-current --json
+.venv/bin/python -m marginalia_cli summarize-topic local --json
+.venv/bin/python -m marginalia_cli status --json
+```
 
-Stubbed intentionally:
+## What Is Real Now
 
-- real audio playback
-- real speech recognition
-- real summarization and rewrite generation
+- document ingestion into SQLite with section and chunk parsing
+- persisted reading session state changes
+- anchored note capture via explicit text or a fake dictation provider
+- deterministic rewrite draft generation through a fake provider
+- deterministic topic summarization through a fake provider
+- document and note search over local storage
+- doctor and status reporting with schema and database details
+- end-to-end smoke flow covering ingest, play, pause, note, rewrite, summary,
+  search, and status
+
+## What Is Still Stubbed
+
+- actual audio playback
+- microphone capture and speech recognition
+- production rewrite and summarization providers
+- persistent event history outside the current process
+- desktop UI and editor adapters
 
 ## Roadmap Summary
 
 Near term:
 
-- stabilize the core domain and state transitions
-- define SQLite schema v0 and migration strategy
-- harden the CLI into a usable local workflow
-- add better tests around sessioning, notes, and storage
+- extend the SQLite bootstrap into explicit migrations
+- improve chunking and reading progress heuristics
+- add richer note and draft inspection commands
+- prepare the core for a thin desktop shell without changing boundaries
 
 Later:
 
@@ -154,4 +198,6 @@ See `docs/roadmap/milestones.md` and `docs/roadmap/backlog-seed.md`.
 
 ## License
 
-A final license has not been chosen yet. This repository includes [`LICENSE.placeholder`](LICENSE.placeholder) until a deliberate licensing decision is made.
+A final license has not been chosen yet. This repository includes
+[`LICENSE.placeholder`](LICENSE.placeholder) until a deliberate licensing
+decision is made.

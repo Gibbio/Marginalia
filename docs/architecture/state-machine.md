@@ -30,18 +30,31 @@
 - future desktop and API clients will need a single state vocabulary
 - tests can assert lifecycle transitions before real speech providers exist
 
-## Bootstrap Implementation Notes
+## V0 Implementation Notes
 
-The repository currently implements the state graph and exercises the most useful
-local transitions:
+The repository currently implements the state graph and uses it in real CLI
+flows:
 
 - `play`
 - `pause`
 - `resume`
 - `note-start`
 - `note-stop`
+- `rewrite-current`
 - `restart-chapter`
 - `next-chapter`
 
-`LISTENING_FOR_COMMAND` and `READING_REWRITE` are defined now so future provider
-work does not invent incompatible state names later.
+Implemented transition behavior:
+
+- `play` creates a session for the explicitly requested document, the active
+  session document, or the latest ingested document
+- `pause` moves `READING -> PAUSED`
+- `resume` moves `PAUSED -> READING`
+- `note-start` moves `PAUSED` or `READING -> RECORDING_NOTE`
+- `note-stop` persists a note and returns the session to `PAUSED`
+- `rewrite-current` moves `PAUSED` or `READING -> PROCESSING_REWRITE -> PAUSED`
+- `restart-chapter` and `next-chapter` update the persisted reading position
+
+`LISTENING_FOR_COMMAND` and `READING_REWRITE` remain intentionally defined but
+only partially exercised. They are reserved so later voice-command and
+rewrite-playback work does not invent incompatible state names.

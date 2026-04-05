@@ -19,6 +19,9 @@ make bootstrap
 This creates `.venv`, upgrades `pip`, and installs the project plus development
 dependencies in editable mode.
 
+If you want a persistent local configuration file instead of environment
+variables, start from `examples/local-config.toml`.
+
 ## Daily Commands
 
 ```bash
@@ -38,8 +41,17 @@ Useful environment variables:
 - `MARGINALIA_DB_PATH`
 - `MARGINALIA_LOG_LEVEL`
 - `MARGINALIA_CONFIG`
+- `MARGINALIA_FAKE_COMMANDS`
+- `MARGINALIA_FAKE_DICTATION_TEXT`
+- `MARGINALIA_DEFAULT_VOICE`
 
 The CLI `doctor` command reports the effective local configuration.
+
+Example:
+
+```bash
+.venv/bin/python -m marginalia_cli --config examples/local-config.toml doctor --json
+```
 
 ## Devcontainer
 
