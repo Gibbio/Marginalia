@@ -15,6 +15,7 @@ from marginalia_adapters.real.kokoro import KokoroSpeechSynthesizer
 from marginalia_adapters.real.piper import PiperSpeechSynthesizer
 from marginalia_adapters.real.playback import SubprocessPlaybackEngine
 from marginalia_adapters.real.vosk import VoskCommandRecognizer
+from marginalia_adapters.real.whisper_cpp import WhisperCppDictationTranscriber
 from marginalia_core.application.command_router import CommandLexicon, load_command_lexicon
 from marginalia_core.application.services.document_ingestion_service import (
     DocumentIngestionService,
@@ -102,7 +103,7 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
     command_lexicon = _load_runtime_command_lexicon(settings)
     runtime_supervisor = FileRuntimeSupervisor(settings.runtime_dir / "active-session.json")
     command_stt = _build_command_recognizer(settings, provider_checks, command_lexicon)
-    dictation_stt = FakeDictationTranscriber(transcript=settings.fake_dictation_text)
+    dictation_stt = _build_dictation_transcriber(settings, provider_checks)
     tts = _build_speech_synthesizer(settings, provider_checks)
     playback = _build_playback_engine(settings, provider_checks)
     rewrite_generator = FakeRewriteGenerator()
@@ -204,6 +205,28 @@ def _build_command_recognizer(
     else:
         logger.info("Command STT: using fake provider (configured=%s)", provider_name)
     return FakeCommandRecognizer(commands=settings.fake_command_script)
+
+
+def _build_dictation_transcriber(
+    settings: AppSettings,
+    provider_checks: dict[str, Any],
+) -> DictationTranscriber:
+    provider_name = settings.dictation_stt_provider
+    if provider_name == "whisper-cpp":
+        if provider_checks["whisper_cpp"]["ready"] or not settings.allow_provider_fallback:
+            logger.info("Dictation STT: using real whisper.cpp transcriber")
+            return WhisperCppDictationTranscriber(
+                executable=settings.whisper_cpp_executable,
+                model_path=settings.whisper_cpp_model_path or Path("whisper-model-missing"),
+                language=settings.whisper_cpp_language,
+                max_record_seconds=settings.whisper_cpp_max_record_seconds,
+            )
+        logger.warning(
+            "Dictation STT: whisper-cpp requested but not ready, falling back to fake"
+        )
+    else:
+        logger.info("Dictation STT: using fake provider (configured=%s)", provider_name)
+    return FakeDictationTranscriber(transcript=settings.fake_dictation_text)
 
 
 def _build_speech_synthesizer(

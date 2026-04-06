@@ -38,6 +38,32 @@ semantic versioning once public releases begin.
   units (configurable via `chunk_target_chars`, default 300)
 - 10 new chunking tests covering merge, split, mixed content, offsets,
   edge cases, and the real voice-test document
+- reading progress tracking: `status`, `synchronize_active_session`, and
+  voice-status responses now include a `progress` dict with
+  `section_index/section_count`, `chunk_index/section_chunk_count`, and
+  `chunks_read/total_chunks` fractions
+- `READING_PROGRESSED` event payload enriched with `section_count`,
+  `section_chunk_count`, `chunks_read`, and `total_chunks` totals
+- chapter boundary logging in `advance_after_playback_completion()`
+- `REWIND` voice command intent: go back one chunk (or to the last chunk
+  of the previous section) — Italian phrases `indietro`, `precedente`;
+  English phrases `back`, `previous`
+- 10 new tests covering progress fractions in status/sync/events and
+  rewind behavior (within section, cross-section, document start, voice
+  dispatch)
+- `WhisperCppDictationTranscriber` real adapter: records from the
+  microphone, invokes the whisper.cpp binary, parses output into a
+  `DictationTranscript` — enables real note dictation on Apple Silicon
+- whisper.cpp config: `[whisper_cpp]` TOML section with `executable`,
+  `model_path`, `language`, `max_record_seconds`; env overrides
+  `MARGINALIA_WHISPER_CPP_*`
+- `doctor` reports whisper-cpp readiness (executable, model, sounddevice)
+- bootstrap wires `dictation_stt = "whisper-cpp"` with the standard
+  fallback pattern
+- `make bootstrap-whisper` clones, builds whisper.cpp, and downloads the
+  base GGML model
+- 9 new whisper tests: capabilities, error paths, doctor section,
+  bootstrap fallback/selection, default settings
 
 ### Changed
 

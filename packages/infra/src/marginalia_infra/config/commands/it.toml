@@ -4,6 +4,7 @@ language = "it"
 pause = ["pausa"]
 resume = ["continua", "riprendi"]
 repeat = ["ripeti"]
+rewind = ["indietro", "precedente"]
 next_chapter = ["capitolo successivo"]
 restart_chapter = ["ricomincia capitolo"]
 status = ["stato"]

@@ -50,6 +50,10 @@ class AppSettings:
     vosk_listen_timeout_seconds: float
     vosk_input_device_index: int | None
     vosk_input_device_name: str | None
+    whisper_cpp_executable: str
+    whisper_cpp_model_path: Path | None
+    whisper_cpp_language: str
+    whisper_cpp_max_record_seconds: int
     playback_command: str
     log_file: Path | None = None
     audio_cache_max_age_hours: int = 72
@@ -66,6 +70,7 @@ class AppSettings:
         kokoro = _as_dict(config_data.get("kokoro"))
         piper = _as_dict(config_data.get("piper"))
         vosk = _as_dict(config_data.get("vosk"))
+        whisper_cpp = _as_dict(config_data.get("whisper_cpp"))
         playback = _as_dict(config_data.get("playback"))
 
         home_dir = _path_setting(
@@ -242,6 +247,26 @@ class AppSettings:
                 config_data=vosk,
                 config_key="input_device_name",
             ),
+            whisper_cpp_executable=os.getenv(
+                "MARGINALIA_WHISPER_CPP_EXECUTABLE",
+                str(whisper_cpp.get("executable", "whisper-cpp")),
+            ),
+            whisper_cpp_model_path=_optional_path_setting(
+                env_key="MARGINALIA_WHISPER_CPP_MODEL_PATH",
+                config_data=whisper_cpp,
+                config_key="model_path",
+                base_dir=resolved_config.parent if resolved_config else None,
+            ),
+            whisper_cpp_language=os.getenv(
+                "MARGINALIA_WHISPER_CPP_LANGUAGE",
+                str(whisper_cpp.get("language", "it")),
+            ),
+            whisper_cpp_max_record_seconds=_int_setting(
+                env_key="MARGINALIA_WHISPER_CPP_MAX_RECORD_SECONDS",
+                config_data=whisper_cpp,
+                config_key="max_record_seconds",
+                fallback=120,
+            ),
             playback_command=os.getenv(
                 "MARGINALIA_PLAYBACK_COMMAND",
                 str(playback.get("command", "afplay")),
@@ -400,6 +425,22 @@ class AppSettings:
                     and vosk_package_available
                     and sounddevice_package_available
                     and bool(audio_input_probe["selected_device"]),
+                },
+                "whisper_cpp": {
+                    "executable": self.whisper_cpp_executable,
+                    "executable_available": shutil.which(self.whisper_cpp_executable) is not None,
+                    "model_path": self.whisper_cpp_model_path,
+                    "model_exists": bool(
+                        self.whisper_cpp_model_path and self.whisper_cpp_model_path.exists()
+                    ),
+                    "language": self.whisper_cpp_language,
+                    "max_record_seconds": self.whisper_cpp_max_record_seconds,
+                    "sounddevice_package_available": sounddevice_package_available,
+                    "ready": shutil.which(self.whisper_cpp_executable) is not None
+                    and bool(
+                        self.whisper_cpp_model_path and self.whisper_cpp_model_path.exists()
+                    )
+                    and sounddevice_package_available,
                 },
                 "playback": {
                     "command": self.playback_command,

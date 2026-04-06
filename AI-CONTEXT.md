@@ -218,6 +218,8 @@ Key settings:
 - `kokoro.default_voice` — Kokoro voice ID
 - `kokoro.python_executable` — separate Python 3.12 runtime for Kokoro
 - `vosk.model_path` — Vosk model directory
+- `whisper_cpp.executable` — whisper.cpp binary path
+- `whisper_cpp.model_path` — GGML model file path
 - `providers.allow_fallback` — whether to fall back to fake when real fails
 - `session_max_inactive_hours` — session expiry threshold (default 24)
 - `audio_cache_max_age_hours` — audio cache cleanup (default 72)
@@ -226,7 +228,7 @@ Key settings:
 
 ## Testing
 
-65 tests as of pre-Alpha 0.3. All deterministic, no network, no real audio.
+94 tests. All deterministic, no network, no real audio.
 
 ```bash
 make test          # or: .venv/bin/python -m pytest tests/ -x -q
@@ -286,8 +288,10 @@ Always run: pytest, ruff, mypy. All three must pass clean.
 - Vosk voice command recognition with language-specific grammar
 - Subprocess playback via `afplay`
 - Read-while-listen runtime loop
-- Voice command dispatch (pause, resume, repeat, chapter nav, stop, help)
+- Voice command dispatch (pause, resume, repeat, rewind, chapter nav, stop, help)
+- Reading progress tracking in status responses and events
 - Note capture with position anchoring
+- whisper.cpp dictation transcriber for real note dictation
 - Audio cache management
 - Runtime supervision with PID reuse protection and file locking
 - Session auto-expiry
@@ -295,7 +299,6 @@ Always run: pytest, ruff, mypy. All three must pass clean.
 
 ### Stubbed (fake providers, real interfaces)
 
-- Note dictation STT (returns fixed text)
 - Rewrite generation (returns deterministic draft)
 - Topic summarization (returns deterministic summary)
 - Desktop UI
