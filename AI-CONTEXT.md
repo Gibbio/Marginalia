@@ -228,7 +228,7 @@ Key settings:
 
 ## Testing
 
-94 tests. All deterministic, no network, no real audio.
+106 tests. All deterministic, no network, no real audio.
 
 ```bash
 make test          # or: .venv/bin/python -m pytest tests/ -x -q

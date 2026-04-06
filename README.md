@@ -21,103 +21,51 @@ tools. Marginalia collapses those workflows into a local-first engine that can:
 
 ## Installation
 
-### 1. Base environment
+### Quick setup (full stack)
 
-Requirements: Python 3.12+ and `make`.
+Requirements: macOS Apple Silicon, Python 3.12+, `make`, Homebrew.
 
 ```bash
 git clone https://github.com/Gibbio/Marginalia.git
 cd Marginalia
-make bootstrap
+make setup
 ```
 
-This creates a `.venv` virtualenv and installs the project in editable mode
-with dev dependencies (mypy, pytest, ruff).
-
-Running without any `--config` flag uses all-fake providers — no external
-dependencies needed. This is enough for development, tests, and smoke flows.
-
-### 2. Real providers (macOS Apple Silicon alpha path)
-
-To run the full read-while-listening loop with real audio you need three
-external providers. Each one is optional and falls back to fake if missing
-(unless `allow_fallback = false` in your config).
-
-#### Kokoro TTS (text-to-speech)
-
-Kokoro requires its own Python 3.12 virtualenv because `kokoro` is not yet
-compatible with Python 3.13+.
-
-```bash
-make bootstrap-kokoro
-```
-
-This creates `.venv-kokoro/` with `kokoro` and `soundfile`. The first
-synthesis run may download model weights from Hugging Face.
-
-Optionally install `espeak-ng` for better non-English phonemization:
-
-```bash
-brew install espeak-ng
-```
-
-#### Vosk command STT (speech-to-text)
-
-Install the Python packages in the main virtualenv:
-
-```bash
-.venv/bin/pip install vosk sounddevice
-```
-
-Download an Italian model (or whichever language you need):
-
-```bash
-mkdir -p .models/vosk
-cd .models/vosk
-curl -LO https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
-unzip vosk-model-small-it-0.22.zip
-cd ../..
-```
+This single command installs system dependencies (portaudio, espeak-ng, uv),
+creates the Python environment, sets up all real providers (Kokoro TTS, Vosk
+command STT, whisper.cpp dictation), downloads models, generates a starter
+config, and runs `doctor` to verify everything works.
 
 Your terminal app must have microphone permission on macOS.
 
-#### Whisper.cpp dictation STT (note dictation)
-
-whisper.cpp transcribes spoken notes using the Whisper model running
-locally on Apple Silicon (Metal acceleration).
+### Development-only setup (fake providers)
 
 ```bash
-make bootstrap-whisper
+make bootstrap
 ```
 
-This clones whisper.cpp, compiles it, and downloads the `base` GGML model
-(~150 MB). Then point your config at it:
+Creates `.venv` and installs the project with dev dependencies. No external
+deps needed — fake providers are used by default. Enough for development,
+tests, and smoke flows.
 
-```toml
-[whisper_cpp]
-executable = ".whisper-cpp/main"
-model_path = ".whisper-cpp/models/ggml-base.bin"
-language = "it"
-```
+### Manual provider setup
 
-Set `dictation_stt = "whisper-cpp"` in `[providers]`.
-
-#### Playback
-
-`afplay` ships with macOS — no additional installation needed.
-
-#### Optional: Piper TTS
-
-Piper is an alternative TTS adapter. Install the `piper` binary and download
-an ONNX voice model. See `docs/product/alpha-0.1-local-loop.md` for details.
-
-### 3. Configuration
-
-Copy and edit the example config to match your local paths:
+If you prefer to install providers individually:
 
 ```bash
-cp examples/alpha-local-config.toml my-config.toml
-# edit my-config.toml — update kokoro.python_executable, vosk.model_path, etc.
+make bootstrap-kokoro          # Kokoro TTS (separate Python 3.12 venv)
+make bootstrap-vosk            # Download Vosk Italian model
+make bootstrap-whisper         # Build whisper.cpp + download base model
+make bootstrap-runtime-deps    # Install vosk, sounddevice, numpy in main venv
+```
+
+### Configuration
+
+`make setup` generates `marginalia.toml` automatically. For manual config,
+copy and edit the example:
+
+```bash
+cp examples/alpha-local-config.toml marginalia.toml
 ```
 
 Key settings:
@@ -131,12 +79,12 @@ Key settings:
 | `vosk.model_path` | Path to the Vosk model directory |
 | `whisper_cpp.executable` | Path to whisper.cpp binary |
 | `whisper_cpp.model_path` | Path to GGML model file |
-| `providers.allow_fallback` | Set to `false` for real alpha runs |
+| `providers.allow_fallback` | Set to `false` for strict real-provider runs |
 
-### 4. Verify
+### Verify
 
 ```bash
-.venv/bin/python -m marginalia_cli --config my-config.toml doctor --json
+make doctor
 ```
 
 Do not proceed to the real loop until `provider_checks.kokoro.ready`,
@@ -145,16 +93,31 @@ Do not proceed to the real loop until `provider_checks.kokoro.ready`,
 
 ## Quick Start
 
+Interactive shell (recommended):
+
+```bash
+make shell
+```
+
+Then inside the shell:
+
+```
+marginalia> ingest path/to/document.md
+marginalia> play
+marginalia> status
+marginalia> quit
+```
+
 Fake-provider smoke flow (no external deps):
 
 ```bash
 make smoke
 ```
 
-Real alpha flow:
+Single-command real alpha flow:
 
 ```bash
-.venv/bin/python -m marginalia_cli --config my-config.toml play path/to/document.md --json
+.venv/bin/python -m marginalia_cli --config marginalia.toml play path/to/document.md --json
 ```
 
 What `play` does:
@@ -163,6 +126,7 @@ What `play` does:
 - starts playback automatically on the OS default output device
 - opens the microphone automatically on the OS default input device
 - keeps command listening active while reading
+- pre-synthesizes the next chunk in the background to eliminate gaps
 - advances chunk by chunk and chapter by chapter
 - exits on document completion, explicit `stop`, or `Ctrl-C`
 - cleans up any stale Marginalia runtime before starting
@@ -171,6 +135,7 @@ What `play` does:
 
 | Command | Description |
 |---|---|
+| `shell` | Interactive REPL with all commands below |
 | `play` | Start or resume reading a document |
 | `pause` | Pause playback |
 | `resume` | Resume playback |
@@ -178,7 +143,7 @@ What `play` does:
 | `restart-chapter` | Restart the current chapter |
 | `next-chapter` | Skip to the next chapter |
 | `stop` | Stop the reading session |
-| `status` | Show session state and playback info |
+| `status` | Show session state and reading progress |
 | `ingest` | Import a document without playing it |
 | `note-start` | Begin capturing a note |
 | `note-stop` | Stop capturing and anchor the note |
@@ -251,8 +216,10 @@ More detail in `docs/architecture/repository-structure.md`.
 ```bash
 make format      # ruff format + autofix
 make lint        # ruff check + mypy
-make test        # pytest
+make test        # pytest (106 tests)
 make smoke       # end-to-end smoke flow with fake providers
+make shell       # interactive Marginalia shell
+make doctor      # check provider readiness
 make run-cli-help
 ```
 
@@ -265,7 +232,11 @@ As of April 2026, the repository delivers a pre-Alpha 0.3 local reading loop:
 - SQLite-backed persistence with sequential file-based migrations (v4)
 - real Kokoro TTS, optional Piper TTS, Vosk command STT, whisper.cpp
   dictation STT behind ports
+- interactive shell with background RuntimeLoop thread
 - step-driven runtime loop with automatic playback and command listening
+- background pre-synthesis of the next chunk (eliminates inter-chunk gaps)
+- sentence-aware chunking with configurable target size
+- reading progress tracking (section/chunk fractions, overall progress)
 - dict-driven voice command dispatch with file-driven lexicons per language
 - PID reuse protection and advisory file locking on the runtime record
 - session auto-expiry for stale sessions
@@ -273,9 +244,9 @@ As of April 2026, the repository delivers a pre-Alpha 0.3 local reading loop:
 - structured logging for provider selection, process cleanup, and command
   dispatch
 - `READING_COMPLETED` and `COMMAND_DISPATCHED` domain events
+- `make setup` bootstraps the full stack in one command
 - fake provider fallbacks for testing and development
-- event-driven services for ingestion, sessioning, notes, rewrite, summary,
-  search, and voice control
+- 106 tests, clean lint and types
 
 ### Still stubbed
 
@@ -286,11 +257,11 @@ As of April 2026, the repository delivers a pre-Alpha 0.3 local reading loop:
 
 ## Roadmap
 
-Near term: document inspection commands, chunking improvements, real-provider
-packaging hardening, single runtime UX evaluation.
+Near term: document inspection commands, session management, doctor
+remediation hints, note review and editing.
 
-Later: desktop shell, local API, editor adapters, real local or hybrid speech
-and LLM providers.
+Later: EPUB/PDF ingestion, real LLM rewrite and summarization, desktop
+shell upgrade, editor adapters.
 
 See `docs/roadmap/milestones.md` and `docs/roadmap/backlog-seed.md`.
 
