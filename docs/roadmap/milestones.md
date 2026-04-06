@@ -105,8 +105,12 @@ Status on April 5, 2026: implemented.
 - background pre-synthesis of the next chunk to eliminate inter-chunk
   TTS latency gaps
 - 10 chunking tests, 10 progress and rewind tests, 9 whisper tests,
-  4 pre-synthesis tests
-- total test count: 98
+  4 pre-synthesis tests, 8 interactive shell tests
+- interactive `shell` command: `cmd.Cmd`-based REPL with play, pause,
+  resume, stop, repeat, rewind, next, restart, status, documents, notes,
+  ingest, note, and doctor — background `RuntimeLoop` thread keeps
+  playback running while the user types commands
+- total test count: 106
 
 Remaining hardening before V1:
 

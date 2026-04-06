@@ -29,10 +29,16 @@ Last updated: April 2026.
 
 Working:
 - Real read-while-listen loop with Kokoro TTS, Vosk commands, afplay
-- Voice commands: pause, resume, repeat, chapter nav, stop, help
+- Voice commands: pause, resume, repeat, rewind, chapter nav, stop, help
 - Document ingestion, session persistence, note anchoring
 - Runtime supervision with PID reuse protection and file locking
-- 65 tests, clean lint and types
+- Interactive shell (`marginalia shell`) with playback, navigation, status,
+  notes, ingest, and doctor — runs the RuntimeLoop in a background thread
+- Background pre-synthesis eliminates inter-chunk TTS gaps
+- Sentence-aware chunking with configurable target
+- Reading progress tracking (section/chunk fractions, overall progress)
+- Real whisper.cpp dictation adapter for note capture
+- 106 tests, clean lint and types
 
 Stubbed:
 - Note dictation (returns fixed text)

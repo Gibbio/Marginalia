@@ -399,6 +399,18 @@ def doctor(
     raise typer.Exit(code=0)
 
 
+@app.command("shell")
+def interactive_shell(
+    ctx: typer.Context,
+) -> None:
+    """Start an interactive Marginalia shell."""
+
+    from marginalia_cli.shell import MarginaliaShell
+
+    container = _container_from_context(ctx)
+    MarginaliaShell(container).cmdloop()
+
+
 def run() -> None:
     """Console script entrypoint."""
 
