@@ -33,12 +33,13 @@
      |            |
      | ports      | ports
      v            v
-+-----------+  +----------------+
-| SQLite    |  | Local Adapters |
-| storage   |  | fake STT/TTS   |
-| sessions  |  | fake playback  |
-| notes     |  | fake LLM       |
-+-----------+  +----------------+
++-----------+  +--------------------+
+| SQLite    |  | Local Adapters     |
+| storage   |  | Kokoro / Piper TTS |
+| sessions  |  | Vosk command STT   |
+| notes     |  | subprocess playback|
++-----------+  | fake fallbacks     |
+               +--------------------+
 
 Future, not implemented now:
 - desktop shell over the same application services

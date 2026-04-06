@@ -52,8 +52,8 @@ Real provider integrations are welcome later, but they must:
 - preserve local-first operation where possible
 - update `docs/architecture/provider-swappability.md` if the contract surface changes
 
-The repository now includes real local Piper, Vosk, and subprocess playback
-adapters for Alpha 0.1. Fake providers remain acceptable and expected for CI,
+The repository now includes real local Kokoro (default TTS), Piper (optional
+TTS), Vosk (command STT), and subprocess playback adapters. Fake providers remain acceptable and expected for CI,
 tests, and fallback behavior. They should remain deterministic,
 capability-declared, and clearly identified as fake in user-facing output.
 

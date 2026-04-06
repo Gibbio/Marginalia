@@ -51,13 +51,13 @@ The supported real-provider path is:
 
 ## Configuration
 
-Start from [examples/alpha-local-config.toml](/Users/mauriziogobbo/Marginalia/examples/alpha-local-config.toml).
+Start from [examples/alpha-local-config.toml](examples/alpha-local-config.toml).
 
 Important notes:
 
 - `command_language = "it"` selects the lexicon file used for spoken command matching.
 - command phrases come from `packages/infra/src/marginalia_infra/config/commands/<language>.toml`.
-- `default_voice` is the active Kokoro voice id in the default setup.
+- `kokoro.default_voice` is the active Kokoro voice id.
 - `kokoro.python_executable` should point to a dedicated Python 3.12 or 3.11 runtime.
 - `kokoro.lang_code = "i"` selects the Italian pipeline.
 - `piper.model_path` remains available if you want to switch back to Piper.
@@ -147,4 +147,4 @@ Manual command equivalents remain available:
 - Fake providers remain available and stay useful for deterministic development and smoke flows.
 
 For the repeatable manual runtime verification flow, use
-[docs/testing/alpha-0.1-runtime-loop.md](/Users/mauriziogobbo/Marginalia/docs/testing/alpha-0.1-runtime-loop.md).
+[docs/testing/alpha-0.1-runtime-loop.md](docs/testing/alpha-0.1-runtime-loop.md).

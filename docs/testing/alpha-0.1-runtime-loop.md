@@ -22,7 +22,7 @@ Verify the only supported Alpha 0.1 runtime mode:
 
 ## Recommended Config
 
-Use [examples/alpha-local-config.toml](/Users/mauriziogobbo/Marginalia/examples/alpha-local-config.toml).
+Use [examples/alpha-local-config.toml](examples/alpha-local-config.toml).
 
 Important checks:
 

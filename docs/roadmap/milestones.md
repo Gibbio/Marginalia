@@ -84,7 +84,17 @@ Status on April 5, 2026: implemented.
 - added 12 new tests covering: completion vs stop distinction, help intent,
   alias resolution, restart after completion, status truthfulness, provider
   capability reporting, fallback visibility
-- total test count: 60
+- PID reuse protection: runtime supervisor records OS process start time and
+  skips termination when start time mismatches
+- advisory file locking (`fcntl.flock`) on the runtime JSON to prevent
+  concurrent CLI races
+- session auto-expiry: stale `is_active=1` sessions are deactivated on startup
+  when they exceed `session_max_inactive_hours` (default 24 h)
+- `_handled_commands` list capped at 1000 entries in `RuntimeLoop` to prevent
+  unbounded memory growth
+- 5 additional tests: session expiry, PID reuse protection, file locking
+  non-deadlock, command cap enforcement
+- total test count: 65
 
 Remaining hardening before V1:
 
