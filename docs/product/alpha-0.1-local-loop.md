@@ -1,5 +1,9 @@
 # Alpha 0.1 Local Loop
 
+> **Historical document.** This describes the Alpha 0.1 state completed in
+> early April 2026. The current state is pre-Alpha 0.3 — see
+> `docs/roadmap/milestones.md` and `NEXT.md` for up-to-date status.
+
 ## Goal
 
 Alpha 0.1 proves the narrow local loop on macOS Apple Silicon:

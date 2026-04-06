@@ -47,7 +47,8 @@ The current runtime is simple but real:
 
 ## What Is Implemented Now
 
-- document ingestion with markdown heading and paragraph chunk parsing
+- document ingestion with markdown heading and sentence-aware chunk parsing
+  (configurable `chunk_target_chars`)
 - normalized document persistence for documents, sections, and chunks
 - session creation and persistence with explicit `is_active` flag
 - persisted provider metadata and playback runtime metadata for the active
@@ -55,13 +56,17 @@ The current runtime is simple but real:
 - real local Kokoro synthesis to WAV artifacts by default, Piper as optional
   alternate adapter
 - real local command recognition through Vosk when configured
+- real local note dictation through whisper.cpp when configured
 - real local playback through `afplay` when configured
 - step-driven runtime loop decoupled from the CLI
+- interactive shell (`marginalia shell`) with background RuntimeLoop thread
 - signal handling for graceful shutdown during playback
 - pause and resume state transitions
-- repeat, chapter restart, chapter advance, stop, and bounded voice-command
-  loop commands
+- repeat, rewind, chapter restart, chapter advance, stop, help, and bounded
+  voice-command loop commands
 - automatic chunk and chapter progression until completion or stop
+- background pre-synthesis of the next chunk to eliminate inter-chunk TTS gaps
+- reading progress tracking (section/chunk fractions, overall progress)
 - note capture lifecycle with anchored notes
 - rewrite draft generation through a deterministic fake provider
 - topic summary generation through a deterministic fake provider
@@ -71,10 +76,10 @@ The current runtime is simple but real:
 - sequential file-based SQLite migrations
 - audio cache cleanup with configurable max age
 - structured logging with optional file handler
+- `make setup` bootstraps the full stack in one command
 
 ## What Is Still Stubbed
 
-- real note dictation STT
 - persistent event history or out-of-process subscribers
 - draft review workflows beyond generation
 - sentence-level playback tracking
