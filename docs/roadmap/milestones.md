@@ -102,8 +102,11 @@ Status on April 5, 2026: implemented.
 - chapter boundary logging in auto-advance
 - whisper.cpp dictation transcriber adapter with config, doctor check,
   bootstrap wiring, and `make bootstrap-whisper`
-- 10 chunking tests, 10 progress and rewind tests, 9 whisper tests
-- total test count: 94
+- background pre-synthesis of the next chunk to eliminate inter-chunk
+  TTS latency gaps
+- 10 chunking tests, 10 progress and rewind tests, 9 whisper tests,
+  4 pre-synthesis tests
+- total test count: 98
 
 Remaining hardening before V1:
 
