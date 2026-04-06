@@ -170,7 +170,7 @@ class AppSettings:
             ),
             default_voice=os.getenv(
                 "MARGINALIA_DEFAULT_VOICE",
-                str(config_data.get("default_voice", "if_sara")),
+                str(kokoro.get("default_voice", "if_sara")),
             ),
             kokoro_python_executable=os.getenv(
                 "MARGINALIA_KOKORO_PYTHON_EXECUTABLE",

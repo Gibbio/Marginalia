@@ -3,7 +3,6 @@ log_level = "INFO"
 database_path = ".marginalia/alpha.sqlite3"
 audio_cache_dir = ".marginalia/audio-cache"
 command_language = "it"
-default_voice = "im_nicola"
 
 [providers]
 command_stt = "vosk"
@@ -15,6 +14,7 @@ allow_fallback = false
 
 [kokoro]
 python_executable = "/Users/mauriziogobbo/Marginalia/.venv-kokoro/bin/python"
+default_voice = "im_nicola"
 lang_code = "i"
 speed = 1.0
 

@@ -135,14 +135,14 @@ Real alpha instructions live in
 
 Marginalia can run from environment variables or from an explicit TOML file.
 
-- `examples/local-config.toml` keeps the deterministic fake-provider setup
 - `examples/alpha-local-config.toml` shows the real local alpha path with
   Kokoro, `afplay`, and Vosk using the default OS audio devices
+- running without `--config` uses all-fake providers by default
 
 Example:
 
 ```bash
-.venv/bin/python -m marginalia_cli --config examples/local-config.toml doctor --json
+.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml doctor --json
 ```
 
 `doctor` reports:

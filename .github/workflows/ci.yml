@@ -38,5 +38,5 @@ jobs:
         run: |
           python -m marginalia_cli --help
           python -m marginalia_cli doctor --json
-          python -m marginalia_cli ingest examples/sample-document.txt --json
+          python -m marginalia_cli ingest examples/voice-test-it.txt --json
           python -m marginalia_cli status --json

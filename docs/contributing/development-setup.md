@@ -22,8 +22,8 @@ dependencies in editable mode.
 If you want a persistent local configuration file instead of environment
 variables:
 
-- start from `examples/local-config.toml` for the deterministic fake-provider path
 - start from `examples/alpha-local-config.toml` for the real Alpha 0.1 local loop
+- running without `--config` uses all-fake providers by default
 
 ## Daily Commands
 
@@ -67,7 +67,7 @@ The CLI `doctor` command reports the effective local configuration.
 Example:
 
 ```bash
-.venv/bin/python -m marginalia_cli --config examples/local-config.toml doctor --json
+.venv/bin/python -m marginalia_cli doctor --json
 ```
 
 `doctor` is currently the fastest way to validate:

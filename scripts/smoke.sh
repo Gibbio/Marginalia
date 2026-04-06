@@ -9,8 +9,8 @@ export MARGINALIA_PLAYBACK_PROVIDER="${MARGINALIA_PLAYBACK_PROVIDER:-fake}"
 export MARGINALIA_FAKE_PLAYBACK_AUTO_COMPLETE_POLLS="${MARGINALIA_FAKE_PLAYBACK_AUTO_COMPLETE_POLLS:-2}"
 
 .venv/bin/python -m marginalia_cli doctor --json
-.venv/bin/python -m marginalia_cli play examples/sample-document.txt --json
+.venv/bin/python -m marginalia_cli play examples/voice-test-it.txt --json
 .venv/bin/python -m marginalia_cli status --json
 MARGINALIA_FAKE_COMMANDS="" MARGINALIA_FAKE_PLAYBACK_AUTO_COMPLETE_POLLS=0 \
-  .venv/bin/python -m marginalia_cli play examples/sample-document.txt --json
+  .venv/bin/python -m marginalia_cli play examples/voice-test-it.txt --json
 .venv/bin/python -m marginalia_cli status --json
