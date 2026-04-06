@@ -9,6 +9,12 @@ semantic versioning once public releases begin.
 
 ### Added
 
+- interactive `shell` command: a `cmd.Cmd`-based REPL with play, pause,
+  resume, stop, repeat, rewind, next, restart, status, documents, notes,
+  ingest, note, and doctor commands — background `RuntimeLoop` thread
+  keeps playback running while accepting new commands
+- 8 new shell tests covering quit, exit, unknown commands, status,
+  pause delegation, doctor, ingest validation
 - `HELP` voice command intent with Italian (`aiuto`, `comandi`) and English
   (`help`, `commands`) phrases
 - stop aliases: `fermati` (Italian) and `halt` (English)
