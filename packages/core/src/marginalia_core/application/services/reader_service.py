@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from uuid import uuid4
 
@@ -57,6 +58,7 @@ class ReaderService:
         self._tts_provider_name = speech_synthesizer.describe_capabilities().provider_name
         self._command_provider_name = command_recognizer.describe_capabilities().provider_name
         self._playback_provider_name = playback_engine.describe_capabilities().provider_name
+        self._pre_synth_thread: threading.Thread | None = None
 
     def play(
         self,
@@ -759,6 +761,7 @@ class ReaderService:
         message: str,
         publish_started: bool,
     ) -> OperationResult:
+        self._wait_for_pre_synthesis()
         synthesis_result = self._speech_synthesizer.synthesize(
             SynthesisRequest(text=text_to_synthesize, voice=self._default_voice)
         )
@@ -767,6 +770,7 @@ class ReaderService:
             session.position,
             synthesis=synthesis_result,
         )
+        self._pre_synthesize_next_chunk(document, session)
         self._apply_playback_snapshot(session, playback_snapshot)
         session.voice = synthesis_result.voice
         session.tts_provider = synthesis_result.provider_name
@@ -867,6 +871,56 @@ class ReaderService:
             "chunks_read": chunks_read,
             "total_chunks": total_chunks,
         }
+
+    def _pre_synthesize_next_chunk(
+        self, document: Document, session: ReadingSession
+    ) -> None:
+        """Pre-synthesize the next chunk's audio in a background thread.
+
+        When the current chunk finishes, the next one's WAV is already cached
+        on disk, eliminating the inter-chunk gap caused by TTS latency.
+        """
+
+        section_index = session.position.section_index
+        chunk_index = session.position.chunk_index
+        current_section = document.get_section(section_index)
+        next_chunk_idx = chunk_index + 1
+
+        if next_chunk_idx < current_section.chunk_count:
+            text = current_section.get_chunk(next_chunk_idx).text
+        elif section_index + 1 < document.chapter_count:
+            next_section = document.get_section(section_index + 1)
+            if next_section.chunk_count > 0:
+                text = next_section.get_chunk(0).text
+            else:
+                return
+        else:
+            return  # end of document
+
+        if not text.strip():
+            return
+
+        voice = self._default_voice
+
+        def _synthesize() -> None:
+            try:
+                self._speech_synthesizer.synthesize(
+                    SynthesisRequest(text=text, voice=voice)
+                )
+                logger.debug("Pre-synthesized next chunk (%d chars)", len(text))
+            except Exception:
+                logger.debug("Pre-synthesis failed (non-fatal)", exc_info=True)
+
+        thread = threading.Thread(target=_synthesize, daemon=True)
+        thread.start()
+        self._pre_synth_thread = thread
+
+    def _wait_for_pre_synthesis(self) -> None:
+        """Wait for any pending background pre-synthesis to finish."""
+
+        if self._pre_synth_thread is not None and self._pre_synth_thread.is_alive():
+            self._pre_synth_thread.join(timeout=10.0)
+        self._pre_synth_thread = None
 
     def _mark_command(
         self,

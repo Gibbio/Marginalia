@@ -105,18 +105,20 @@ Completed April 2026.
 - Estimated time remaining deferred to a later step (requires playback
   timing instrumentation)
 
-## Step 5 — Playback Quality of Life [partial]
+## Step 5 — Playback Quality of Life [done]
 
-Completed April 2026 (REWIND command).
+Completed April 2026.
 
 - `REWIND` voice command intent: go back one chunk, crossing section
   boundaries when needed — Italian `indietro`/`precedente`, English
   `back`/`previous`
 - `previous_chunk()` method in `ReaderService`, wired into the dispatch table
-- 5 new rewind tests (within section, cross-section, document start, lexicon,
-  voice dispatch)
+- background pre-synthesis: after starting chunk N, chunk N+1 is
+  synthesized in a daemon thread — eliminates the inter-chunk TTS gap
+  (Kokoro file cache makes the next `synthesize()` call instant)
+- 5 rewind tests + 4 pre-synthesis tests
 
-Deferred to a later step (more invasive, not blocking):
+Deferred to a later step:
 - `speed` voice command to cycle playback speeds
 - configurable inter-chunk pause duration
 - context re-read on resume

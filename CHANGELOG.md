@@ -64,6 +64,11 @@ semantic versioning once public releases begin.
   base GGML model
 - 9 new whisper tests: capabilities, error paths, doctor section,
   bootstrap fallback/selection, default settings
+- background pre-synthesis: after starting playback of chunk N, the next
+  chunk's audio is synthesized in a daemon thread — when chunk N finishes,
+  the cached WAV is already on disk, eliminating the inter-chunk TTS gap
+- 4 new pre-synthesis tests: trigger, last-chunk no-op, cache reuse,
+  daemon thread
 
 ### Changed
 
