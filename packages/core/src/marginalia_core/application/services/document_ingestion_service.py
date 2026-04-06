@@ -19,9 +19,11 @@ class DocumentIngestionService:
         *,
         document_repository: DocumentRepository,
         event_publisher: EventPublisher,
+        chunk_target_chars: int = 300,
     ) -> None:
         self._document_repository = document_repository
         self._event_publisher = event_publisher
+        self._chunk_target_chars = chunk_target_chars
 
     def ingest_text_file(self, source_path: Path) -> OperationResult:
         if source_path.suffix.lower() not in {".md", ".markdown", ".txt"}:
@@ -33,7 +35,9 @@ class DocumentIngestionService:
         if not raw_text:
             return OperationResult.error("The source file is empty.")
 
-        document = build_document_outline(source_path, raw_text)
+        document = build_document_outline(
+            source_path, raw_text, chunk_target_chars=self._chunk_target_chars
+        )
         existing = self._document_repository.get_document(document.document_id)
         self._document_repository.save_document(document)
         self._event_publisher.publish(
