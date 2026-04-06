@@ -18,6 +18,8 @@ htmlcov/
 .marginalia/
 .models/
 .venv-kokoro/
+.whisper-cpp/
+marginalia.toml
 tmp/
 *.sqlite
 *.sqlite3
