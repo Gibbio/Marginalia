@@ -1,83 +1,203 @@
 # Marginalia
 
-Marginalia is a local AI-first voice reading and annotation engine. It is meant
-to read long-form text aloud, react to voice-oriented controls, capture notes
-anchored to the current reading location, and later help rewrite or summarize
-sections of a document.
+Marginalia is a local AI-first voice reading and annotation engine. It reads
+long-form text aloud, reacts to voice commands, captures notes anchored to the
+current reading position, and can later help rewrite or summarize sections of a
+document.
 
-The repository is intentionally structured as a production-minded monorepo. The
-first usable interface is a CLI, the core is Python, storage starts with
-SQLite, and speech plus LLM capabilities stay behind replaceable ports.
+The repository is structured as a production-minded monorepo. The first usable
+interface is a CLI, the core is Python, storage starts with SQLite, and speech
+plus LLM capabilities stay behind replaceable ports.
 
 ## Why It Exists
 
 Reading, listening, annotating, and revising are still split across too many
-tools. Marginalia is meant to collapse those workflows into a local-first
-engine that can:
+tools. Marginalia collapses those workflows into a local-first engine that can:
 
 - read a document like an audiobook
-- react to simple spoken control commands later
+- react to spoken control commands
 - attach dictated notes to the exact place where they were spoken
-- turn those notes into rewrites or summaries later
+- turn those notes into rewrites or summaries
 
-## Current Scope
+## Installation
 
-As of April 5, 2026, the repository delivers Alpha 0.2 of the local reading
-loop:
+### 1. Base environment
 
-- monorepo structure for long-term product development
-- Python core packages with clean architecture boundaries
-- CLI as the first usable interface
-- SQLite-backed local persistence with sequential file-based migrations (v4)
-- normalized document storage for documents, sections, and chunks
-- real local Kokoro TTS by default, optional Piper TTS, and Vosk command-STT adapters behind ports
-- local subprocess-backed playback for generated audio artifacts
-- step-driven runtime loop: `play` ingests or selects a file, starts reading
-  automatically, opens the microphone automatically, and keeps command
-  listening active until completion or explicit stop — the loop can be driven
-  by a CLI, a desktop timer, or an async wrapper
-- language-specific voice command lexicons loaded from TOML files
-- stale runtime/process cleanup before a new foreground reading session starts
-- signal handling (SIGINT/SIGTERM) for graceful shutdown during playback
-- explicit active session flag instead of implicit ordering
-- SQLite WAL mode and busy timeout for concurrent reader/writer safety
-- audio cache cleanup with configurable max age
-- structured logging with optional file output
-- fake provider fallbacks for testing and development
-- event-driven application services for ingestion, sessioning, notes, rewrite,
-  summary, search, and voice control
-- dict-driven voice command dispatch with file-driven lexicons per language
-- `HELP` voice command intent reporting available commands
-- `READING_COMPLETED` and `COMMAND_DISPATCHED` domain events for observability
-- structured logging for provider selection, process cleanup, and command dispatch
-- CI, devcontainer, smoke flow, and updated architecture documentation
+Requirements: Python 3.12+ and `make`.
 
-## Non-Goals For Now
+```bash
+git clone https://github.com/Gibbio/Marginalia.git
+cd Marginalia
+make bootstrap
+```
 
-- real desktop application implementation
-- concrete editor integrations such as Obsidian
-- network-distributed architecture or microservices
-- real note dictation STT
-- real rewrite or summarization provider integrations
-- HTTP or WebSocket APIs
+This creates a `.venv` virtualenv and installs the project in editable mode
+with dev dependencies (mypy, pytest, ruff).
 
-## Architecture Summary
+Running without any `--config` flag uses all-fake providers — no external
+dependencies needed. This is enough for development, tests, and smoke flows.
 
-Marginalia is structured as a lightweight modular monolith:
+### 2. Real providers (macOS Apple Silicon alpha path)
 
-- `packages/core` contains domain models, the session state machine,
-  application services, events, and provider/storage ports
-- `packages/adapters` contains deterministic fake provider implementations and
-  later real provider adapters
-- `packages/infra` contains configuration, logging, event bus wiring, and
-  SQLite repositories
-- `apps/cli` contains the Typer CLI and the composition root
+To run the full read-while-listening loop with real audio you need three
+external providers. Each one is optional and falls back to fake if missing
+(unless `allow_fallback = false` in your config).
+
+#### Kokoro TTS (text-to-speech)
+
+Kokoro requires its own Python 3.12 virtualenv because `kokoro` is not yet
+compatible with Python 3.13+.
+
+```bash
+make bootstrap-kokoro
+```
+
+This creates `.venv-kokoro/` with `kokoro` and `soundfile`. The first
+synthesis run may download model weights from Hugging Face.
+
+Optionally install `espeak-ng` for better non-English phonemization:
+
+```bash
+brew install espeak-ng
+```
+
+#### Vosk command STT (speech-to-text)
+
+Install the Python packages in the main virtualenv:
+
+```bash
+.venv/bin/pip install vosk sounddevice
+```
+
+Download an Italian model (or whichever language you need):
+
+```bash
+mkdir -p .models/vosk
+cd .models/vosk
+curl -LO https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
+unzip vosk-model-small-it-0.22.zip
+cd ../..
+```
+
+Your terminal app must have microphone permission on macOS.
+
+#### Playback
+
+`afplay` ships with macOS — no additional installation needed.
+
+#### Optional: Piper TTS
+
+Piper is an alternative TTS adapter. Install the `piper` binary and download
+an ONNX voice model. See `docs/product/alpha-0.1-local-loop.md` for details.
+
+### 3. Configuration
+
+Copy and edit the example config to match your local paths:
+
+```bash
+cp examples/alpha-local-config.toml my-config.toml
+# edit my-config.toml — update kokoro.python_executable, vosk.model_path, etc.
+```
+
+Key settings:
+
+| Setting | Purpose |
+|---|---|
+| `command_language` | Language for voice commands (`it`, `en`) |
+| `kokoro.python_executable` | Path to the Kokoro Python 3.12 runtime |
+| `kokoro.default_voice` | Kokoro voice id (e.g. `im_nicola`, `if_sara`) |
+| `kokoro.lang_code` | Kokoro language pipeline (`i` for Italian) |
+| `vosk.model_path` | Path to the Vosk model directory |
+| `providers.allow_fallback` | Set to `false` for real alpha runs |
+
+### 4. Verify
+
+```bash
+.venv/bin/python -m marginalia_cli --config my-config.toml doctor --json
+```
+
+Do not proceed to the real loop until `provider_checks.kokoro.ready`,
+`provider_checks.vosk.ready`, and `provider_checks.playback.ready` are all
+`true`.
+
+## Quick Start
+
+Fake-provider smoke flow (no external deps):
+
+```bash
+make smoke
+```
+
+Real alpha flow:
+
+```bash
+.venv/bin/python -m marginalia_cli --config my-config.toml play path/to/document.md --json
+```
+
+What `play` does:
+
+- ingests the file if it is a path on disk
+- starts playback automatically on the OS default output device
+- opens the microphone automatically on the OS default input device
+- keeps command listening active while reading
+- advances chunk by chunk and chapter by chapter
+- exits on document completion, explicit `stop`, or `Ctrl-C`
+- cleans up any stale Marginalia runtime before starting
+
+## CLI Commands
+
+| Command | Description |
+|---|---|
+| `play` | Start or resume reading a document |
+| `pause` | Pause playback |
+| `resume` | Resume playback |
+| `repeat` | Repeat the current chunk |
+| `restart-chapter` | Restart the current chapter |
+| `next-chapter` | Skip to the next chapter |
+| `stop` | Stop the reading session |
+| `status` | Show session state and playback info |
+| `ingest` | Import a document without playing it |
+| `note-start` | Begin capturing a note |
+| `note-stop` | Stop capturing and anchor the note |
+| `rewrite-current` | Generate a rewrite draft for the current section |
+| `summarize-topic` | Generate a topic summary |
+| `search-document` | Search document text |
+| `search-notes` | Search captured notes |
+| `doctor` | Report config, providers, and schema health |
+
+## Voice Commands
+
+The command vocabulary is loaded from language-specific TOML files under
+`packages/infra/src/marginalia_infra/config/commands/`.
+
+Italian (`it`):
+
+| Command | Phrases |
+|---|---|
+| Pause | `pausa` |
+| Resume | `continua`, `riprendi` |
+| Repeat | `ripeti` |
+| Next chapter | `capitolo successivo` |
+| Restart chapter | `ricomincia capitolo` |
+| Status | `stato` |
+| Stop | `stop`, `ferma`, `fermati` |
+| Help | `aiuto`, `comandi` |
+
+## Architecture
+
+Marginalia is a lightweight modular monolith:
+
+- **`packages/core`** — domain models, session state machine, application
+  services, events, and provider/storage ports
+- **`packages/adapters`** — deterministic fake providers and real provider
+  adapters (Kokoro, Piper, Vosk, subprocess playback)
+- **`packages/infra`** — configuration, logging, event bus, SQLite
+  repositories, and runtime supervision
+- **`apps/cli`** — Typer CLI and composition root
 
 The core never depends on editor APIs, concrete speech SDKs, or remote service
-contracts. Those concerns sit behind ports and can be replaced later without
+contracts. Those concerns sit behind ports and can be replaced without
 distorting the domain model.
-
-## Repository Layout
 
 ```text
 .
@@ -100,184 +220,55 @@ distorting the domain model.
 └── tests/
 ```
 
-More detail lives in `docs/architecture/repository-structure.md`.
+More detail in `docs/architecture/repository-structure.md`.
 
-## Local Setup
-
-Prerequisites:
-
-- Python 3.12+
-- `make`
-- for the real alpha path on macOS: a Kokoro Python runtime compatible with
-  Python `<3.13`, `afplay`, a Vosk model directory, and Python packages `vosk`
-  plus `sounddevice`
-
-Bootstrap a local environment:
+## Development
 
 ```bash
-make bootstrap
-```
-
-Useful commands:
-
-```bash
-make format
-make lint
-make test
-make smoke
+make format      # ruff format + autofix
+make lint        # ruff check + mypy
+make test        # pytest
+make smoke       # end-to-end smoke flow with fake providers
 make run-cli-help
 ```
 
-Real alpha instructions live in
-[`docs/product/alpha-0.1-local-loop.md`](docs/product/alpha-0.1-local-loop.md).
+See `docs/contributing/development-setup.md` for more.
 
-## Configuration
+## Current State
 
-Marginalia can run from environment variables or from an explicit TOML file.
+As of April 2026, the repository delivers a pre-Alpha 0.3 local reading loop:
 
-- `examples/alpha-local-config.toml` shows the real local alpha path with
-  Kokoro, `afplay`, and Vosk using the default OS audio devices
-- running without `--config` uses all-fake providers by default
+- SQLite-backed persistence with sequential file-based migrations (v4)
+- real Kokoro TTS, optional Piper TTS, Vosk command STT behind ports
+- step-driven runtime loop with automatic playback and command listening
+- dict-driven voice command dispatch with file-driven lexicons per language
+- PID reuse protection and advisory file locking on the runtime record
+- session auto-expiry for stale sessions
+- signal handling (SIGINT/SIGTERM) for graceful shutdown
+- structured logging for provider selection, process cleanup, and command
+  dispatch
+- `READING_COMPLETED` and `COMMAND_DISPATCHED` domain events
+- fake provider fallbacks for testing and development
+- event-driven services for ingestion, sessioning, notes, rewrite, summary,
+  search, and voice control
 
-Example:
-
-```bash
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml doctor --json
-```
-
-`doctor` reports:
-
-- resolved local paths
-- configured provider names
-- configured command language and lexicon path
-- provider capability metadata
-- readiness checks for Kokoro, Piper, Vosk, and playback
-- default input/output device visibility for the supported runtime path
-- SQLite schema version, profile, tables, and row counts
-
-## Current CLI Commands
-
-The CLI surface currently includes:
-
-- `ingest`
-- `play`
-- `pause`
-- `resume`
-- `repeat`
-- `restart-chapter`
-- `next-chapter`
-- `stop`
-- `note-start`
-- `note-stop`
-- `rewrite-current`
-- `summarize-topic`
-- `search-document`
-- `search-notes`
-- `status`
-- `doctor`
-
-Example Alpha 0.1 flow:
-
-```bash
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml doctor --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml play path/to/document.md --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml pause --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml resume --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml next-chapter --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml stop --json
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml status --json
-```
-
-## Single Runtime Mode
-
-Alpha 0.1 now supports one interactive runtime only:
-
-- provide a file path or stored document id to `play`
-- Marginalia ingests the file when needed
-- playback starts automatically on the OS default output device
-- microphone listening starts automatically on the OS default input device
-- command listening stays active while playback is ongoing
-- the document advances chunk by chunk and chapter by chapter until the end or `stop`
-- starting a new `play` cleans up any stale Marginalia runtime process first
-
-The command vocabulary is loaded from language-specific TOML files under
-`packages/infra/src/marginalia_infra/config/commands/`.
-
-The repeatable manual verification flow lives in
-[`docs/testing/alpha-0.1-runtime-loop.md`](docs/testing/alpha-0.1-runtime-loop.md).
-
-## What Is Real Now
-
-- document ingestion into SQLite with section and chunk parsing
-- normalized document persistence for documents, sections, and chunks
-- persisted reading session state changes across separate CLI invocations
-- persisted provider metadata, audio references, and playback process metadata
-- persisted runtime metadata for command listening, command language, runtime
-  pid, and startup cleanup summary
-- real local Kokoro synthesis to WAV artifacts when configured
-- optional real local Piper synthesis to WAV artifacts when configured
-- real local Vosk command recognition with a constrained language-specific
-  command lexicon when configured
-- local subprocess-backed playback control through the continuous `play`
-  runtime plus manual `pause`, `resume`, and `stop`
-- automatic chunk and chapter progression during the supported read+listen
-  runtime
-- startup cleanup of stale foreground runtime records before a new session
-  begins
-- dict-driven voice command dispatch — adding a new intent requires only an
-  enum member, a TOML phrase entry, and a dispatch table entry
-- `HELP` voice command intent reporting available commands in the active
-  language
-- `READING_COMPLETED` and `COMMAND_DISPATCHED` domain events for lifecycle
-  observability
-- structured logging for provider selection, process cleanup, command dispatch,
-  and session start/stop/completion
-- anchored note capture via explicit text or a fake dictation provider
-- deterministic rewrite draft generation with source anchor and provider
-  metadata
-- deterministic topic summarization with highlights and provider metadata
-- document and note search over local storage
-- `doctor` reporting for config, provider capabilities, and schema health
-- `status` reporting for session, playback projection, note counts, and latest
-  draft/note context
-- end-to-end smoke flow covering ingest, play, navigation, note capture,
-  rewrite, summary, search, and status
-
-## What Is Still Stubbed
+### Still stubbed
 
 - real note dictation STT
 - production rewrite and summarization providers
 - persistent event history outside the current process
 - sentence-level playback tracking
-- true ducking during simultaneous Bluetooth playback and microphone capture
 - desktop UI and editor adapters
 
-## Roadmap Summary
+## Roadmap
 
-Near term:
+Near term: document inspection commands, chunking improvements, real-provider
+packaging hardening, single runtime UX evaluation.
 
-- extend schema bootstrap into explicit migrations
-- improve chunking and reading progress heuristics
-- add document, note, and draft inspection commands
-- harden the real-provider path for more environments and better diagnostics
-- evaluate whether the single read-while-listening runtime is smooth enough to pursue beyond Alpha 0.1
-
-Later:
-
-- desktop shell
-- local API
-- editor adapters
-- real local or hybrid speech and LLM providers
+Later: desktop shell, local API, editor adapters, real local or hybrid speech
+and LLM providers.
 
 See `docs/roadmap/milestones.md` and `docs/roadmap/backlog-seed.md`.
-
-## Development Philosophy
-
-- local-first before networked
-- explicit architecture before speculative frameworks
-- fake adapters behind ports before real provider lock-in
-- documentation and ADRs as part of the product surface
-- small coherent changes with tests and docs updates
 
 ## License
 
