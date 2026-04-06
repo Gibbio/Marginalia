@@ -246,6 +246,73 @@ def test_runtime_service_restart_after_completed_session(tmp_path: Path) -> None
     )
 
 
+def test_runtime_supervisor_skips_termination_on_pid_reuse(tmp_path: Path) -> None:
+    """When the recorded PID's start time mismatches, cleanup removes the record without killing."""
+
+    runtime_supervisor = FileRuntimeSupervisor(tmp_path / "runtime" / "active-session.json")
+    import os
+
+    record = RuntimeSessionRecord(
+        process_id=os.getpid(),
+        session_id="old-session",
+        document_id="old-doc",
+        command_language="it",
+        process_start_time="FAKE_START_TIME_THAT_WILL_NOT_MATCH",
+    )
+    runtime_supervisor.activate(record)
+
+    report = runtime_supervisor.cleanup_existing_runtime(current_process_id=os.getpid() + 99999)
+
+    assert report.runtime_found is True
+    assert report.record_removed is True
+    assert len(report.terminated_process_ids) == 0
+    assert any("start time" in note for note in report.notes)
+
+
+def test_runtime_supervisor_file_locking_does_not_deadlock(tmp_path: Path) -> None:
+    """Sequential activate/cleanup/clear calls complete without deadlock."""
+
+    runtime_supervisor = FileRuntimeSupervisor(tmp_path / "runtime" / "active-session.json")
+    import os
+
+    record = RuntimeSessionRecord(
+        process_id=os.getpid(),
+        session_id="lock-test",
+        document_id="doc-1",
+        command_language="it",
+    )
+    runtime_supervisor.activate(record)
+    current = runtime_supervisor.current_runtime()
+    assert current is not None
+    assert current.session_id == "lock-test"
+
+    runtime_supervisor.clear(process_id=os.getpid())
+    assert runtime_supervisor.current_runtime() is None
+
+
+def test_handled_commands_capped_at_1000(tmp_path: Path) -> None:
+    """The _handled_commands list does not grow beyond 1000 entries."""
+
+    runtime_service, _, _, _ = _build_runtime_services(
+        tmp_path,
+        commands=tuple(["pausa", "continua"] * 600),
+        playback_auto_complete_after_snapshots=9999,
+    )
+    loop = runtime_service.create_loop()
+    start_result = loop.start(str(Path("tests/fixtures/sample_document.txt").resolve()))
+    assert start_result.status.value == "ok"
+
+    with loop:
+        steps = 0
+        while loop.step() is StepStatus.CONTINUE:
+            steps += 1
+            if steps > 1500:
+                loop.request_shutdown()
+                break
+
+    assert len(loop._handled_commands) <= 1000
+
+
 def test_status_truthfulness_after_completion(tmp_path: Path) -> None:
     """Status correctly reports IDLE/stopped/completed after document finishes."""
 

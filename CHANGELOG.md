@@ -21,6 +21,18 @@ semantic versioning once public releases begin.
 - 12 new tests: completion vs stop distinction, help intent dispatch, alias
   resolution (`fermati`, `halt`), restart after completion, status
   truthfulness, provider capability reporting, fallback visibility
+- PID reuse protection: runtime supervisor records OS process start time and
+  skips termination when start time mismatches (prevents killing unrelated
+  processes after PID recycling)
+- advisory file locking (`fcntl.flock`) on the runtime JSON to prevent
+  concurrent CLI invocations from racing on activate/cleanup/clear
+- session auto-expiry: stale `is_active=1` sessions are deactivated on
+  startup when they exceed `session_max_inactive_hours` (default 24 h,
+  configurable via `MARGINALIA_SESSION_MAX_INACTIVE_HOURS`)
+- `_handled_commands` list capped at 1000 entries in `RuntimeLoop` to
+  prevent unbounded memory growth during very long reading sessions
+- 5 new tests: session expiry (stale + recent), PID reuse protection,
+  file locking non-deadlock, command cap enforcement
 
 ### Changed
 

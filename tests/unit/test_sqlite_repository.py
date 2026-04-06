@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from marginalia_core.application.services.document_ingestion_service import (
@@ -167,3 +168,44 @@ def test_sqlite_session_round_trip_preserves_provider_runtime_metadata(tmp_path:
     assert restored.runtime_process_id == 9876
     assert restored.runtime_status == "active"
     assert restored.startup_cleanup_summary == "Terminated stale runtime pid 111."
+
+
+def test_deactivate_stale_sessions_expires_old_sessions(tmp_path: Path) -> None:
+    database = SQLiteDatabase(tmp_path / "marginalia.sqlite3")
+    database.initialize()
+    repository = SQLiteSessionRepository(database)
+
+    stale_session = ReadingSession(
+        session_id="stale-session",
+        document_id="doc-1",
+        state=ReaderState.READING,
+        playback_state=PlaybackState.PLAYING,
+        position=ReadingPosition(section_index=0, chunk_index=0),
+        updated_at=datetime.now() - timedelta(hours=48),
+    )
+    repository.save_session(stale_session)
+
+    count = repository.deactivate_stale_sessions(max_inactive_hours=24)
+
+    assert count == 1
+    assert repository.get_active_session() is None
+
+
+def test_deactivate_stale_sessions_preserves_recent_sessions(tmp_path: Path) -> None:
+    database = SQLiteDatabase(tmp_path / "marginalia.sqlite3")
+    database.initialize()
+    repository = SQLiteSessionRepository(database)
+
+    recent_session = ReadingSession(
+        session_id="recent-session",
+        document_id="doc-1",
+        state=ReaderState.READING,
+        playback_state=PlaybackState.PLAYING,
+        position=ReadingPosition(section_index=0, chunk_index=0),
+    )
+    repository.save_session(recent_session)
+
+    count = repository.deactivate_stale_sessions(max_inactive_hours=24)
+
+    assert count == 0
+    assert repository.get_active_session() is not None
