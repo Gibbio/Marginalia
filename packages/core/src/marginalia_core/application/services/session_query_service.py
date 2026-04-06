@@ -62,6 +62,12 @@ class SessionQueryService:
         latest_note = notes[-1] if notes else None
         latest_draft = drafts[0] if drafts else None
 
+        section_index = session.position.section_index
+        chunk_index = session.position.chunk_index
+        chunks_before = sum(
+            document.get_section(i).chunk_count for i in range(section_index)
+        )
+
         return OperationResult.ok(
             "Active session located.",
             data={
@@ -76,6 +82,14 @@ class SessionQueryService:
                     "anchor": session.position.anchor,
                     "section_title": current_section.title,
                     "chunk_text": current_chunk.text,
+                },
+                "progress": {
+                    "section_index": section_index,
+                    "section_count": document.chapter_count,
+                    "chunk_index": chunk_index,
+                    "section_chunk_count": current_section.chunk_count,
+                    "chunks_read": chunks_before + chunk_index,
+                    "total_chunks": document.total_chunk_count,
                 },
                 "playback": playback_snapshot,
                 "providers": {

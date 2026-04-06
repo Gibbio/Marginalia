@@ -81,6 +81,27 @@ cd ../..
 
 Your terminal app must have microphone permission on macOS.
 
+#### Whisper.cpp dictation STT (note dictation)
+
+whisper.cpp transcribes spoken notes using the Whisper model running
+locally on Apple Silicon (Metal acceleration).
+
+```bash
+make bootstrap-whisper
+```
+
+This clones whisper.cpp, compiles it, and downloads the `base` GGML model
+(~150 MB). Then point your config at it:
+
+```toml
+[whisper_cpp]
+executable = ".whisper-cpp/main"
+model_path = ".whisper-cpp/models/ggml-base.bin"
+language = "it"
+```
+
+Set `dictation_stt = "whisper-cpp"` in `[providers]`.
+
 #### Playback
 
 `afplay` ships with macOS — no additional installation needed.
@@ -108,6 +129,8 @@ Key settings:
 | `kokoro.default_voice` | Kokoro voice id (e.g. `im_nicola`, `if_sara`) |
 | `kokoro.lang_code` | Kokoro language pipeline (`i` for Italian) |
 | `vosk.model_path` | Path to the Vosk model directory |
+| `whisper_cpp.executable` | Path to whisper.cpp binary |
+| `whisper_cpp.model_path` | Path to GGML model file |
 | `providers.allow_fallback` | Set to `false` for real alpha runs |
 
 ### 4. Verify
@@ -177,6 +200,7 @@ Italian (`it`):
 | Pause | `pausa` |
 | Resume | `continua`, `riprendi` |
 | Repeat | `ripeti` |
+| Rewind | `indietro`, `precedente` |
 | Next chapter | `capitolo successivo` |
 | Restart chapter | `ricomincia capitolo` |
 | Status | `stato` |
@@ -239,7 +263,8 @@ See `docs/contributing/development-setup.md` for more.
 As of April 2026, the repository delivers a pre-Alpha 0.3 local reading loop:
 
 - SQLite-backed persistence with sequential file-based migrations (v4)
-- real Kokoro TTS, optional Piper TTS, Vosk command STT behind ports
+- real Kokoro TTS, optional Piper TTS, Vosk command STT, whisper.cpp
+  dictation STT behind ports
 - step-driven runtime loop with automatic playback and command listening
 - dict-driven voice command dispatch with file-driven lexicons per language
 - PID reuse protection and advisory file locking on the runtime record
@@ -254,7 +279,6 @@ As of April 2026, the repository delivers a pre-Alpha 0.3 local reading loop:
 
 ### Still stubbed
 
-- real note dictation STT
 - production rewrite and summarization providers
 - persistent event history outside the current process
 - sentence-level playback tracking

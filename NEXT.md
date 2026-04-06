@@ -91,34 +91,35 @@ Reduce friction for first-time real-provider setup on macOS.
 
 Size: small. Config and diagnostics only, no core changes.
 
-## Step 4 — Reading Progress
+## Step 4 — Reading Progress [done]
 
-Let the user know where they are in the document.
+Completed April 2026.
 
-- `status` should report reading progress: current section/chunk as a fraction
-  of the total (e.g. "Chapter 3/5, chunk 2/8")
-- `status` should report estimated time remaining if chunks have been timed
-  (track elapsed playback time per chunk in the session)
-- Add a `READING_PROGRESSED` event payload with section/chunk/total fields
-  (the event name already exists but the payload is minimal)
-- The runtime loop should log progress at chapter boundaries
+- `status`, `synchronize_active_session`, and voice-status responses include
+  a `progress` dict: `section_index/section_count`,
+  `chunk_index/section_chunk_count`, `chunks_read/total_chunks`
+- `READING_PROGRESSED` event enriched with `section_count`,
+  `section_chunk_count`, `chunks_read`, `total_chunks`
+- Chapter boundary logging in `advance_after_playback_completion()`
+- 5 new progress tests
+- Estimated time remaining deferred to a later step (requires playback
+  timing instrumentation)
 
-Size: small. Session metadata enrichment, no schema changes needed (use
-existing session fields).
+## Step 5 — Playback Quality of Life [partial]
 
-## Step 5 — Playback Quality of Life
+Completed April 2026 (REWIND command).
 
-Small improvements that make the listening experience less mechanical.
+- `REWIND` voice command intent: go back one chunk, crossing section
+  boundaries when needed — Italian `indietro`/`precedente`, English
+  `back`/`previous`
+- `previous_chunk()` method in `ReaderService`, wired into the dispatch table
+- 5 new rewind tests (within section, cross-section, document start, lexicon,
+  voice dispatch)
 
-- Add a `speed` voice command to cycle through playback speeds (1.0, 1.25,
-  1.5) — Kokoro already supports a speed parameter
-- Add a `REWIND` voice command intent to go back one chunk (like `repeat` but
-  one chunk behind the current position)
-- Configurable pause duration between chunks (default ~0.5s silence)
-- When `resume` is called, optionally re-read the last few words of the
-  previous chunk for context continuity
-
-Size: small-medium. New voice commands follow the established pattern.
+Deferred to a later step (more invasive, not blocking):
+- `speed` voice command to cycle playback speeds
+- configurable inter-chunk pause duration
+- context re-read on resume
 
 ## Step 6 — Session Management
 
@@ -134,23 +135,23 @@ Let the user manage sessions explicitly.
 
 Size: small. Query and lifecycle commands, no new domain concepts.
 
-## Step 7 — Real Note Dictation
+## Step 7 — Real Note Dictation [partial]
 
-Replace the fake dictation provider with real local speech-to-text.
+Completed April 2026 (whisper.cpp adapter).
 
-- Evaluate Whisper.cpp or faster-whisper as the dictation backend — both run
-  locally on Apple Silicon
-- The dictation port (`DictationTranscriber`) already exists — this is an
-  adapter, not an architecture change
-- `note-start` opens the microphone in dictation mode (longer capture, no
-  grammar constraint)
-- `note-stop` transcribes and anchors the note
-- The note should store both the transcript and the raw audio path for later
-  review
-- Test with the existing fake adapter, smoke-test with the real adapter
-- Document the dictation model setup in the README installation section
+- `WhisperCppDictationTranscriber` adapter: records from mic via
+  `sounddevice`, invokes whisper.cpp `main` binary, parses output
+- `[whisper_cpp]` config section with `executable`, `model_path`,
+  `language`, `max_record_seconds`
+- `doctor` reports whisper-cpp readiness
+- bootstrap wires `dictation_stt = "whisper-cpp"` with fallback
+- `make bootstrap-whisper` builds whisper.cpp and downloads the base model
+- 9 new tests
 
-Size: medium. New adapter, model setup, but the port and service already exist.
+Remaining:
+- Raw audio path storage for later review
+- Smoke-test with real hardware
+- README installation section update for whisper setup
 
 ## Step 8 — Note Review and Editing
 

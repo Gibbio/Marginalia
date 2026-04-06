@@ -94,14 +94,23 @@ Status on April 5, 2026: implemented.
   unbounded memory growth
 - 5 additional tests: session expiry, PID reuse protection, file locking
   non-deadlock, command cap enforcement
-- total test count: 65
+- sentence-aware chunking: long paragraphs split at punctuation, short ones
+  merged into reading-sized units (configurable `chunk_target_chars`)
+- reading progress tracking: `progress` dict in status/sync/events with
+  section and chunk fractions plus overall `chunks_read/total_chunks`
+- `REWIND` voice command intent (go back one chunk, crossing sections)
+- chapter boundary logging in auto-advance
+- whisper.cpp dictation transcriber adapter with config, doctor check,
+  bootstrap wiring, and `make bootstrap-whisper`
+- 10 chunking tests, 10 progress and rewind tests, 9 whisper tests
+- total test count: 94
 
 Remaining hardening before V1:
 
-- richer chunking and progress semantics
 - better document, note, and draft inspection commands
 - stronger real-provider install ergonomics and compatibility guidance
 - optional event persistence if it becomes operationally useful
+- playback speed cycling, inter-chunk pause, context re-read on resume
 
 ## V1 Usable CLI
 

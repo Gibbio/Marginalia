@@ -127,6 +127,7 @@ class ReaderService:
                     "section_title": section.title,
                     "chunk_text": chunk.text,
                 },
+                "progress": self._reading_progress(document, session),
                 "playback": playback_snapshot,
             },
         )
@@ -206,6 +207,12 @@ class ReaderService:
         next_section_index = session.position.section_index + 1
         if next_section_index < len(document.sections):
             session.position = ReadingPosition(section_index=next_section_index, chunk_index=0)
+            logger.info(
+                "Chapter boundary: advancing to section %d/%d (%s)",
+                next_section_index + 1,
+                document.chapter_count,
+                document.get_section(next_section_index).title,
+            )
             result = self._start_current_chunk(
                 session,
                 document,
@@ -390,6 +397,56 @@ class ReaderService:
             publish_started=False,
         )
 
+    def previous_chunk(
+        self,
+        *,
+        command_source: str = "cli",
+        recognized_command: str | None = None,
+    ) -> OperationResult:
+        """Go back one chunk, crossing into the previous section if needed."""
+
+        session = self._session_repository.get_active_session()
+        if session is None:
+            return OperationResult.error("No active reading session exists.")
+
+        document = self._document_repository.get_document(session.document_id)
+        if document is None:
+            return OperationResult.error("The active session references a missing document.")
+
+        self._synchronize_session_playback(session)
+
+        prev_chunk = session.position.chunk_index - 1
+        if prev_chunk >= 0:
+            session.position = ReadingPosition(
+                section_index=session.position.section_index,
+                chunk_index=prev_chunk,
+            )
+        elif session.position.section_index > 0:
+            prev_section = session.position.section_index - 1
+            last_chunk = document.get_section(prev_section).chunk_count - 1
+            session.position = ReadingPosition(
+                section_index=prev_section,
+                chunk_index=last_chunk,
+            )
+        else:
+            return OperationResult.error("Already at the beginning of the document.")
+
+        if session.state is not ReaderState.READING:
+            try:
+                self._state_machine.transition(session, ReaderState.READING)
+            except InvalidTransitionError as exc:
+                return OperationResult.error(str(exc))
+
+        return self._start_current_chunk(
+            session,
+            document,
+            command_name="rewind",
+            command_source=command_source,
+            recognized_command=recognized_command,
+            message="Moved to the previous chunk.",
+            publish_started=False,
+        )
+
     def restart_chapter(
         self,
         *,
@@ -433,6 +490,7 @@ class ReaderService:
                 "Session moved to the start of the current chapter.",
                 data={"session": session, "playback": playback_snapshot},
             )
+        progress = self._reading_progress(document, session)
         self._publish(
             EventName.CHAPTER_RESTARTED,
             session_id=session.session_id,
@@ -447,6 +505,10 @@ class ReaderService:
             section_index=session.position.section_index,
             chunk_index=session.position.chunk_index,
             anchor=session.position.anchor,
+            section_count=progress["section_count"],
+            section_chunk_count=progress["section_chunk_count"],
+            chunks_read=progress["chunks_read"],
+            total_chunks=progress["total_chunks"],
         )
         return result
 
@@ -494,6 +556,7 @@ class ReaderService:
                 "Session moved to the next chapter.",
                 data={"session": session, "playback": playback_snapshot},
             )
+        progress = self._reading_progress(document, session)
         self._publish(
             EventName.CHAPTER_ADVANCED,
             session_id=session.session_id,
@@ -508,6 +571,10 @@ class ReaderService:
             section_index=session.position.section_index,
             chunk_index=session.position.chunk_index,
             anchor=session.position.anchor,
+            section_count=progress["section_count"],
+            section_chunk_count=progress["section_chunk_count"],
+            chunks_read=progress["chunks_read"],
+            total_chunks=progress["total_chunks"],
         )
         return result
 
@@ -571,6 +638,7 @@ class ReaderService:
             VoiceCommandIntent.PAUSE: _wrap(self.pause),
             VoiceCommandIntent.RESUME: _wrap(self.resume),
             VoiceCommandIntent.REPEAT: _wrap(self.repeat_current_chunk),
+            VoiceCommandIntent.REWIND: _wrap(self.previous_chunk),
             VoiceCommandIntent.NEXT_CHAPTER: _wrap(self.next_chapter),
             VoiceCommandIntent.RESTART_CHAPTER: _wrap(self.restart_chapter),
             VoiceCommandIntent.STATUS: lambda r: self._voice_status(
@@ -619,6 +687,7 @@ class ReaderService:
                     "section_title": section.title,
                     "chunk_text": chunk.text,
                 },
+                "progress": self._reading_progress(document, session),
                 "playback": playback_snapshot,
             },
         )
@@ -737,6 +806,7 @@ class ReaderService:
                 document_id=session.document_id,
                 playback_state=playback_snapshot.state.value,
             )
+        progress = self._reading_progress(document, session)
         self._publish(
             EventName.READING_PROGRESSED,
             session_id=session.session_id,
@@ -744,6 +814,10 @@ class ReaderService:
             section_index=session.position.section_index,
             chunk_index=session.position.chunk_index,
             anchor=session.position.anchor,
+            section_count=progress["section_count"],
+            section_chunk_count=progress["section_chunk_count"],
+            chunks_read=progress["chunks_read"],
+            total_chunks=progress["total_chunks"],
         )
         return OperationResult.ok(
             message,
@@ -756,6 +830,7 @@ class ReaderService:
                 "rendered_char_count": len(text_to_synthesize),
                 "synthesis": synthesis_result,
                 "playback": playback_snapshot,
+                "progress": progress,
             },
         )
 
@@ -766,6 +841,32 @@ class ReaderService:
     ) -> tuple[DocumentSection, DocumentChunk]:
         section = document.get_section(session.position.section_index)
         return section, section.get_chunk(session.position.chunk_index)
+
+    @staticmethod
+    def _reading_progress(
+        document: Document,
+        session: ReadingSession,
+    ) -> dict[str, object]:
+        """Compute reading progress fractions for the current position."""
+
+        section_index = session.position.section_index
+        chunk_index = session.position.chunk_index
+        section_count = document.chapter_count
+        current_section = document.get_section(section_index)
+        section_chunk_count = current_section.chunk_count
+        chunks_before = sum(
+            document.get_section(i).chunk_count for i in range(section_index)
+        )
+        chunks_read = chunks_before + chunk_index
+        total_chunks = document.total_chunk_count
+        return {
+            "section_index": section_index,
+            "section_count": section_count,
+            "chunk_index": chunk_index,
+            "section_chunk_count": section_chunk_count,
+            "chunks_read": chunks_read,
+            "total_chunks": total_chunks,
+        }
 
     def _mark_command(
         self,

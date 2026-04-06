@@ -15,6 +15,7 @@ class VoiceCommandIntent(str, Enum):
     PAUSE = "pause"
     RESUME = "resume"
     REPEAT = "repeat"
+    REWIND = "rewind"
     NEXT_CHAPTER = "next-chapter"
     RESTART_CHAPTER = "restart-chapter"
     STATUS = "status"

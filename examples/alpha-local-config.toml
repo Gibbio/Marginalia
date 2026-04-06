@@ -6,7 +6,7 @@ command_language = "it"
 
 [providers]
 command_stt = "vosk"
-dictation_stt = "fake"
+dictation_stt = "whisper-cpp"
 tts = "kokoro"
 playback = "subprocess"
 llm = "fake"
@@ -33,6 +33,12 @@ timeout_seconds = 4.0
 # Optional overrides remain available only for troubleshooting.
 # input_device_name = "Desk Mic"
 # input_device_index = 1
+
+[whisper_cpp]
+executable = "whisper-cpp"
+# model_path = "/Users/you/whisper.cpp/models/ggml-base.bin"
+language = "it"
+max_record_seconds = 120
 
 [playback]
 command = "afplay"
