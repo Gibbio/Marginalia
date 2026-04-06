@@ -33,6 +33,7 @@ and clear documentation are non-negotiable.
 - Storage: SQLite with WAL mode
 - TTS: Kokoro (default), Piper (optional)
 - Command STT: Vosk
+- Dictation STT: whisper.cpp
 - Playback: `afplay` via subprocess
 - Testing: pytest
 - Linting: ruff
@@ -69,6 +70,7 @@ packages/infra/src/marginalia_infra/
 apps/cli/src/marginalia_cli/
     main.py         # Typer CLI entry point
     bootstrap.py    # Composition root — builds the entire object graph
+    shell.py        # Interactive cmd.Cmd REPL
 ```
 
 ### Dependency Rule
@@ -112,7 +114,7 @@ the only place where concrete implementations are wired together.
 
 | Service | Purpose |
 |---|---|
-| `ReaderService` | Session lifecycle: play, pause, resume, stop, repeat, chapter navigation, voice command dispatch |
+| `ReaderService` | Session lifecycle: play, pause, resume, stop, repeat, rewind, chapter navigation, voice command dispatch, background pre-synthesis, reading progress |
 | `RuntimeLoop` | Step-driven read-while-listen loop (`step()` returns `StepStatus`) |
 | `ReadingRuntimeService` | Thin wrapper that creates and drives a `RuntimeLoop` |
 | `DocumentIngestionService` | Parse and persist documents |
@@ -160,7 +162,16 @@ Each `step()` call:
 4. Dispatches the command through `ReaderService`
 
 The caller owns the loop driver — the CLI uses a `while` loop with signal
-handlers, a desktop app would use a timer.
+handlers, the interactive shell runs it in a background daemon thread, and
+a desktop app would use a timer.
+
+### Background Pre-Synthesis
+
+After starting playback of chunk N, `ReaderService` spawns a daemon thread
+to synthesize chunk N+1. When chunk N finishes, the next `synthesize()` call
+hits Kokoro's SHA1-based file cache and returns instantly — eliminating the
+inter-chunk TTS gap. The pre-synthesis thread is joined (with timeout) before
+each new synthesis to avoid races.
 
 ### Voice Command Dispatch
 
@@ -221,6 +232,7 @@ Key settings:
 - `whisper_cpp.executable` — whisper.cpp binary path
 - `whisper_cpp.model_path` — GGML model file path
 - `providers.allow_fallback` — whether to fall back to fake when real fails
+- `chunk_target_chars` — sentence-aware chunk target size (default 300)
 - `session_max_inactive_hours` — session expiry threshold (default 24)
 - `audio_cache_max_age_hours` — audio cache cleanup (default 72)
 
@@ -310,17 +322,19 @@ Always run: pytest, ruff, mypy. All three must pass clean.
 
 ## Roadmap — What Comes Next
 
-From `docs/roadmap/backlog-seed.md`, roughly in priority order:
+See `NEXT.md` for the full 18-step roadmap. Current priority order:
 
-1. **Document inspection commands** — let users list/inspect documents, notes,
-   drafts from the CLI without opening SQLite
-2. **Chunking improvements** — more deliberate than paragraph-only splitting
-3. **Single runtime UX evaluation** — is Bluetooth listening + continuous
-   command capture good enough?
-4. **Real provider packaging** — reduce setup friction, improve `doctor` hints
-5. **Event payload contracts** — stabilize before adding persistence
-6. **Draft review workflow** — list, retrieve, transition draft status
-7. **Command recognition robustness** — safe spoken variants, small grammar
+1. **Document browser and inspection** — browse a folder, pick a file to
+   play; `show-document`, `list-drafts`, `list-sessions` (Step 1)
+2. **Doctor remediation hints** — actionable messages instead of just flags
+   (Step 3)
+3. **Session management** — list, delete, resume sessions (Step 6)
+4. **Note recording UX** — audio cues, command stripping, post-note
+   workflow (keep/rewrite/discard) (Steps 7-8)
+5. **Document format support** — EPUB and PDF ingestion (Step 9)
+6. **Real LLM rewrite and summarization** — local or hybrid (Steps 10-12)
+7. **Rich TUI** — Textual upgrade with document text pane, reading
+   highlight, status bar (Step 15)
 
 ---
 
@@ -329,6 +343,7 @@ From `docs/roadmap/backlog-seed.md`, roughly in priority order:
 | What you need | Where to look |
 |---|---|
 | CLI entry point | `apps/cli/src/marginalia_cli/main.py` |
+| Interactive shell | `apps/cli/src/marginalia_cli/shell.py` |
 | Object graph wiring | `apps/cli/src/marginalia_cli/bootstrap.py` |
 | Session state machine | `packages/core/src/marginalia_core/domain/reading_session.py` |
 | Voice command routing | `packages/core/src/marginalia_core/application/command_router.py` |
@@ -338,6 +353,7 @@ From `docs/roadmap/backlog-seed.md`, roughly in priority order:
 | Domain events | `packages/core/src/marginalia_core/events/models.py` |
 | Real Kokoro adapter | `packages/adapters/src/marginalia_adapters/real/kokoro.py` |
 | Real Vosk adapter | `packages/adapters/src/marginalia_adapters/real/vosk.py` |
+| Real whisper.cpp adapter | `packages/adapters/src/marginalia_adapters/real/whisper_cpp.py` |
 | Fake adapters | `packages/adapters/src/marginalia_adapters/fake/` |
 | SQLite repositories | `packages/infra/src/marginalia_infra/storage/sqlite.py` |
 | SQL migrations | `packages/infra/src/marginalia_infra/storage/migrations/` |
@@ -348,6 +364,7 @@ From `docs/roadmap/backlog-seed.md`, roughly in priority order:
 | Changelog | `CHANGELOG.md` |
 | Architecture docs | `docs/architecture/` |
 | ADRs | `docs/adr/` |
+| Next steps roadmap | `NEXT.md` |
 | Backlog | `docs/roadmap/backlog-seed.md` |
 | Milestones | `docs/roadmap/milestones.md` |
 
