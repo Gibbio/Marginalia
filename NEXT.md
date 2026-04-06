@@ -56,7 +56,7 @@ Main rough edges:
 
 ---
 
-## Step 1 — CLI Inspection Commands [partial]
+## Step 1 — CLI Inspection and Document Browser [partial]
 
 Partially completed April 2026.
 
@@ -66,6 +66,10 @@ and `notes` (list notes for the active session). What remains:
 - `show-document <id>` — show document outline (sections and chunk counts)
 - `list-drafts <document-id>` — show rewrite drafts for a document
 - `list-sessions` — show recent sessions with state, document, last command
+- **Document browser:** `open` or `browse [directory]` shell command that
+  lists files in a folder (default: current dir or a configured library
+  path), lets the user pick by number, and auto-ingests + plays — replaces
+  the manual `ingest path/to/file.md` workflow
 - Add these as both shell commands and Typer subcommands
 - tests for each new command
 
@@ -163,13 +167,30 @@ the full bootstrap including whisper.cpp build and model download.
 - 9 new tests
 
 Remaining:
+- **Audio cues for note recording:** play a short tone (beep/chime) when
+  note-start begins recording and when note-stop ends it — the user needs
+  clear feedback that the mic is live. Use a bundled WAV file played through
+  the existing playback engine.
+- **Strip the stop command from transcription:** when the user says
+  "nota stop" or "note stop" to end dictation, the STT will capture that
+  phrase — detect and strip it from the transcript before saving.
+  Implementation depends on the STT provider: whisper.cpp returns full text,
+  so a simple suffix-strip against the command lexicon should work.
 - Raw audio path storage for later review
 - Smoke-test with real hardware
 
-## Step 8 — Note Review and Editing
+## Step 8 — Note Review and Post-Note Workflow
 
-Make captured notes actionable.
+Make captured notes actionable and give the user a choice after dictation.
 
+- **Post-note prompt:** after note-stop, show the transcript and ask the
+  user what to do:
+  - `keep` — save as a standalone anchored note (current behavior)
+  - `rewrite` — pass the note + current section to the rewrite service and
+    generate a rework draft that incorporates the note into the text
+  - `discard` — throw away the transcript
+  - In the shell this is an interactive prompt; via CLI flags (`--action
+    keep|rewrite|discard`) for scripted use
 - `show-note <id>` — display full note transcript with its anchor position
 - `edit-note <id> --transcript "..."` — correct a dictation mistake
 - `delete-note <id>` — remove a note
@@ -177,7 +198,7 @@ Make captured notes actionable.
 - Notes should display their position context: which section title and chunk
   excerpt they are anchored to
 
-Size: small. CLI surface and repository queries.
+Size: small-medium. CLI surface, repository queries, and post-note dispatch.
 
 ## Step 9 — Document Format Support
 
@@ -224,17 +245,26 @@ Make rewrite drafts more than a generated blob.
 
 Size: small. Status enum, CLI commands, repository queries.
 
-## Step 12 — Real Summarization
+## Step 12 — Real Summarization and Voice Search
 
-Replace the fake summarization provider with a real one.
+Replace the fake summarization provider with a real one and add
+voice-driven document discovery.
 
 - Reuse the same LLM backend from Step 10
 - The summary port (`TopicSummarizer`) already exists
 - Summary results should be persisted (currently transient) — add a `summaries`
   table via migration
 - `list-summaries <document-id>` and `show-summary <id>`
+- `summarize` shell command — summarize the current document or a specific
+  section using the real LLM provider
+- **Voice search by topic:** `search-topic` voice command or shell command
+  that records a short dictation (via the existing `DictationTranscriber`),
+  transcribes it, and runs a search across all documents and notes for
+  matching content — "find me the document about X" without typing
+- Voice search reuses the existing `SearchService` — the new part is
+  capturing the query by voice instead of keyboard
 
-Size: small-medium. New migration, adapter reuse, CLI surface.
+Size: medium. New migration, adapter reuse, voice-to-search pipeline.
 
 ## Step 13 — Event Persistence
 
@@ -261,21 +291,32 @@ Let Marginalia output be useful outside Marginalia.
 
 Size: small. Formatting and file output, no new domain logic.
 
-## Step 15 — Desktop Shell Spike
+## Step 15 — Rich Terminal UI (Textual)
 
-Upgrade the interactive shell or add a richer terminal UI.
+Upgrade the `cmd.Cmd` shell to a Textual TUI for a richer reading
+experience.
 
 The `cmd.Cmd`-based shell already provides a functional interactive
-experience. This step evaluates whether a richer UI is worth the cost:
+experience. This step upgrades it to a full terminal UI:
 
-- Evaluate Textual (terminal UI) as an upgrade path for the existing shell
-  — live-updating progress, split panes for status and commands
-- Alternatively, evaluate a lightweight native wrapper (e.g. Tauri with
-  a Python backend) if the terminal approach proves too limiting
+- **Document text pane:** show the full document text on screen. As
+  playback progresses, highlight the current chunk in a distinct color
+  (e.g. inverse or bold) and dim already-read chunks — the user always
+  sees where they are in the text
+- **Status bar (bottom):** persistent footer showing CPU usage, memory,
+  current chunk/section progress, playback state, provider info — similar
+  to Claude Code's status line ("Now using extra usage"). Updated in
+  real-time via the event bus
+- **Command input pane:** text input at the bottom for shell commands,
+  coexisting with the status bar
+- **Note recording indicator:** visual indicator (e.g. blinking "REC" in
+  the status bar) when note dictation is active
+- Evaluate Textual as the framework — it supports split panes, reactive
+  updates, and runs in any terminal
 - The `RuntimeLoop.step()` model already supports timer-driven callers
-- Voice commands continue through the microphone — the shell adds visual
+- Voice commands continue through the microphone — the TUI adds visual
   feedback, not new input methods
-- If Textual, keep it in `apps/cli/`; if native, add `apps/desktop/`
+- Keep it in `apps/cli/` as an upgrade to the existing shell
 
 Size: medium. Upgrade path from existing shell, core and services reused.
 
