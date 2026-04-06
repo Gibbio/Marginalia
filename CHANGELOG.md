@@ -13,6 +13,14 @@ semantic versioning once public releases begin.
   resume, stop, repeat, rewind, next, restart, status, documents, notes,
   ingest, note, and doctor commands — background `RuntimeLoop` thread
   keeps playback running while accepting new commands
+- `make setup` — single command that installs all system dependencies
+  (portaudio, espeak-ng, uv via Homebrew), Python environment, runtime
+  packages (vosk, sounddevice, numpy), Kokoro TTS, Vosk model, whisper.cpp,
+  generates a starter config, and runs doctor to verify
+- `make bootstrap-vosk` — downloads and extracts the Vosk Italian model
+- `make bootstrap-runtime-deps` — installs vosk, sounddevice, numpy in
+  the main venv
+- `make shell` / `make doctor` — convenience targets
 - 8 new shell tests covering quit, exit, unknown commands, status,
   pause delegation, doctor, ingest validation
 - `HELP` voice command intent with Italian (`aiuto`, `comandi`) and English

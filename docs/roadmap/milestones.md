@@ -110,6 +110,12 @@ Status on April 5, 2026: implemented.
   resume, stop, repeat, rewind, next, restart, status, documents, notes,
   ingest, note, and doctor — background `RuntimeLoop` thread keeps
   playback running while the user types commands
+- `make setup`: single command that bootstraps the entire system — Homebrew
+  deps (portaudio, espeak-ng, uv), Python venv, runtime packages (vosk,
+  sounddevice, numpy), Kokoro TTS, Vosk model, whisper.cpp, config
+  generation, and doctor verification
+- `make bootstrap-vosk` downloads and extracts the Vosk Italian model
+- `make shell` and `make doctor` convenience targets
 - total test count: 106
 
 Remaining hardening before V1:
