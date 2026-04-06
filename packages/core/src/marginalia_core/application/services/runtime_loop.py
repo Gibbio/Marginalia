@@ -214,16 +214,17 @@ class RuntimeLoop:
                 raw_text=capture.raw_text or capture.recognized_command,
             )
         )
-        self._handled_commands.append(
-            {
-                "recognized_command": capture.recognized_command,
-                "status": dispatch_result.status.value,
-                "message": dispatch_result.message,
-                "handled_command": dispatch_result.data.get("handled_command")
-                if dispatch_result.data
-                else None,
-            }
-        )
+        if len(self._handled_commands) < 1000:
+            self._handled_commands.append(
+                {
+                    "recognized_command": capture.recognized_command,
+                    "status": dispatch_result.status.value,
+                    "message": dispatch_result.message,
+                    "handled_command": dispatch_result.data.get("handled_command")
+                    if dispatch_result.data
+                    else None,
+                }
+            )
         logger.info(
             "Voice command: %s -> %s",
             capture.recognized_command,

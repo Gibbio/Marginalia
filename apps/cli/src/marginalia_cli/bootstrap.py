@@ -92,6 +92,12 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
     note_repository = SQLiteNoteRepository(database)
     draft_repository = SQLiteRewriteDraftRepository(database)
 
+    stale_count = session_repository.deactivate_stale_sessions(
+        max_inactive_hours=settings.session_max_inactive_hours,
+    )
+    if stale_count:
+        logger.info("Deactivated %d stale session(s)", stale_count)
+
     provider_checks = settings.doctor_report()["provider_checks"]
     command_lexicon = _load_runtime_command_lexicon(settings)
     runtime_supervisor = FileRuntimeSupervisor(settings.runtime_dir / "active-session.json")

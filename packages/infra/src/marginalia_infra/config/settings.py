@@ -53,6 +53,7 @@ class AppSettings:
     playback_command: str
     log_file: Path | None = None
     audio_cache_max_age_hours: int = 72
+    session_max_inactive_hours: int = 24
     config_path: Path | None = None
 
     @classmethod
@@ -255,6 +256,12 @@ class AppSettings:
                 config_data=config_data,
                 config_key="audio_cache_max_age_hours",
                 fallback=72,
+            ),
+            session_max_inactive_hours=_int_setting(
+                env_key="MARGINALIA_SESSION_MAX_INACTIVE_HOURS",
+                config_data=config_data,
+                config_key="session_max_inactive_hours",
+                fallback=24,
             ),
             config_path=resolved_config,
         )

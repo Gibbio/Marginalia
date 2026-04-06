@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import signal
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -25,20 +28,40 @@ class FileRuntimeSupervisor:
 
     def __init__(self, runtime_file: Path) -> None:
         self._runtime_file = runtime_file
+        self._lock_path = runtime_file.with_suffix(".lock")
+
+    @contextmanager
+    def _lock(self) -> Iterator[None]:
+        """Acquire an advisory file lock to prevent concurrent access."""
+
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = self._lock_path.open("w")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            fd.close()
 
     def activate(self, record: RuntimeSessionRecord) -> None:
-        self._runtime_file.parent.mkdir(parents=True, exist_ok=True)
-        payload = asdict(record)
-        payload["started_at"] = record.started_at.isoformat()
-        payload["working_directory"] = (
-            str(record.working_directory) if record.working_directory is not None else None
-        )
-        self._runtime_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        logger.info(
-            "Runtime record activated: pid=%d session=%s",
-            record.process_id,
-            record.session_id,
-        )
+        with self._lock():
+            self._runtime_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = asdict(record)
+            payload["started_at"] = record.started_at.isoformat()
+            payload["working_directory"] = (
+                str(record.working_directory) if record.working_directory is not None else None
+            )
+            payload["process_start_time"] = (
+                record.process_start_time or _process_start_time(record.process_id)
+            )
+            self._runtime_file.write_text(
+                json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+            )
+            logger.info(
+                "Runtime record activated: pid=%d session=%s",
+                record.process_id,
+                record.session_id,
+            )
 
     def current_runtime(self) -> RuntimeSessionRecord | None:
         if not self._runtime_file.exists():
@@ -50,6 +73,7 @@ class FileRuntimeSupervisor:
         try:
             started_at = datetime.fromisoformat(str(payload["started_at"]))
             working_directory = payload.get("working_directory")
+            raw_start_time = payload.get("process_start_time")
             return RuntimeSessionRecord(
                 process_id=int(payload["process_id"]),
                 session_id=str(payload["session_id"]),
@@ -60,14 +84,25 @@ class FileRuntimeSupervisor:
                 working_directory=(
                     Path(str(working_directory)) if working_directory not in {None, ""} else None
                 ),
+                process_start_time=(
+                    str(raw_start_time) if raw_start_time not in {None, ""} else None
+                ),
             )
         except (KeyError, TypeError, ValueError):
             return None
 
     def cleanup_existing_runtime(self, *, current_process_id: int) -> RuntimeCleanupReport:
+        with self._lock():
+            return self._cleanup_existing_runtime_locked(
+                current_process_id=current_process_id
+            )
+
+    def _cleanup_existing_runtime_locked(
+        self, *, current_process_id: int
+    ) -> RuntimeCleanupReport:
         record = self.current_runtime()
         if record is None:
-            self.clear()
+            self._clear_unlocked()
             logger.debug("No existing runtime record found during cleanup")
             return RuntimeCleanupReport(runtime_found=False, record_removed=False)
 
@@ -81,7 +116,7 @@ class FileRuntimeSupervisor:
         record_removed = False
         if record.process_id == current_process_id:
             logger.info("Cleanup: removing self-referential record for pid %d", record.process_id)
-            self.clear(process_id=record.process_id)
+            self._clear_unlocked(process_id=record.process_id)
             return RuntimeCleanupReport(
                 runtime_found=True,
                 record_removed=True,
@@ -91,12 +126,33 @@ class FileRuntimeSupervisor:
         if not _process_exists(record.process_id):
             logger.info("Cleanup: pid %d is no longer alive, removing record", record.process_id)
             notes.append("Removed a stale runtime record for a process that is no longer alive.")
-            self.clear(process_id=record.process_id)
+            self._clear_unlocked(process_id=record.process_id)
             return RuntimeCleanupReport(
                 runtime_found=True,
                 record_removed=True,
                 notes=tuple(notes),
             )
+
+        if record.process_start_time is not None:
+            current_start = _process_start_time(record.process_id)
+            if current_start is not None and current_start != record.process_start_time:
+                logger.warning(
+                    "Cleanup: pid %d start time mismatch (recorded=%s, actual=%s), "
+                    "likely PID reuse — skipping termination",
+                    record.process_id,
+                    record.process_start_time,
+                    current_start,
+                )
+                notes.append(
+                    f"Skipped terminating pid {record.process_id}: "
+                    "process start time does not match (likely PID reuse)."
+                )
+                self._clear_unlocked(process_id=record.process_id)
+                return RuntimeCleanupReport(
+                    runtime_found=True,
+                    record_removed=True,
+                    notes=tuple(notes),
+                )
 
         command_line = _process_command_line(record.process_id)
         if command_line and "marginalia" not in command_line.lower():
@@ -121,7 +177,7 @@ class FileRuntimeSupervisor:
                 )
                 logger.error("Cleanup: failed to terminate pid %d", record.process_id)
 
-        self.clear(process_id=record.process_id)
+        self._clear_unlocked(process_id=record.process_id)
         record_removed = True
         return RuntimeCleanupReport(
             runtime_found=True,
@@ -131,6 +187,10 @@ class FileRuntimeSupervisor:
         )
 
     def clear(self, *, process_id: int | None = None) -> None:
+        with self._lock():
+            self._clear_unlocked(process_id=process_id)
+
+    def _clear_unlocked(self, *, process_id: int | None = None) -> None:
         record = self.current_runtime()
         if record is not None and process_id is not None and record.process_id != process_id:
             return
@@ -182,6 +242,22 @@ def _process_command_line(process_id: int) -> str | None:
         return None
     command_line = completed.stdout.strip()
     return command_line or None
+
+
+def _process_start_time(process_id: int) -> str | None:
+    """Return the OS-reported launch time for a process, or None."""
+
+    try:
+        completed = subprocess.run(
+            ["ps", "-p", str(process_id), "-o", "lstart="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    start_time = completed.stdout.strip()
+    return start_time or None
 
 
 def _process_state(process_id: int) -> str | None:

@@ -484,6 +484,21 @@ class SQLiteSessionRepository(_SQLiteRepository):
         )
 
 
+    def deactivate_stale_sessions(self, *, max_inactive_hours: int) -> int:
+        """Mark sessions as inactive when they exceed the staleness threshold."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE sessions
+                SET is_active = 0
+                WHERE is_active = 1
+                  AND updated_at < datetime('now', ? || ' hours')
+                """,
+                (f"-{max_inactive_hours}",),
+            )
+            return cursor.rowcount
+
+
 class SQLiteNoteRepository(_SQLiteRepository):
     """SQLite storage for anchored notes."""
 

@@ -23,6 +23,7 @@ class RuntimeSessionRecord:
     started_at: datetime = field(default_factory=_utc_now)
     entrypoint: str = "play"
     working_directory: Path | None = None
+    process_start_time: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
