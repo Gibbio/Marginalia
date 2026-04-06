@@ -33,38 +33,40 @@ Working:
 - Document ingestion, session persistence, note anchoring
 - Runtime supervision with PID reuse protection and file locking
 - Interactive shell (`marginalia shell`) with playback, navigation, status,
-  notes, ingest, and doctor — runs the RuntimeLoop in a background thread
+  documents, notes, ingest, and doctor — runs the RuntimeLoop in a
+  background thread
 - Background pre-synthesis eliminates inter-chunk TTS gaps
-- Sentence-aware chunking with configurable target
+- Sentence-aware chunking with configurable target size
 - Reading progress tracking (section/chunk fractions, overall progress)
 - Real whisper.cpp dictation adapter for note capture
+- `make setup` bootstraps the full stack in one command (system deps,
+  Python venv, runtime packages, Kokoro, Vosk model, whisper.cpp, config)
 - 106 tests, clean lint and types
 
 Stubbed:
-- Note dictation (returns fixed text)
 - Rewrite and summary generation (fake providers)
 - Desktop UI, editor adapters
 
 Main rough edges:
-- Chunking is paragraph-only — long paragraphs produce awkward playback units
-- No way to inspect documents, notes, or drafts from the CLI
-- Real-provider setup requires too many manual steps
-- No progress indication during reading
-- No way to list or manage sessions
+- No dedicated inspection commands (`show-document`, `list-drafts`,
+  `list-sessions`) — basic `documents` and `notes` exist in the shell
+- Doctor output is readiness flags only — no remediation hints or checklist
+- No way to manage sessions (delete, resume a previous one)
+- Windows support not yet implemented (macOS-only)
 
 ---
 
-## Step 1 — CLI Inspection Commands
+## Step 1 — CLI Inspection Commands [partial]
 
-Make stored data accessible without opening SQLite.
+Partially completed April 2026.
 
-- `list-documents` — show ingested documents with title, section count, chunk
-  count, import date
+The interactive shell already provides `documents` (list ingested docs)
+and `notes` (list notes for the active session). What remains:
+
 - `show-document <id>` — show document outline (sections and chunk counts)
-- `list-notes <document-id>` — show anchored notes for a document
 - `list-drafts <document-id>` — show rewrite drafts for a document
 - `list-sessions` — show recent sessions with state, document, last command
-- output stays JSON-structured and script-friendly
+- Add these as both shell commands and Typer subcommands
 - tests for each new command
 
 Size: small. No new domain logic, only query paths and CLI surface.
@@ -81,18 +83,20 @@ Completed April 2026.
 - 10 new tests covering merge, split, mixed content, char offsets, edge cases
 - Existing 65 tests unaffected — section/chunk/anchor model unchanged
 
-## Step 3 — Provider Setup Ergonomics
+## Step 3 — Provider Setup Ergonomics [partial]
 
-Reduce friction for first-time real-provider setup on macOS.
+Partially completed April 2026.
+
+`make setup` now bootstraps the entire stack in one command (system deps,
+venv, runtime packages, all providers, config generation, doctor
+verification). What remains is improving the `doctor` output:
 
 - `doctor` should print actionable remediation hints, not just readiness flags
   (e.g. "run `make bootstrap-kokoro` to set up Kokoro TTS")
-- `doctor` should report the detected default audio input/output device names
-  clearly, not just indices
 - `doctor` should warn when `allow_fallback = true` and real providers are not
   ready (currently silent)
-- Add a `setup` section to `doctor` output: a checklist of what is ready and
-  what is missing, ordered by setup priority
+- Add a setup checklist to `doctor` output: what is ready and what is
+  missing, ordered by setup priority
 - Update `examples/alpha-local-config.toml` comments to explain each setting
 
 Size: small. Config and diagnostics only, no core changes.
@@ -133,19 +137,21 @@ Deferred to a later step:
 
 Let the user manage sessions explicitly.
 
-- `list-sessions` already added in Step 1 — extend it here
+- `list-sessions` — show recent sessions with state, document, progress
+  (prerequisite from Step 1)
 - `delete-session <id>` — deactivate and remove a session
 - `resume-session <id>` — switch the active session to a previous one
 - When starting `play` with no target and no active session, show a list of
   recent sessions the user can resume instead of just picking the latest
   document
-- Session history is useful even with a single-user CLI
+- Add as both shell commands and Typer subcommands
 
 Size: small. Query and lifecycle commands, no new domain concepts.
 
 ## Step 7 — Real Note Dictation [partial]
 
-Completed April 2026 (whisper.cpp adapter).
+Completed April 2026 (whisper.cpp adapter). `make setup` now handles
+the full bootstrap including whisper.cpp build and model download.
 
 - `WhisperCppDictationTranscriber` adapter: records from mic via
   `sounddevice`, invokes whisper.cpp `main` binary, parses output
@@ -159,7 +165,6 @@ Completed April 2026 (whisper.cpp adapter).
 Remaining:
 - Raw audio path storage for later review
 - Smoke-test with real hardware
-- README installation section update for whisper setup
 
 ## Step 8 — Note Review and Editing
 
@@ -258,18 +263,21 @@ Size: small. Formatting and file output, no new domain logic.
 
 ## Step 15 — Desktop Shell Spike
 
-Add a thin desktop interface without changing core assumptions.
+Upgrade the interactive shell or add a richer terminal UI.
 
-- Evaluate Textual (terminal UI) vs a lightweight native wrapper (e.g.
-  Tauri with a Python backend, or a simple Tkinter panel)
+The `cmd.Cmd`-based shell already provides a functional interactive
+experience. This step evaluates whether a richer UI is worth the cost:
+
+- Evaluate Textual (terminal UI) as an upgrade path for the existing shell
+  — live-updating progress, split panes for status and commands
+- Alternatively, evaluate a lightweight native wrapper (e.g. Tauri with
+  a Python backend) if the terminal approach proves too limiting
 - The `RuntimeLoop.step()` model already supports timer-driven callers
-- The shell should show: current document/section/chunk, playback state,
-  recent voice commands, reading progress
 - Voice commands continue through the microphone — the shell adds visual
   feedback, not new input methods
-- Keep it as a separate app in `apps/desktop/`
+- If Textual, keep it in `apps/cli/`; if native, add `apps/desktop/`
 
-Size: medium-large. New app surface, but core and services are reused as-is.
+Size: medium. Upgrade path from existing shell, core and services reused.
 
 ## Step 16 — Concurrent Playback and Dictation
 
@@ -320,6 +328,9 @@ These are conscious non-goals until the engine is mature:
 - **Web UI** — terminal or desktop only
 - **Streaming TTS** — chunk-based synthesis is fine for the current playback
   model; streaming adds complexity without clear UX benefit yet
+- **Windows support** — feasible (~half day, mostly infra layer: fcntl,
+  signal, process supervision, build scripts) but deferred until the
+  engine is mature on macOS
 
 ---
 
