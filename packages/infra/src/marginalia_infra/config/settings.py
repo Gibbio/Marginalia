@@ -54,6 +54,7 @@ class AppSettings:
     log_file: Path | None = None
     audio_cache_max_age_hours: int = 72
     session_max_inactive_hours: int = 24
+    chunk_target_chars: int = 300
     config_path: Path | None = None
 
     @classmethod
@@ -262,6 +263,12 @@ class AppSettings:
                 config_data=config_data,
                 config_key="session_max_inactive_hours",
                 fallback=24,
+            ),
+            chunk_target_chars=_int_setting(
+                env_key="MARGINALIA_CHUNK_TARGET_CHARS",
+                config_data=config_data,
+                config_key="chunk_target_chars",
+                fallback=300,
             ),
             config_path=resolved_config,
         )

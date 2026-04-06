@@ -33,6 +33,11 @@ semantic versioning once public releases begin.
   prevent unbounded memory growth during very long reading sessions
 - 5 new tests: session expiry (stale + recent), PID reuse protection,
   file locking non-deadlock, command cap enforcement
+- sentence-aware chunking: long paragraphs are split at punctuation
+  boundaries, short consecutive paragraphs are merged into reading-sized
+  units (configurable via `chunk_target_chars`, default 300)
+- 10 new chunking tests covering merge, split, mixed content, offsets,
+  edge cases, and the real voice-test document
 
 ### Changed
 

@@ -110,6 +110,7 @@ def build_container(config_path: Path | None = None, *, verbose: bool = False) -
     ingestion_service = DocumentIngestionService(
         document_repository=document_repository,
         event_publisher=event_bus,
+        chunk_target_chars=settings.chunk_target_chars,
     )
     reader_service = ReaderService(
         document_repository=document_repository,

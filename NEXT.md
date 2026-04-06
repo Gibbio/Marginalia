@@ -63,21 +63,17 @@ Make stored data accessible without opening SQLite.
 
 Size: small. No new domain logic, only query paths and CLI surface.
 
-## Step 2 — Smarter Chunking
+## Step 2 — Smarter Chunking [done]
 
-Make the reading unit more natural than a raw paragraph.
+Completed April 2026.
 
-- Split long paragraphs into sentence-aware chunks (use punctuation boundaries,
-  not NLP — keep it dependency-free)
-- Merge very short consecutive paragraphs into a single chunk when they fall
-  below a configurable minimum character threshold
-- Preserve the existing section/chunk/anchor model — this is a parser change,
-  not a schema change
-- The chunk is still the playback unit and the note anchor unit
-- Add a setting for target chunk size (e.g. `chunk_target_chars = 300`)
-- Tests comparing old and new chunking output on realistic documents
-
-Size: small-medium. Parser changes plus tests, no service or schema changes.
+- Long paragraphs (>1.5x target) split at sentence boundaries (`.!?…`)
+- Short consecutive fragments merged until they approach the target
+- `chunk_target_chars` setting (default 300, configurable via env or TOML)
+- Threaded through `AppSettings` → `DocumentIngestionService` →
+  `build_document_outline`
+- 10 new tests covering merge, split, mixed content, char offsets, edge cases
+- Existing 65 tests unaffected — section/chunk/anchor model unchanged
 
 ## Step 3 — Provider Setup Ergonomics
 
