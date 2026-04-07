@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
+from time import perf_counter
 
 from marginalia_backend.bootstrap import BackendContainer
 from marginalia_core.application.result import OperationResult, OperationStatus
 from marginalia_core.application.services.runtime_loop import RuntimeLoop, StepStatus
+
+logger = logging.getLogger(__name__)
 
 
 class BackendRuntimeManager:
@@ -22,6 +26,7 @@ class BackendRuntimeManager:
     def start_session(self, target: str | None) -> OperationResult:
         """Start a background reading runtime."""
 
+        started_at = perf_counter()
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return OperationResult.error("A reading session is already active.")
@@ -35,6 +40,16 @@ class BackendRuntimeManager:
             thread = threading.Thread(target=self._run_loop, daemon=True)
             thread.start()
             self._thread = thread
+            session = start_result.data.get("session")
+            resolved_target = start_result.data.get("target", {})
+            logger.info(
+                "timing runtime_start target=%s session=%s document=%s ingested_now=%s total_ms=%.2f",
+                target or "-",
+                getattr(session, "session_id", "-"),
+                getattr(session, "document_id", resolved_target.get("document_id", "-")),
+                resolved_target.get("ingested_now", False),
+                (perf_counter() - started_at) * 1000,
+            )
             return OperationResult.ok("Reading session started.", data=start_result.data)
 
     def stop_session(self) -> OperationResult:

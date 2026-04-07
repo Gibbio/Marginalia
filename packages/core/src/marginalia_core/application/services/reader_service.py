@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from time import perf_counter
 from uuid import uuid4
 
 from marginalia_core.application.command_router import (
@@ -881,16 +882,21 @@ class ReaderService:
         message: str,
         publish_started: bool,
     ) -> OperationResult:
-        self._wait_for_pre_synthesis()
+        operation_started_at = perf_counter()
+        wait_pre_synth_ms = self._wait_for_pre_synthesis()
+        synth_started_at = perf_counter()
         synthesis_result = self._speech_synthesizer.synthesize(
             SynthesisRequest(text=text_to_synthesize, voice=self._default_voice)
         )
+        synth_ms = (perf_counter() - synth_started_at) * 1000
+        playback_started_at = perf_counter()
         playback_snapshot = self._playback_engine.start(
             document,
             session.position,
             synthesis=synthesis_result,
         )
-        self._pre_synthesize_next_chunk(document, session)
+        playback_start_ms = (perf_counter() - playback_started_at) * 1000
+        pre_synthesized_anchor = self._pre_synthesize_next_chunk(document, session)
         self._apply_playback_snapshot(session, playback_snapshot)
         session.voice = synthesis_result.voice
         session.tts_provider = synthesis_result.provider_name
@@ -943,6 +949,27 @@ class ReaderService:
             chunks_read=progress["chunks_read"],
             total_chunks=progress["total_chunks"],
         )
+        timings = {
+            "wait_pre_synth_ms": round(wait_pre_synth_ms, 2),
+            "synthesis_ms": round(synth_ms, 2),
+            "playback_start_ms": round(playback_start_ms, 2),
+            "total_ms": round((perf_counter() - operation_started_at) * 1000, 2),
+        }
+        logger.info(
+            "timing playback_start session=%s document=%s anchor=%s chars=%d command=%s "
+            "wait_pre_synth_ms=%.2f synthesis_ms=%.2f playback_start_ms=%.2f total_ms=%.2f "
+            "pre_synth_next=%s",
+            session.session_id,
+            session.document_id,
+            session.position.anchor,
+            len(text_to_synthesize),
+            command_name,
+            timings["wait_pre_synth_ms"],
+            timings["synthesis_ms"],
+            timings["playback_start_ms"],
+            timings["total_ms"],
+            pre_synthesized_anchor or "-",
+        )
         return OperationResult.ok(
             message,
             data={
@@ -955,6 +982,8 @@ class ReaderService:
                 "synthesis": synthesis_result,
                 "playback": playback_snapshot,
                 "progress": progress,
+                "timings": timings,
+                "pre_synthesized_anchor": pre_synthesized_anchor,
             },
         )
 
@@ -994,7 +1023,7 @@ class ReaderService:
 
     def _pre_synthesize_next_chunk(
         self, document: Document, session: ReadingSession
-    ) -> None:
+    ) -> str | None:
         """Pre-synthesize the next chunk's audio in a background thread.
 
         When the current chunk finishes, the next one's WAV is already cached
@@ -1007,18 +1036,26 @@ class ReaderService:
         next_chunk_idx = chunk_index + 1
 
         if next_chunk_idx < current_section.chunk_count:
+            next_position = ReadingPosition(
+                section_index=section_index,
+                chunk_index=next_chunk_idx,
+            )
             text = current_section.get_chunk(next_chunk_idx).text
         elif section_index + 1 < document.chapter_count:
             next_section = document.get_section(section_index + 1)
             if next_section.chunk_count > 0:
+                next_position = ReadingPosition(
+                    section_index=section_index + 1,
+                    chunk_index=0,
+                )
                 text = next_section.get_chunk(0).text
             else:
-                return
+                return None
         else:
-            return  # end of document
+            return None  # end of document
 
         if not text.strip():
-            return
+            return None
 
         voice = self._default_voice
 
@@ -1034,13 +1071,16 @@ class ReaderService:
         thread = threading.Thread(target=_synthesize, daemon=True)
         thread.start()
         self._pre_synth_thread = thread
+        return next_position.anchor
 
-    def _wait_for_pre_synthesis(self) -> None:
+    def _wait_for_pre_synthesis(self) -> float:
         """Wait for any pending background pre-synthesis to finish."""
 
+        started_at = perf_counter()
         if self._pre_synth_thread is not None and self._pre_synth_thread.is_alive():
             self._pre_synth_thread.join(timeout=10.0)
         self._pre_synth_thread = None
+        return (perf_counter() - started_at) * 1000
 
     def _mark_command(
         self,

@@ -22,12 +22,6 @@ pub struct SuggestionItem {
 }
 
 #[derive(Clone)]
-pub struct LocalMarkdownFile {
-    pub name: String,
-    pub path: PathBuf,
-}
-
-#[derive(Clone)]
 struct IngestPathCandidate {
     path: PathBuf,
     is_directory: bool,
@@ -104,8 +98,9 @@ pub struct App {
     pub session_snapshot: Option<SessionSnapshot>,
     pub document_view: Option<DocumentView>,
     pub library_documents: Vec<DocumentListItem>,
-    pub local_markdown_files: Vec<LocalMarkdownFile>,
     pub messages: VecDeque<String>,
+    document_scroll: u16,
+    last_backend_log_sequence: u64,
     selected_document_id: Option<String>,
     history: VecDeque<String>,
     history_index: Option<usize>,
@@ -126,8 +121,9 @@ impl App {
             session_snapshot: None,
             document_view: None,
             library_documents: Vec::new(),
-            local_markdown_files: Vec::new(),
             messages: VecDeque::new(),
+            document_scroll: 0,
+            last_backend_log_sequence: 0,
             selected_document_id: None,
             history: VecDeque::new(),
             history_index: None,
@@ -138,6 +134,7 @@ impl App {
             suggestion_index: 0,
         };
         app.refresh()?;
+        app.poll_backend_logs();
         app.push_message("Connected to Marginalia backend. Type /play <path|id>.".to_string());
         Ok(app)
     }
@@ -145,6 +142,16 @@ impl App {
     pub fn refresh_if_due(&mut self) {
         if self.last_refresh.elapsed() >= Duration::from_millis(750) {
             let _ = self.refresh();
+        }
+    }
+
+    pub fn poll_backend_logs(&mut self) {
+        let entries = self
+            .backend
+            .recent_stderr_entries(self.last_backend_log_sequence);
+        for entry in entries {
+            self.last_backend_log_sequence = entry.sequence;
+            self.push_message(entry.line);
         }
     }
 
@@ -159,8 +166,8 @@ impl App {
             self.selected_document_id = None;
             self.document_view = self.backend.get_document_view(None)?;
         }
-        self.local_markdown_files = discover_markdown_files();
         self.last_refresh = Instant::now();
+        self.poll_backend_logs();
         Ok(())
     }
 
@@ -313,8 +320,7 @@ impl App {
     pub fn command_hint(&self) -> String {
         let input = self.input.trim();
         if input.is_empty() {
-            return "Type / to explore commands. Empty input: arrows navigate. Ctrl+P/Ctrl+N browse history."
-                .to_string();
+            return "Type / to explore commands. Empty input: arrows navigate, PageUp/PageDown scroll document, Home/End jump. Ctrl+P/Ctrl+N browse history.".to_string();
         }
         if !input.starts_with('/') {
             return "Commands must start with /.".to_string();
@@ -468,7 +474,7 @@ impl App {
 
     fn push_message(&mut self, message: String) {
         self.messages.push_back(message);
-        while self.messages.len() > 8 {
+        while self.messages.len() > 200 {
             self.messages.pop_front();
         }
     }
@@ -523,6 +529,45 @@ impl App {
 
     pub fn navigate_next_chapter(&mut self) {
         self.run_shortcut_command("next_chapter");
+    }
+
+    pub fn scroll_document_up(&mut self, amount: u16) {
+        self.document_scroll = self.document_scroll.saturating_sub(amount);
+    }
+
+    pub fn scroll_document_down(&mut self, amount: u16) {
+        self.document_scroll = self.document_scroll.saturating_add(amount);
+    }
+
+    pub fn scroll_document_to_top(&mut self) {
+        self.document_scroll = 0;
+    }
+
+    pub fn scroll_document_to_bottom(&mut self) {
+        self.document_scroll = u16::MAX;
+    }
+
+    pub fn document_scroll(&self) -> u16 {
+        self.document_scroll
+    }
+
+    pub fn sync_document_scroll(
+        &mut self,
+        active_line_index: Option<usize>,
+        viewport_height: u16,
+        total_lines: usize,
+    ) {
+        let max_scroll = total_lines.saturating_sub(viewport_height as usize) as u16;
+        self.document_scroll = self.document_scroll.min(max_scroll);
+        let Some(active_line_index) = active_line_index else {
+            return;
+        };
+        let active_line = active_line_index as u16;
+        let viewport_bottom = self.document_scroll.saturating_add(viewport_height);
+        if active_line < self.document_scroll || active_line >= viewport_bottom {
+            let preferred_offset = viewport_height / 3;
+            self.document_scroll = active_line.saturating_sub(preferred_offset).min(max_scroll);
+        }
     }
 
     fn suggestions(&self) -> Vec<SuggestionItem> {
@@ -644,33 +689,6 @@ fn longest_common_prefix(input: &str, matches: &[SuggestionItem]) -> Option<Stri
     } else {
         None
     }
-}
-
-fn discover_markdown_files() -> Vec<LocalMarkdownFile> {
-    let Ok(current_dir) = std::env::current_dir() else {
-        return Vec::new();
-    };
-    let Ok(entries) = fs::read_dir(current_dir) else {
-        return Vec::new();
-    };
-
-    let mut files: Vec<LocalMarkdownFile> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_file())
-        .filter(|path| {
-            path.extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
-        })
-        .filter_map(|path| {
-            let name = path.file_name()?.to_str()?.to_string();
-            Some(LocalMarkdownFile { name, path })
-        })
-        .collect();
-
-    files.sort_by(|left, right| left.name.cmp(&right.name));
-    files
 }
 
 fn discover_ingestable_files(argument_prefix: &str) -> Vec<IngestPathCandidate> {

@@ -13,17 +13,20 @@ use std::time::Duration;
 const PROTOCOL_VERSION: u32 = 1;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[derive(Debug, Clone)]
+pub struct BackendLogEntry {
+    pub sequence: u64,
+    pub line: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ResponseEnvelope {
     pub status: String,
-    pub name: String,
     pub message: String,
     #[serde(default)]
     pub payload: Value,
     #[serde(default)]
     pub request_id: Option<String>,
-    #[serde(default)]
-    pub protocol_version: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -75,7 +78,6 @@ pub struct DocumentChunkView {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DocumentSectionView {
-    pub chunk_count: u32,
     pub chunks: Vec<DocumentChunkView>,
     pub index: u32,
     pub title: String,
@@ -109,7 +111,7 @@ pub struct BackendClient {
     response_rx: mpsc::Receiver<String>,
     reader_thread: Option<JoinHandle<()>>,
     request_counter: u64,
-    stderr_lines: Arc<Mutex<VecDeque<String>>>,
+    stderr_lines: Arc<Mutex<VecDeque<BackendLogEntry>>>,
     stderr_thread: Option<JoinHandle<()>>,
 }
 
@@ -151,7 +153,7 @@ impl BackendClient {
             .stderr
             .take()
             .ok_or_else(|| "Backend stderr pipe unavailable.".to_string())?;
-        let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(24)));
+        let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(256)));
         let stderr_thread = Some(spawn_stderr_collector(stderr, Arc::clone(&stderr_lines)));
         let (response_tx, response_rx) = mpsc::channel();
         let reader_thread = Some(spawn_stdout_reader(stdout, response_tx));
@@ -225,6 +227,17 @@ impl BackendClient {
     ) -> Result<ResponseEnvelope, String> {
         let response = self.send_request("command", name, payload)?;
         Ok(response)
+    }
+
+    pub fn recent_stderr_entries(&self, after_sequence: u64) -> Vec<BackendLogEntry> {
+        let Ok(lines) = self.stderr_lines.lock() else {
+            return Vec::new();
+        };
+        lines
+            .iter()
+            .filter(|entry| entry.sequence > after_sequence)
+            .cloned()
+            .collect()
     }
 
     fn send_request(
@@ -312,7 +325,11 @@ impl BackendClient {
         let Ok(lines) = self.stderr_lines.lock() else {
             return String::new();
         };
-        lines.iter().cloned().collect::<Vec<_>>().join(" | ")
+        lines
+            .iter()
+            .map(|entry| entry.line.clone())
+            .collect::<Vec<_>>()
+            .join(" | ")
     }
 }
 
@@ -354,20 +371,25 @@ fn spawn_stdout_reader(stdout: ChildStdout, tx: mpsc::Sender<String>) -> JoinHan
 
 fn spawn_stderr_collector(
     stderr: ChildStderr,
-    stderr_lines: Arc<Mutex<VecDeque<String>>>,
+    stderr_lines: Arc<Mutex<VecDeque<BackendLogEntry>>>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
+        let mut sequence = 0_u64;
         for line in reader.lines().map_while(Result::ok) {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
+            sequence += 1;
             if let Ok(mut lines) = stderr_lines.lock() {
-                if lines.len() >= 12 {
+                if lines.len() >= 200 {
                     lines.pop_front();
                 }
-                lines.push_back(trimmed.to_string());
+                lines.push_back(BackendLogEntry {
+                    sequence,
+                    line: trimmed.to_string(),
+                });
             }
         }
     })

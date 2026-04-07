@@ -39,6 +39,7 @@ class SubprocessPlaybackEngine:
         self._progress_units = 0
         self._audio_reference: str | None = None
         self._process_id: int | None = None
+        self._process: subprocess.Popen[bytes] | None = None
 
     def describe_capabilities(self) -> ProviderCapabilities:
         return SUBPROCESS_PLAYBACK_CAPABILITIES
@@ -54,6 +55,8 @@ class SubprocessPlaybackEngine:
         self._progress_units = snapshot.progress_units
         self._audio_reference = snapshot.audio_reference
         self._process_id = snapshot.process_id
+        if self._process is not None and self._process.poll() is not None:
+            self._process = None
 
     def start(
         self,
@@ -88,6 +91,7 @@ class SubprocessPlaybackEngine:
         self._last_action = "start"
         self._progress_units += 1
         self._audio_reference = synthesis.audio_reference
+        self._process = process
         self._process_id = process.pid
         return self.snapshot()
 
@@ -109,10 +113,21 @@ class SubprocessPlaybackEngine:
         return self.snapshot()
 
     def stop(self) -> PlaybackSnapshot:
-        if self._process_id is not None and _process_exists(self._process_id):
+        if self._process is not None:
+            if self._process.poll() is None:
+                self._process.terminate()
+                for _ in range(10):
+                    if self._process.poll() is not None:
+                        break
+                    time.sleep(0.05)
+                if self._process.poll() is None:
+                    self._process.kill()
+                    self._process.wait(timeout=1.0)
+            self._process = None
+        elif self._process_id is not None and _process_exists(self._process_id):
             os.kill(self._process_id, signal.SIGTERM)
             for _ in range(10):
-                if not _process_exists(self._process_id):
+                if _process_has_exited(self._process_id):
                     break
                 time.sleep(0.05)
             if _process_exists(self._process_id):
@@ -143,9 +158,25 @@ class SubprocessPlaybackEngine:
         )
 
     def _refresh_state(self) -> None:
+        if self._process is not None:
+            if self._process.poll() is None:
+                self._process_id = self._process.pid
+                return
+            if self._state is PlaybackState.PLAYING:
+                self._last_action = "completed"
+            self._state = PlaybackState.STOPPED
+            self._process_id = None
+            self._process = None
+            return
         if self._process_id is None:
             if self._state is not PlaybackState.PAUSED:
                 self._state = PlaybackState.STOPPED
+            return
+        if _process_has_exited(self._process_id):
+            if self._state is PlaybackState.PLAYING:
+                self._last_action = "completed"
+            self._state = PlaybackState.STOPPED
+            self._process_id = None
             return
         if _process_exists(self._process_id):
             return
@@ -154,6 +185,13 @@ class SubprocessPlaybackEngine:
         self._state = PlaybackState.STOPPED
         self._process_id = None
 
+
+def _process_has_exited(process_id: int) -> bool:
+    try:
+        completed_pid, _ = os.waitpid(process_id, os.WNOHANG)
+    except ChildProcessError:
+        return not _process_exists(process_id)
+    return completed_pid == process_id
 
 
 def _process_exists(process_id: int) -> bool:

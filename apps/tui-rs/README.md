@@ -45,6 +45,9 @@ Session navigation:
 - with an empty command bar, `Down` triggers `next_chunk`
 - with an empty command bar, `Left` triggers `previous_chapter`
 - with an empty command bar, `Right` triggers `next_chapter`
+- with an empty command bar, `PageUp` and `PageDown` scroll the `Document` pane
+- with an empty command bar, `Home` jumps to the top of the `Document` pane
+- with an empty command bar, `End` jumps to the bottom of the `Document` pane
 
 `/ingest` accepts markdown and plain text files. In the current TUI it also:
 
@@ -52,3 +55,6 @@ Session navigation:
 - suggests `.md`, `.markdown`, and `.txt` files from the directory you are
   currently typing
 - updates the `Document` pane immediately after a successful import
+
+The `Document` pane now renders the full document outline and auto-follows the
+active chunk while keeping the backend timing logs visible in the `Log` pane.

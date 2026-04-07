@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -31,10 +32,15 @@ class SQLiteDatabase:
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
         self._connection: sqlite3.Connection | None = None
+        self._lock = threading.RLock()
 
     @property
     def database_path(self) -> Path:
         return self._database_path
+
+    @property
+    def lock(self) -> threading.RLock:
+        return self._lock
 
     def connect(self) -> sqlite3.Connection:
         if self._connection is not None:
@@ -170,11 +176,28 @@ class _SQLiteRepository:
             database if isinstance(database, SQLiteDatabase) else SQLiteDatabase(database)
         )
 
-    def _connect(self) -> sqlite3.Connection:
-        return self._database.connect()
+    def _connect(self) -> "_LockedConnection":
+        return _LockedConnection(self._database.connect(), self._database.lock)
 
     def ensure_schema(self) -> None:
         self._database.initialize()
+
+
+class _LockedConnection:
+    def __init__(self, connection: sqlite3.Connection, lock: threading.RLock) -> None:
+        self._connection = connection
+        self._lock = lock
+
+    def __enter__(self) -> sqlite3.Connection:
+        self._lock.acquire()
+        self._connection.__enter__()
+        return self._connection
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None:
+        try:
+            return self._connection.__exit__(exc_type, exc, tb)
+        finally:
+            self._lock.release()
 
 
 class SQLiteDocumentRepository(_SQLiteRepository):
