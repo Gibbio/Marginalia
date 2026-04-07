@@ -98,11 +98,13 @@ pub struct App {
     pub library_documents: Vec<DocumentListItem>,
     pub local_markdown_files: Vec<LocalMarkdownFile>,
     pub messages: VecDeque<String>,
+    selected_document_id: Option<String>,
     history: VecDeque<String>,
     history_index: Option<usize>,
     history_draft: Option<String>,
     launched_at: Instant,
     last_refresh: Instant,
+    quit_armed_at: Option<Instant>,
     suggestion_index: usize,
 }
 
@@ -118,11 +120,13 @@ impl App {
             library_documents: Vec::new(),
             local_markdown_files: Vec::new(),
             messages: VecDeque::new(),
+            selected_document_id: None,
             history: VecDeque::new(),
             history_index: None,
             history_draft: None,
             launched_at: Instant::now(),
             last_refresh: Instant::now() - Duration::from_secs(1),
+            quit_armed_at: None,
             suggestion_index: 0,
         };
         app.refresh()?;
@@ -139,8 +143,14 @@ impl App {
     pub fn refresh(&mut self) -> Result<(), String> {
         self.app_snapshot = Some(self.backend.get_app_snapshot()?);
         self.session_snapshot = self.backend.get_session_snapshot()?;
-        self.document_view = self.backend.get_document_view()?;
         self.library_documents = self.backend.list_documents()?;
+        self.document_view = self
+            .backend
+            .get_document_view(self.selected_document_id.as_deref())?;
+        if self.document_view.is_none() {
+            self.selected_document_id = None;
+            self.document_view = self.backend.get_document_view(None)?;
+        }
         self.local_markdown_files = discover_markdown_files();
         self.last_refresh = Instant::now();
         Ok(())
@@ -173,6 +183,19 @@ impl App {
             }
         }
         self.submit_input();
+    }
+
+    pub fn handle_ctrl_c(&mut self) {
+        let now = Instant::now();
+        if self
+            .quit_armed_at
+            .is_some_and(|armed_at| now.duration_since(armed_at) <= Duration::from_secs(2))
+        {
+            self.should_quit = true;
+            return;
+        }
+        self.quit_armed_at = Some(now);
+        self.push_message("Press Ctrl-C again within 2s to quit.".to_string());
     }
 
     pub fn autocomplete(&mut self) {
@@ -388,8 +411,19 @@ impl App {
                 if argument.is_empty() {
                     return Err("Usage: /ingest <path>".to_string());
                 }
-                self.backend
-                    .execute_command("ingest_document", json!({"path": argument}))?
+                let response = self
+                    .backend
+                    .execute_command_response("ingest_document", json!({"path": argument}))?;
+                if response.status != "ok" {
+                    return Err(response.message);
+                }
+                self.selected_document_id = response
+                    .payload
+                    .get("document")
+                    .and_then(|document| document.get("document_id"))
+                    .and_then(|document_id| document_id.as_str())
+                    .map(ToString::to_string);
+                response.message
             }
             "pause" => self.backend.execute_command("pause_session", json!({}))?,
             "resume" => self.backend.execute_command("resume_session", json!({}))?,
