@@ -134,16 +134,20 @@ fn render(frame: &mut Frame, app: &mut App) {
         .block(Block::default().borders(Borders::ALL).title("Overview"))
         .wrap(Wrap { trim: false });
 
-    let (document_lines, active_document_line) = render_document_lines(app);
+    let (document_lines, active_document_line) =
+        render_document_lines(app, body[0].width.saturating_sub(2).max(1) as usize);
     sync_document_scroll(app, body[0], active_document_line, document_lines.len());
     let document = Paragraph::new(document_lines)
         .block(Block::default().borders(Borders::ALL).title("Document"))
         .scroll((app.document_scroll(), 0))
-        .wrap(Wrap { trim: true });
+        .wrap(Wrap { trim: false });
 
-    let messages = Paragraph::new(render_messages(app))
+    let messages_widget = Paragraph::new(render_messages(app))
         .block(Block::default().borders(Borders::ALL).title("Log"))
         .wrap(Wrap { trim: true });
+    let messages_viewport = sidebar[0].height.saturating_sub(2);
+    let messages_total = messages_widget.line_count(sidebar[0].width.saturating_sub(2)) as u16;
+    let messages = messages_widget.scroll((messages_total.saturating_sub(messages_viewport), 0));
 
     let status = Paragraph::new(render_status_lines(app))
         .block(Block::default().borders(Borders::ALL).title("Session"))
@@ -414,7 +418,7 @@ fn render_status_lines(app: &App) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_document_lines(app: &App) -> (Vec<Line<'static>>, Option<usize>) {
+fn render_document_lines(app: &App, content_width: usize) -> (Vec<Line<'static>>, Option<usize>) {
     let Some(document) = &app.document_view else {
         return (
             vec![
@@ -474,24 +478,39 @@ fn render_document_lines(app: &App) -> (Vec<Line<'static>>, Option<usize>) {
                 Style::default().fg(Color::Gray)
             };
             let chunk_text = chunk.text.replace('\n', " ");
+            let first_prefix = format!("{} [{}:{}] ", marker, section.index + 1, chunk.index + 1);
+            let continuation_prefix = " ".repeat(first_prefix.chars().count());
+            let wrapped_chunk_lines = wrap_prefixed_text(&first_prefix, &chunk_text, content_width);
             if chunk.is_active {
                 active_line_index = Some(lines.len());
             }
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{} ", marker),
-                    if chunk.is_active {
-                        Style::default().fg(Color::Yellow)
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    },
-                ),
-                Span::styled(
-                    format!("[{}:{}] ", section.index + 1, chunk.index + 1),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(chunk_text, chunk_style),
-            ]));
+            for (index, wrapped_line) in wrapped_chunk_lines.into_iter().enumerate() {
+                if index == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{} ", marker),
+                            if chunk.is_active {
+                                Style::default().fg(Color::Yellow)
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            },
+                        ),
+                        Span::styled(
+                            format!("[{}:{}] ", section.index + 1, chunk.index + 1),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(wrapped_line, chunk_style),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            continuation_prefix.clone(),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(wrapped_line, chunk_style),
+                    ]));
+                }
+            }
             if chunk.is_active {
                 lines.push(Line::from(Span::styled(
                     format!(
@@ -528,4 +547,71 @@ fn render_messages(app: &App) -> Vec<Line<'static>> {
         .skip(start)
         .map(|message| Line::from(message.clone()))
         .collect()
+}
+
+fn wrap_prefixed_text(prefix: &str, text: &str, width: usize) -> Vec<String> {
+    let available_width = width.saturating_sub(prefix.chars().count()).max(1);
+    wrap_text(text, available_width, available_width)
+}
+
+fn wrap_text(text: &str, first_width: usize, continuation_width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    let mut limit = first_width.max(1);
+
+    for word in text.split_whitespace() {
+        let word_width = word.chars().count();
+        let separator_width = if current.is_empty() { 0 } else { 1 };
+        if current_width + separator_width + word_width <= limit {
+            if !current.is_empty() {
+                current.push(' ');
+                current_width += 1;
+            }
+            current.push_str(word);
+            current_width += word_width;
+            continue;
+        }
+
+        if !current.is_empty() {
+            result.push(current);
+            current = String::new();
+            limit = continuation_width.max(1);
+        }
+
+        if word_width <= limit {
+            current.push_str(word);
+            current_width = word_width;
+            continue;
+        }
+
+        let mut partial = String::new();
+        let mut partial_width = 0usize;
+        for ch in word.chars() {
+            if partial_width >= limit {
+                result.push(partial);
+                partial = String::new();
+                partial_width = 0;
+                limit = continuation_width.max(1);
+            }
+            partial.push(ch);
+            partial_width += 1;
+        }
+        current = partial;
+        current_width = partial_width;
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    }
+
+    if result.is_empty() {
+        vec![String::new()]
+    } else {
+        result
+    }
 }
