@@ -59,7 +59,10 @@ def serve_stdio(
     """Serve the frontend contract over stdio using JSON Lines."""
 
     gateway = _gateway_from_options(config_path=config_path, verbose=verbose)
-    StdioFrontendServer(gateway).serve_forever()
+    try:
+        StdioFrontendServer(gateway).serve_forever()
+    finally:
+        gateway.shutdown()
 
 
 def run() -> None:
