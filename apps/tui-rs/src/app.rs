@@ -3,9 +3,81 @@ use serde_json::json;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-const COMMANDS: [&str; 12] = [
-    "/play", "/ingest", "/pause", "/resume", "/stop", "/repeat", "/restart", "/back", "/next",
-    "/note", "/help", "/refresh",
+#[derive(Clone, Copy)]
+pub struct CommandSpec {
+    pub name: &'static str,
+    pub usage: &'static str,
+    pub summary: &'static str,
+}
+
+#[derive(Clone)]
+pub struct SuggestionItem {
+    pub value: String,
+    pub label: String,
+    pub summary: String,
+}
+
+pub const COMMANDS: [CommandSpec; 12] = [
+    CommandSpec {
+        name: "/play",
+        usage: "/play <path|id>",
+        summary: "start a reading session",
+    },
+    CommandSpec {
+        name: "/ingest",
+        usage: "/ingest <path>",
+        summary: "ingest a document into the library",
+    },
+    CommandSpec {
+        name: "/pause",
+        usage: "/pause",
+        summary: "pause the active session",
+    },
+    CommandSpec {
+        name: "/resume",
+        usage: "/resume",
+        summary: "resume the active session",
+    },
+    CommandSpec {
+        name: "/stop",
+        usage: "/stop",
+        summary: "stop the active session",
+    },
+    CommandSpec {
+        name: "/repeat",
+        usage: "/repeat",
+        summary: "repeat the current chunk",
+    },
+    CommandSpec {
+        name: "/restart",
+        usage: "/restart",
+        summary: "restart the current chapter",
+    },
+    CommandSpec {
+        name: "/back",
+        usage: "/back",
+        summary: "go to the previous chunk",
+    },
+    CommandSpec {
+        name: "/next",
+        usage: "/next",
+        summary: "jump to the next chapter",
+    },
+    CommandSpec {
+        name: "/note",
+        usage: "/note <text>",
+        summary: "save a note on the current position",
+    },
+    CommandSpec {
+        name: "/help",
+        usage: "/help",
+        summary: "show command help",
+    },
+    CommandSpec {
+        name: "/refresh",
+        usage: "/refresh",
+        summary: "refresh backend snapshots",
+    },
 ];
 
 pub struct App {
@@ -16,7 +88,11 @@ pub struct App {
     pub session_snapshot: Option<SessionSnapshot>,
     pub documents: Vec<DocumentListItem>,
     pub messages: VecDeque<String>,
+    history: VecDeque<String>,
+    history_index: Option<usize>,
+    history_draft: Option<String>,
     last_refresh: Instant,
+    suggestion_index: usize,
 }
 
 impl App {
@@ -29,7 +105,11 @@ impl App {
             session_snapshot: None,
             documents: Vec::new(),
             messages: VecDeque::new(),
+            history: VecDeque::new(),
+            history_index: None,
+            history_draft: None,
             last_refresh: Instant::now() - Duration::from_secs(1),
+            suggestion_index: 0,
         };
         app.refresh()?;
         app.push_message("Connected to Marginalia backend. Type /play <path|id>.".to_string());
@@ -53,6 +133,10 @@ impl App {
     pub fn submit_input(&mut self) {
         let command = self.input.trim().to_string();
         self.input.clear();
+        self.remember_history(&command);
+        self.history_index = None;
+        self.history_draft = None;
+        self.suggestion_index = 0;
         if command.is_empty() {
             return;
         }
@@ -63,32 +147,194 @@ impl App {
     }
 
     pub fn autocomplete(&mut self) {
-        let input = self.input.trim();
-        if !input.starts_with('/') || input.contains(' ') {
-            return;
-        }
-        let matches: Vec<&str> = COMMANDS
-            .iter()
-            .copied()
-            .filter(|command| command.starts_with(input))
-            .collect();
-        match matches.as_slice() {
-            [single] => self.input = (*single).to_string(),
+        let suggestions = self.suggestions();
+        match suggestions.as_slice() {
+            [single] => self.input = single.value.clone(),
             [] => self.push_message("No matching slash command.".to_string()),
-            _ => self.push_message(format!("Matches: {}", matches.join(", "))),
+            _ => {
+                if let Some(selected) = self.selected_suggestion() {
+                    self.input = selected.value;
+                } else if let Some(prefix) = longest_common_prefix(self.input.trim(), &suggestions)
+                {
+                    self.input = prefix;
+                } else {
+                    self.push_message(format!(
+                        "Matches: {}",
+                        suggestions
+                            .iter()
+                            .map(|spec| spec.label.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
         }
+        self.history_index = None;
+        self.history_draft = None;
+        self.suggestion_index = 0;
     }
 
     pub fn push_char(&mut self, ch: char) {
         self.input.push(ch);
+        self.history_index = None;
+        self.history_draft = None;
+        self.suggestion_index = 0;
     }
 
     pub fn pop_char(&mut self) {
         self.input.pop();
+        self.history_index = None;
+        self.history_draft = None;
+        self.suggestion_index = 0;
     }
 
     pub fn clear_input(&mut self) {
         self.input.clear();
+        self.history_index = None;
+        self.history_draft = None;
+        self.suggestion_index = 0;
+    }
+
+    pub fn select_next_history(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+        if self.history_index.is_none() {
+            self.history_draft = Some(self.input.clone());
+            self.history_index = Some(self.history.len() - 1);
+        } else if let Some(index) = self.history_index {
+            if index + 1 < self.history.len() {
+                self.history_index = Some(index + 1);
+            } else {
+                self.input = self.history_draft.clone().unwrap_or_default();
+                self.history_index = None;
+                self.history_draft = None;
+                self.suggestion_index = 0;
+                return;
+            }
+        }
+        if let Some(index) = self.history_index {
+            self.input = self.history[index].clone();
+            self.suggestion_index = 0;
+        }
+    }
+
+    pub fn select_previous_history(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+        if self.history_index.is_none() {
+            self.history_draft = Some(self.input.clone());
+            self.history_index = Some(self.history.len() - 1);
+        } else if let Some(index) = self.history_index {
+            self.history_index = Some(index.saturating_sub(1));
+        }
+        if let Some(index) = self.history_index {
+            self.input = self.history[index].clone();
+            self.suggestion_index = 0;
+        }
+    }
+
+    pub fn completion_suffix(&self) -> Option<String> {
+        let selected = self.selected_suggestion()?;
+        if selected.value == self.input.trim() {
+            return None;
+        }
+        selected
+            .value
+            .strip_prefix(self.input.trim())
+            .map(ToString::to_string)
+    }
+
+    pub fn command_hint(&self) -> String {
+        let input = self.input.trim();
+        if input.is_empty() {
+            return "Type / to explore commands. Tab completes. Ctrl+P/Ctrl+N browse history."
+                .to_string();
+        }
+        if !input.starts_with('/') {
+            return "Commands must start with /.".to_string();
+        }
+        if let Some((command_name, _)) = self.command_context() {
+            if let Some(command) = COMMANDS.iter().find(|command| command.name == command_name) {
+                let suggestions = self.suggestions();
+                if let Some(selected) = self.selected_suggestion() {
+                    return format!(
+                        "{}  {}  selected: {}",
+                        command.usage, command.summary, selected.label
+                    );
+                }
+                if !suggestions.is_empty() {
+                    return format!("{} suggestions for {}", suggestions.len(), command.name);
+                }
+                return format!("{}  {}", command.usage, command.summary);
+            }
+            return "Unknown command.".to_string();
+        }
+
+        let suggestions = self.suggestions();
+        match suggestions.as_slice() {
+            [] => "No matching command.".to_string(),
+            [single] => format!("{}  {}", single.label, single.summary),
+            _ => {
+                if let Some(selected) = self.selected_suggestion() {
+                    format!(
+                        "{} matches  selected: {}  {}",
+                        suggestions.len(),
+                        selected.label,
+                        selected.summary
+                    )
+                } else {
+                    format!("{} matches", suggestions.len())
+                }
+            }
+        }
+    }
+
+    pub fn visible_suggestions(&self) -> Vec<SuggestionItem> {
+        let suggestions = self.suggestions();
+        if suggestions.len() <= 3 {
+            return suggestions;
+        }
+        let selected_index = self.suggestion_index % suggestions.len();
+        let start = selected_index.saturating_sub(2).min(suggestions.len() - 3);
+        suggestions.into_iter().skip(start).take(3).collect()
+    }
+
+    pub fn selected_suggestion_slot(&self) -> Option<usize> {
+        let visible = self.visible_suggestions();
+        let selected = self.selected_suggestion()?;
+        visible
+            .iter()
+            .position(|suggestion| suggestion.value == selected.value)
+    }
+
+    pub fn select_next_suggestion(&mut self) {
+        let suggestions = self.suggestions();
+        if suggestions.is_empty() {
+            return;
+        }
+        self.suggestion_index = (self.suggestion_index + 1) % suggestions.len();
+    }
+
+    pub fn select_previous_suggestion(&mut self) {
+        let suggestions = self.suggestions();
+        if suggestions.is_empty() {
+            return;
+        }
+        self.suggestion_index = if self.suggestion_index == 0 {
+            suggestions.len() - 1
+        } else {
+            self.suggestion_index - 1
+        };
+    }
+
+    fn selected_suggestion(&self) -> Option<SuggestionItem> {
+        let suggestions = self.suggestions();
+        if suggestions.is_empty() {
+            return None;
+        }
+        Some(suggestions[self.suggestion_index % suggestions.len()].clone())
     }
 
     fn execute_command(&mut self, raw: &str) -> Result<String, String> {
@@ -149,8 +395,106 @@ impl App {
             self.messages.pop_front();
         }
     }
+
+    fn remember_history(&mut self, command: &str) {
+        if command.is_empty() {
+            return;
+        }
+        if self
+            .history
+            .back()
+            .is_some_and(|previous| previous == command)
+        {
+            return;
+        }
+        self.history.push_back(command.to_string());
+        while self.history.len() > 50 {
+            self.history.pop_front();
+        }
+    }
+
+    fn suggestions(&self) -> Vec<SuggestionItem> {
+        if !self.input.trim_start().starts_with('/') {
+            return Vec::new();
+        }
+        if let Some((command_name, argument_prefix)) = self.command_context() {
+            return self.argument_suggestions(command_name, argument_prefix);
+        }
+        let input = self.input.trim();
+        COMMANDS
+            .iter()
+            .filter(|command| command.name.starts_with(input))
+            .map(|command| SuggestionItem {
+                value: command.name.to_string(),
+                label: command.name.to_string(),
+                summary: command.summary.to_string(),
+            })
+            .collect()
+    }
+
+    fn command_context(&self) -> Option<(&str, &str)> {
+        let input = self.input.as_str();
+        let (command_name, argument_prefix) = input.split_once(' ')?;
+        if !command_name.starts_with('/') {
+            return None;
+        }
+        Some((command_name.trim(), argument_prefix.trim_start()))
+    }
+
+    fn argument_suggestions(
+        &self,
+        command_name: &str,
+        argument_prefix: &str,
+    ) -> Vec<SuggestionItem> {
+        match command_name {
+            "/play" => self.play_suggestions(argument_prefix),
+            _ => Vec::new(),
+        }
+    }
+
+    fn play_suggestions(&self, argument_prefix: &str) -> Vec<SuggestionItem> {
+        let query = argument_prefix.trim().to_lowercase();
+        self.documents
+            .iter()
+            .filter(|document| {
+                query.is_empty()
+                    || document.document_id.to_lowercase().starts_with(&query)
+                    || document.title.to_lowercase().contains(&query)
+            })
+            .map(|document| SuggestionItem {
+                value: format!("/play {}", document.document_id),
+                label: document.document_id.clone(),
+                summary: format!(
+                    "{} ({} ch, {} chunks)",
+                    document.title, document.chapter_count, document.chunk_count
+                ),
+            })
+            .collect()
+    }
 }
 
 pub fn help_text() -> &'static str {
     "/play <path|id>  /ingest <path>  /pause  /resume  /stop  /repeat  /restart  /back  /next  /note <text>"
+}
+
+fn longest_common_prefix(input: &str, matches: &[SuggestionItem]) -> Option<String> {
+    let first = matches.first()?.value.as_str();
+    let mut prefix = String::new();
+
+    for (index, ch) in first.chars().enumerate() {
+        if matches
+            .iter()
+            .all(|suggestion| suggestion.value.chars().nth(index) == Some(ch))
+        {
+            prefix.push(ch);
+        } else {
+            break;
+        }
+    }
+
+    if prefix.len() > input.len() {
+        Some(prefix)
+    } else {
+        None
+    }
 }

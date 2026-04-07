@@ -1,8 +1,9 @@
 mod app;
 mod backend;
 
-use app::{help_text, App};
+use app::App;
 use backend::BackendClient;
+use crossterm::cursor::{DisableBlinking, EnableBlinking};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -26,17 +27,24 @@ fn main() -> Result<(), String> {
 
     enable_raw_mode().map_err(|err| format!("Unable to enable raw mode: {err}"))?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)
+    execute!(stdout, EnterAlternateScreen, EnableBlinking)
         .map_err(|err| format!("Unable to enter alternate screen: {err}"))?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)
         .map_err(|err| format!("Unable to create terminal backend: {err}"))?;
+    terminal
+        .show_cursor()
+        .map_err(|err| format!("Unable to show terminal cursor: {err}"))?;
 
     let result = run_tui(&mut terminal, &mut app);
 
     disable_raw_mode().map_err(|err| format!("Unable to disable raw mode: {err}"))?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)
-        .map_err(|err| format!("Unable to leave alternate screen: {err}"))?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableBlinking
+    )
+    .map_err(|err| format!("Unable to leave alternate screen: {err}"))?;
     terminal
         .show_cursor()
         .map_err(|err| format!("Unable to restore terminal cursor: {err}"))?;
@@ -67,7 +75,15 @@ fn run_tui(
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.should_quit = true;
                     }
+                    KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.select_previous_history();
+                    }
+                    KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.select_next_history();
+                    }
                     KeyCode::Enter => app.submit_input(),
+                    KeyCode::Up => app.select_previous_suggestion(),
+                    KeyCode::Down => app.select_next_suggestion(),
                     KeyCode::Backspace => app.pop_char(),
                     KeyCode::Esc => app.clear_input(),
                     KeyCode::Tab => app.autocomplete(),
@@ -85,10 +101,10 @@ fn render(frame: &mut Frame, app: &App) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),
+            Constraint::Length(9),
             Constraint::Min(10),
             Constraint::Length(8),
-            Constraint::Length(3),
+            Constraint::Length(7),
         ])
         .split(frame.area());
     let top = Layout::default()
@@ -96,18 +112,9 @@ fn render(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(vertical[1]);
 
-    let header = Paragraph::new(vec![
-        Line::from(Span::styled(
-            "Marginalia Rust TUI",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from("Frontend ratatui + crossterm over backend stdio"),
-        Line::from(help_text()),
-    ])
-    .block(Block::default().borders(Borders::ALL).title("Overview"))
-    .wrap(Wrap { trim: true });
+    let header = Paragraph::new(render_header_lines())
+        .block(Block::default().borders(Borders::ALL).title("Overview"))
+        .wrap(Wrap { trim: true });
 
     let status = Paragraph::new(render_status_lines(app))
         .block(Block::default().borders(Borders::ALL).title("Session"))
@@ -120,7 +127,7 @@ fn render(frame: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("Log"))
         .wrap(Wrap { trim: true });
 
-    let input = Paragraph::new(app.input.as_str())
+    let input = Paragraph::new(render_input_lines(app))
         .block(Block::default().borders(Borders::ALL).title("Command"))
         .style(Style::default().fg(Color::Yellow));
 
@@ -129,6 +136,101 @@ fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(documents, top[1]);
     frame.render_widget(messages, vertical[2]);
     frame.render_widget(input, vertical[3]);
+    frame.set_cursor_position((
+        vertical[3].x + 3 + app.input.chars().count() as u16,
+        vertical[3].y + 1,
+    ));
+}
+
+fn render_header_lines() -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            " __  __                         _             _ _       ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "|  \\/  | __ _ _ __ __ _(_)_ __   __ _| (_) __ _ ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "| |\\/| |/ _` | '__/ _` | | '_ \\ / _` | | |/ _` |",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "| |  | | (_| | | | (_| | | | | | (_| | | | (_| |",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "|_|  |_|\\__,_|_|  \\__, |_|_| |_|\\__,_|_|_|\\__,_|",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "                 |___/                            ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("Rust TUI client over the headless Marginalia backend"),
+    ]
+}
+
+fn render_input_lines(app: &App) -> Vec<Line<'static>> {
+    let mut first_line = vec![
+        Span::styled("> ", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            app.input.clone(),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if let Some(suffix) = app.completion_suffix() {
+        first_line.push(Span::styled(
+            suffix.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    let mut lines = vec![
+        Line::from(first_line),
+        Line::from(Span::styled(
+            app.command_hint(),
+            Style::default().fg(Color::Gray),
+        )),
+    ];
+
+    let selected_slot = app.selected_suggestion_slot();
+    for (index, suggestion) in app.visible_suggestions().into_iter().enumerate() {
+        let prefix = if Some(index) == selected_slot {
+            "› "
+        } else {
+            "  "
+        };
+        let style = if Some(index) == selected_slot {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(prefix, style),
+            Span::styled(format!("{:<18}", suggestion.label), style),
+            Span::styled(suggestion.summary, Style::default().fg(Color::Gray)),
+        ]));
+    }
+
+    lines
 }
 
 fn render_status_lines(app: &App) -> Vec<Line<'static>> {
