@@ -199,7 +199,7 @@ impl App {
             .quit_armed_at
             .is_some_and(|armed_at| now.duration_since(armed_at) <= Duration::from_secs(2))
         {
-            self.should_quit = true;
+            self.graceful_shutdown();
             return;
         }
         self.quit_armed_at = Some(now);
@@ -454,7 +454,7 @@ impl App {
                     .execute_command("create_note", json!({"text": argument}))?
             }
             "quit" | "exit" => {
-                self.should_quit = true;
+                self.graceful_shutdown();
                 "Closing TUI.".to_string()
             }
             _ => return Err(format!("Unknown command: /{name}")),
@@ -502,6 +502,11 @@ impl App {
 
     pub fn animation_frame(&self) -> usize {
         ((self.launched_at.elapsed().as_millis() / 140) % 3) as usize
+    }
+
+    fn graceful_shutdown(&mut self) {
+        let _ = self.backend.execute_command("stop_session", json!({}));
+        self.should_quit = true;
     }
 
     pub fn navigate_previous_chunk(&mut self) {
