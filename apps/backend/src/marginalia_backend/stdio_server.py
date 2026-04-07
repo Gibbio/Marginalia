@@ -45,10 +45,12 @@ class StdioFrontendServer:
         try:
             request = FrontendRequest.from_dict(decoded)
         except ValueError as exc:
+            raw_id = decoded.get("id") if isinstance(decoded, dict) else None
             return FrontendResponse(
                 status=FrontendResponseStatus.ERROR,
                 name="invalid_request",
                 message=str(exc),
+                request_id=str(raw_id) if raw_id is not None else None,
             )
 
         try:

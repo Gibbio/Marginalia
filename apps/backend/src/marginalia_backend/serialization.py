@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def to_transport_value(value: object) -> object:
@@ -26,6 +29,10 @@ def to_transport_value(value: object) -> object:
         return {str(key): to_transport_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):
         return [to_transport_value(item) for item in value]
+    logger.warning(
+        "Unexpected type %s in transport serialization, falling back to str()",
+        type(value).__name__,
+    )
     return str(value)
 
 

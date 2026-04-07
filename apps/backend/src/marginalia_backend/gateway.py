@@ -53,10 +53,22 @@ class LocalFrontendGateway(FrontendGateway):
             queries=tuple(query.value for query in FrontendQueryName),
             transports=("stdio-jsonl",),
             frontend_event_stream_supported=True,
-            dictation_enabled=True,
-            rewrite_enabled=True,
-            summary_enabled=True,
+            dictation_enabled=self._is_real_provider(self._container.dictation_stt),
+            rewrite_enabled=self._is_real_provider(self._container.rewrite_provider),
+            summary_enabled=self._is_real_provider(self._container.summary_provider),
         )
+
+    def shutdown(self) -> None:
+        """Stop any active runtime session for clean process exit."""
+
+        self._runtime_manager.stop_session()
+
+    @staticmethod
+    def _is_real_provider(provider: object) -> bool:
+        caps = getattr(provider, "describe_capabilities", None)
+        if caps is None:
+            return False
+        return not caps().provider_name.startswith("fake")
 
     def execute_command(self, request: FrontendRequest) -> FrontendResponse:
         try:
