@@ -5,6 +5,7 @@ __pycache__/
 .Python
 build/
 dist/
+target/
 *.egg-info/
 .eggs/
 .venv/
