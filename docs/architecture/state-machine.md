@@ -32,14 +32,15 @@ The high-level reader state maps to a projected playback state:
 - `IDLE` projects to `stopped`
 - all other active workflow states project to `paused`
 
-This matters because the CLI is currently a one-shot process model. Playback
-state is therefore synchronized from persisted session metadata plus the current
-playback adapter snapshot on each invocation.
+This matters because frontends may reconnect to a long-running backend process.
+Playback state is therefore synchronized from persisted session metadata plus
+the current playback adapter snapshot rather than from frontend-local state.
 
 ## Why Explicit State Matters
 
 - voice-driven tools become confusing when note capture and playback overlap
-- future desktop and API clients will need a single state vocabulary
+- future TUI, desktop, editor, and mobile clients will need a single state
+  vocabulary
 - tests can assert lifecycle transitions before real speech providers exist
 
 ## Alpha 0.2 Implementation Notes
@@ -87,9 +88,9 @@ class that exposes a `step()` function returning a `StepStatus`:
 - `STOPPED` — the session was stopped by a command or signal
 - `ERROR` — a fatal runtime fault occurred
 
-The caller owns the loop driver. The CLI uses a `while` loop with signal
-handlers; a desktop shell would use a timer; an async wrapper would use
-`asyncio`. The core does not assume any specific concurrency model.
+The caller owns the loop driver. The backend can run it in a worker thread; a
+client may poll snapshots on a timer; an async wrapper may use `asyncio`. The
+core does not assume any specific concurrency model.
 
 ### Voice Command Dispatch
 
@@ -108,5 +109,4 @@ to `stop`.
 Document completion emits a `READING_COMPLETED` event and sets
 `runtime_status = "completed"` with `last_command = "document-complete"`.
 Explicit stop sets `runtime_status = "stopped"` with `last_command = "stop"`.
-This distinction is tested and can be relied upon by future desktop or API
-callers.
+This distinction is tested and can be relied upon by future frontend clients.

@@ -107,7 +107,7 @@ Every response includes:
 Example response:
 
 ```json
-{"status":"ok","name":"get_backend_capabilities","message":"Backend capabilities reported.","payload":{"protocol_version":1,"commands":["create_note","ingest_document","next_chapter","pause_session","previous_chunk","repeat_chunk","resume_session","start_session","stop_session"],"queries":["get_app_snapshot","get_backend_capabilities","get_doctor_report","get_session_snapshot","list_documents"],"transports":["stdio-jsonl"],"frontend_event_stream_supported":true,"dictation_enabled":true,"rewrite_enabled":true,"summary_enabled":true},"request_id":"req-1","protocol_version":1}
+{"status":"ok","name":"get_backend_capabilities","message":"Backend capabilities reported.","payload":{"protocol_version":1,"commands":["create_note","ingest_document","next_chapter","pause_session","previous_chunk","repeat_chunk","restart_chapter","resume_session","start_session","stop_session"],"queries":["get_app_snapshot","get_backend_capabilities","get_document_view","get_doctor_report","get_session_snapshot","list_notes","list_documents","search_documents","search_notes"],"transports":["stdio-jsonl"],"frontend_event_stream_supported":true,"dictation_enabled":true,"rewrite_enabled":true,"summary_enabled":true},"request_id":"req-1","protocol_version":1}
 ```
 
 ## First Handshake
@@ -136,6 +136,7 @@ Currently supported commands:
 - `pause_session`
 - `previous_chunk`
 - `repeat_chunk`
+- `restart_chapter`
 - `resume_session`
 - `start_session`
 - `stop_session`
@@ -180,8 +181,25 @@ These use an empty payload:
 - `resume_session`
 - `stop_session`
 - `repeat_chunk`
+- `restart_chapter`
 - `previous_chunk`
 - `next_chapter`
+
+## Search Queries
+
+The search queries share the same payload shape:
+
+```json
+{"query":"attentive"}
+```
+
+Supported queries:
+
+- `search_documents`
+- `search_notes`
+
+The backend currently rejects empty or whitespace-only queries with an error
+response.
 
 ## Queries
 
@@ -193,9 +211,13 @@ Currently supported queries:
 
 - `get_app_snapshot`
 - `get_backend_capabilities`
+- `get_document_view`
 - `get_doctor_report`
 - `get_session_snapshot`
+- `list_notes`
 - `list_documents`
+- `search_documents`
+- `search_notes`
 
 ### Recommended polling model
 

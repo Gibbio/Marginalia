@@ -21,7 +21,14 @@ from marginalia_core.application.frontend.gateway import FrontendGateway
 from marginalia_core.application.frontend.queries import FrontendQueryName
 from marginalia_core.application.frontend.snapshots import (
     AppSnapshot,
+    DocumentChunkView,
     DocumentListItem,
+    DocumentSectionView,
+    DocumentView,
+    NotesSnapshot,
+    NoteView,
+    SearchResultsSnapshot,
+    SearchResultView,
     SessionSnapshot,
 )
 from marginalia_core.application.result import OperationResult, OperationStatus
@@ -80,6 +87,9 @@ class LocalFrontendGateway(FrontendGateway):
         if command_name is FrontendCommandName.REPEAT_CHUNK:
             result = self._container.reader_service.repeat_current_chunk(command_source="frontend")
             return self._response_from_result(request, result)
+        if command_name is FrontendCommandName.RESTART_CHAPTER:
+            result = self._container.reader_service.restart_chapter(command_source="frontend")
+            return self._response_from_result(request, result)
         if command_name is FrontendCommandName.PREVIOUS_CHUNK:
             result = self._container.reader_service.previous_chunk(command_source="frontend")
             return self._response_from_result(request, result)
@@ -115,15 +125,53 @@ class LocalFrontendGateway(FrontendGateway):
         if query_name is FrontendQueryName.GET_APP_SNAPSHOT:
             payload = {"app": asdict(self._build_app_snapshot())}
             return self._ok_response(request, "App snapshot reported.", payload)
+        if query_name is FrontendQueryName.GET_DOCUMENT_VIEW:
+            document_view = self._build_document_view(request.payload)
+            if document_view is None:
+                return self._error_response(request, "No document is available for document view.")
+            return self._ok_response(
+                request,
+                "Document view reported.",
+                {"document": asdict(document_view)},
+            )
         if query_name is FrontendQueryName.GET_SESSION_SNAPSHOT:
             session_snapshot = self._build_session_snapshot()
             payload = {
                 "session": asdict(session_snapshot) if session_snapshot is not None else None
             }
             return self._ok_response(request, "Session snapshot reported.", payload)
+        if query_name is FrontendQueryName.LIST_NOTES:
+            notes_snapshot = self._build_notes_snapshot(request.payload)
+            if notes_snapshot is None:
+                return self._error_response(request, "No document is available for notes view.")
+            return self._ok_response(
+                request,
+                "Notes snapshot reported.",
+                {"notes": asdict(notes_snapshot)},
+            )
         if query_name is FrontendQueryName.LIST_DOCUMENTS:
             documents = [asdict(document) for document in self._list_documents()]
             return self._ok_response(request, "Document list reported.", {"documents": documents})
+        if query_name is FrontendQueryName.SEARCH_DOCUMENTS:
+            query_text = str(request.payload.get("query", "")).strip()
+            result = self._container.search_service.search_documents(query_text)
+            if result.status is OperationStatus.ERROR:
+                return self._error_response(request, result.message)
+            return self._ok_response(
+                request,
+                "Document search reported.",
+                {"search": asdict(self._search_snapshot_from_result(query_text, result))},
+            )
+        if query_name is FrontendQueryName.SEARCH_NOTES:
+            query_text = str(request.payload.get("query", "")).strip()
+            result = self._container.search_service.search_notes(query_text)
+            if result.status is OperationStatus.ERROR:
+                return self._error_response(request, result.message)
+            return self._ok_response(
+                request,
+                "Note search reported.",
+                {"search": asdict(self._search_snapshot_from_result(query_text, result))},
+            )
         if query_name is FrontendQueryName.GET_DOCTOR_REPORT:
             return self._ok_response(request, "Doctor report reported.", self._doctor_report())
 
@@ -186,6 +234,90 @@ class LocalFrontendGateway(FrontendGateway):
             voice=providers.get("voice"),
         )
 
+    def _build_document_view(self, payload: dict[str, object]) -> DocumentView | None:
+        document = self._resolve_document_from_payload(payload)
+        if document is None:
+            return None
+
+        session_snapshot = self._build_session_snapshot()
+        active_document = (
+            session_snapshot is not None and session_snapshot.document_id == document.document_id
+        )
+        active_section_index = session_snapshot.section_index if active_document else None
+        active_chunk_index = session_snapshot.chunk_index if active_document else None
+
+        sections: list[DocumentSectionView] = []
+        for section in document.sections:
+            chunks: list[DocumentChunkView] = []
+            for chunk in section.chunks:
+                is_active = (
+                    active_section_index == section.index and active_chunk_index == chunk.index
+                )
+                is_read = active_section_index is not None and (
+                    section.index < active_section_index
+                    or (
+                        section.index == active_section_index
+                        and active_chunk_index is not None
+                        and chunk.index < active_chunk_index
+                    )
+                )
+                chunks.append(
+                    DocumentChunkView(
+                        anchor=chunk.anchor,
+                        char_end=chunk.char_end,
+                        char_start=chunk.char_start,
+                        index=chunk.index,
+                        is_active=is_active,
+                        is_read=is_read,
+                        text=chunk.text,
+                    )
+                )
+            sections.append(
+                DocumentSectionView(
+                    chunk_count=section.chunk_count,
+                    chunks=tuple(chunks),
+                    index=section.index,
+                    source_anchor=section.source_anchor,
+                    title=section.title,
+                )
+            )
+
+        return DocumentView(
+            active_chunk_index=active_chunk_index,
+            active_section_index=active_section_index,
+            chapter_count=document.chapter_count,
+            chunk_count=document.total_chunk_count,
+            document_id=document.document_id,
+            sections=tuple(sections),
+            source_path=str(document.source_path),
+            title=document.title,
+        )
+
+    def _build_notes_snapshot(self, payload: dict[str, object]) -> NotesSnapshot | None:
+        document = self._resolve_document_from_payload(payload)
+        if document is None:
+            return None
+
+        notes = self._container.note_repository.list_notes_for_document(document.document_id)
+        return NotesSnapshot(
+            document_id=document.document_id,
+            notes=tuple(
+                NoteView(
+                    anchor=note.anchor,
+                    created_at=note.created_at,
+                    document_id=note.document_id,
+                    language=note.language,
+                    note_id=note.note_id,
+                    section_index=note.position.section_index,
+                    chunk_index=note.position.chunk_index,
+                    session_id=note.session_id,
+                    transcript=note.transcript,
+                    transcription_provider=note.transcription_provider,
+                )
+                for note in notes
+            ),
+        )
+
     def _list_documents(self) -> tuple[DocumentListItem, ...]:
         documents = self._container.document_repository.list_documents()
         return tuple(
@@ -197,6 +329,39 @@ class LocalFrontendGateway(FrontendGateway):
             )
             for document in documents
         )
+
+    def _search_snapshot_from_result(
+        self,
+        query_text: str,
+        result: OperationResult,
+    ) -> SearchResultsSnapshot:
+        return SearchResultsSnapshot(
+            query=query_text,
+            results=tuple(
+                SearchResultView(
+                    anchor=search_result.anchor,
+                    entity_id=search_result.entity_id,
+                    entity_kind=search_result.entity_kind,
+                    excerpt=search_result.excerpt,
+                    score=search_result.score,
+                )
+                for search_result in result.data.get("results", [])
+            ),
+        )
+
+    def _resolve_document_from_payload(self, payload: dict[str, object]):
+        document_id = str(payload.get("document_id", "")).strip()
+        if document_id:
+            return self._container.document_repository.get_document(document_id)
+
+        session = self._container.session_repository.get_active_session()
+        if session is not None:
+            document = self._container.document_repository.get_document(session.document_id)
+            if document is not None:
+                return document
+
+        documents = self._container.document_repository.list_documents()
+        return documents[0] if documents else None
 
     def _doctor_report(self) -> dict[str, object]:
         report = self._container.settings.doctor_report()

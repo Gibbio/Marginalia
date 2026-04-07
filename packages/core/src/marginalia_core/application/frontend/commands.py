@@ -14,6 +14,7 @@ class FrontendCommandName(str, Enum):
     PAUSE_SESSION = "pause_session"
     PREVIOUS_CHUNK = "previous_chunk"
     REPEAT_CHUNK = "repeat_chunk"
+    RESTART_CHAPTER = "restart_chapter"
     RESUME_SESSION = "resume_session"
     START_SESSION = "start_session"
     STOP_SESSION = "stop_session"

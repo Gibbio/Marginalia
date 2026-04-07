@@ -116,7 +116,7 @@ It should stop being the primary orchestration surface.
 
 Commands mutate backend state.
 
-Examples:
+Currently implemented:
 
 - `ingest_document`
 - `start_session`
@@ -124,32 +124,40 @@ Examples:
 - `resume_session`
 - `stop_session`
 - `repeat_chunk`
+- `restart_chapter`
 - `previous_chunk`
 - `next_chapter`
 - `create_note`
+
+Planned later:
+
 - `rewrite_current_section`
+- `summarize_topic`
 
 ### Queries
 
 Queries return coherent snapshots.
 
-Examples:
+Currently implemented:
 
 - `get_app_snapshot`
-- `get_session_snapshot`
-- `list_documents`
+- `get_backend_capabilities`
 - `get_document_view`
+- `get_doctor_report`
+- `get_session_snapshot`
 - `list_notes`
+- `list_documents`
 - `search_documents`
 - `search_notes`
-- `get_backend_capabilities`
-- `get_doctor_report`
+
+Planned later:
+
 
 ### Events
 
 Events keep clients synchronized without polling every action.
 
-Examples:
+Defined as boundary targets:
 
 - `session_started`
 - `session_progressed`
@@ -178,6 +186,9 @@ Recommended initial snapshots:
 Events should update these snapshots incrementally, but queries must always be
 able to rebuild them from scratch.
 
+Right now the stdio transport is still request/response oriented, so clients
+must rely on snapshot refresh and optional polling.
+
 ## Capability Model
 
 Different clients need different affordances. The backend should publish
@@ -202,6 +213,46 @@ of hard-coding assumptions.
 5. Move future TUI, GUI, and plugin work onto the contract layer.
 6. Add Unix socket transport only when a second class of client actually needs
    it.
+
+## Next Contract Additions
+
+The current contract now covers the core reading loop, notes, document
+inspection, and search. The next additions should complete the editorial
+surface rather than add more navigation primitives.
+
+Recommended order:
+
+### 1. Add `rewrite_current_section`
+
+Type: command
+
+Why next:
+
+- it is the first workflow that creates a user-visible artifact beyond notes
+- desktop and plugin clients will need a backend-owned rewrite operation rather
+  than bespoke prompt logic in the frontend
+
+### 2. Add `summarize_topic`
+
+Type: query-like operation
+
+Recommended shape:
+
+- expose it as a query if it remains non-persistent
+- expose it as a command if summaries become persisted artifacts later
+
+### 3. Add explicit note capture lifecycle commands when needed
+
+Candidates:
+
+- `start_note_capture`
+- `stop_note_capture`
+- `cancel_note_capture`
+
+Why deferred:
+
+- current frontends can create notes with a single `create_note` command
+- multi-step capture only matters once voice-heavy clients need finer control
 
 ## Guardrails
 

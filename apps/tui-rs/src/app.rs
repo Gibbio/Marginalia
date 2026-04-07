@@ -3,8 +3,9 @@ use serde_json::json;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-const COMMANDS: [&str; 9] = [
-    "/play", "/ingest", "/pause", "/resume", "/stop", "/repeat", "/back", "/next", "/note",
+const COMMANDS: [&str; 12] = [
+    "/play", "/ingest", "/pause", "/resume", "/stop", "/repeat", "/restart", "/back", "/next",
+    "/note", "/help", "/refresh",
 ];
 
 pub struct App {
@@ -119,6 +120,7 @@ impl App {
             "resume" => self.backend.execute_command("resume_session", json!({}))?,
             "stop" => self.backend.execute_command("stop_session", json!({}))?,
             "repeat" => self.backend.execute_command("repeat_chunk", json!({}))?,
+            "restart" => self.backend.execute_command("restart_chapter", json!({}))?,
             "back" => self.backend.execute_command("previous_chunk", json!({}))?,
             "next" => self.backend.execute_command("next_chapter", json!({}))?,
             "note" => {
@@ -150,5 +152,5 @@ impl App {
 }
 
 pub fn help_text() -> &'static str {
-    "/play <path|id>  /ingest <path>  /pause  /resume  /stop  /repeat  /back  /next  /note <text>"
+    "/play <path|id>  /ingest <path>  /pause  /resume  /stop  /repeat  /restart  /back  /next  /note <text>"
 }
