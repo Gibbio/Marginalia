@@ -5,17 +5,25 @@ use std::env;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 const PROTOCOL_VERSION: u32 = 1;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Deserialize)]
 pub struct ResponseEnvelope {
     pub status: String,
+    pub name: String,
     pub message: String,
     #[serde(default)]
     pub payload: Value,
+    #[serde(default)]
+    pub request_id: Option<String>,
+    #[serde(default)]
+    pub protocol_version: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -98,7 +106,8 @@ struct RequestEnvelope<'a> {
 pub struct BackendClient {
     child: Child,
     stdin: BufWriter<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
+    response_rx: mpsc::Receiver<String>,
+    reader_thread: Option<JoinHandle<()>>,
     request_counter: u64,
     stderr_lines: Arc<Mutex<VecDeque<String>>>,
     stderr_thread: Option<JoinHandle<()>>,
@@ -144,11 +153,14 @@ impl BackendClient {
             .ok_or_else(|| "Backend stderr pipe unavailable.".to_string())?;
         let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(24)));
         let stderr_thread = Some(spawn_stderr_collector(stderr, Arc::clone(&stderr_lines)));
+        let (response_tx, response_rx) = mpsc::channel();
+        let reader_thread = Some(spawn_stdout_reader(stdout, response_tx));
 
         Ok(Self {
             child,
             stdin: BufWriter::new(stdin),
-            stdout: BufReader::new(stdout),
+            response_rx,
+            reader_thread,
             request_counter: 0,
             stderr_lines,
             stderr_thread,
@@ -250,21 +262,35 @@ impl BackendClient {
             )
         })?;
 
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).map_err(|err| {
-            format!(
-                "Unable to read backend response: {err}{}",
-                self.backend_exit_hint()
-            )
-        })?;
-        if line.trim().is_empty() {
-            return Err(format!(
-                "Backend closed the stdio channel unexpectedly.{}",
-                self.backend_exit_hint()
-            ));
+        let line = self
+            .response_rx
+            .recv_timeout(REQUEST_TIMEOUT)
+            .map_err(|err| match err {
+                mpsc::RecvTimeoutError::Timeout => {
+                    format!(
+                        "Backend did not respond within {} seconds.{}",
+                        REQUEST_TIMEOUT.as_secs(),
+                        self.backend_exit_hint()
+                    )
+                }
+                mpsc::RecvTimeoutError::Disconnected => {
+                    format!(
+                        "Backend closed the stdio channel unexpectedly.{}",
+                        self.backend_exit_hint()
+                    )
+                }
+            })?;
+        let response: ResponseEnvelope = serde_json::from_str(&line)
+            .map_err(|err| format!("Unable to decode backend response: {err}"))?;
+        if let Some(ref resp_id) = response.request_id {
+            let expected_id = format!("req-{}", self.request_counter);
+            if resp_id != &expected_id {
+                return Err(format!(
+                    "Response id mismatch: expected {expected_id}, got {resp_id}"
+                ));
+            }
         }
-        serde_json::from_str(&line)
-            .map_err(|err| format!("Unable to decode backend response: {err}"))
+        Ok(response)
     }
 
     fn backend_exit_hint(&mut self) -> String {
@@ -295,10 +321,28 @@ impl Drop for BackendClient {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(handle) = self.reader_thread.take() {
+            let _ = handle.join();
+        }
         if let Some(handle) = self.stderr_thread.take() {
             let _ = handle.join();
         }
     }
+}
+
+fn spawn_stdout_reader(stdout: ChildStdout, tx: mpsc::Sender<String>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            let trimmed = line.trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if tx.send(trimmed).is_err() {
+                break;
+            }
+        }
+    })
 }
 
 fn spawn_stderr_collector(
