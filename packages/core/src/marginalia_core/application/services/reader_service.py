@@ -449,6 +449,126 @@ class ReaderService:
             publish_started=False,
         )
 
+    def next_chunk(
+        self,
+        *,
+        command_source: str = "cli",
+        recognized_command: str | None = None,
+    ) -> OperationResult:
+        """Advance one chunk, crossing into the next section if needed."""
+
+        session = self._session_repository.get_active_session()
+        if session is None:
+            return OperationResult.error("No active reading session exists.")
+
+        document = self._document_repository.get_document(session.document_id)
+        if document is None:
+            return OperationResult.error("The active session references a missing document.")
+
+        self._synchronize_session_playback(session)
+
+        current_section = document.get_section(session.position.section_index)
+        next_chunk_index = session.position.chunk_index + 1
+        crossed_chapter = False
+        if next_chunk_index < current_section.chunk_count:
+            session.position = ReadingPosition(
+                section_index=session.position.section_index,
+                chunk_index=next_chunk_index,
+            )
+        elif session.position.section_index + 1 < len(document.sections):
+            session.position = ReadingPosition(
+                section_index=session.position.section_index + 1,
+                chunk_index=0,
+            )
+            crossed_chapter = True
+        else:
+            return OperationResult.error("Already at the end of the document.")
+
+        if session.state is not ReaderState.READING:
+            try:
+                self._state_machine.transition(session, ReaderState.READING)
+            except InvalidTransitionError as exc:
+                return OperationResult.error(str(exc))
+
+        result = self._start_current_chunk(
+            session,
+            document,
+            command_name="next-chunk",
+            command_source=command_source,
+            recognized_command=recognized_command,
+            message="Moved to the next chunk.",
+            publish_started=False,
+        )
+        if crossed_chapter:
+            self._publish(
+                EventName.CHAPTER_ADVANCED,
+                session_id=session.session_id,
+                document_id=session.document_id,
+                section_index=session.position.section_index,
+                anchor=session.position.anchor,
+            )
+        return result
+
+    def previous_chapter(
+        self,
+        *,
+        command_source: str = "cli",
+        recognized_command: str | None = None,
+    ) -> OperationResult:
+        session = self._session_repository.get_active_session()
+        if session is None:
+            return OperationResult.error("No active reading session exists.")
+
+        document = self._document_repository.get_document(session.document_id)
+        if document is None:
+            return OperationResult.error("The active session references a missing document.")
+
+        self._synchronize_session_playback(session)
+        previous_section_index = session.position.section_index - 1
+        if previous_section_index < 0:
+            return OperationResult.error("Already at the first chapter.")
+
+        session.position = ReadingPosition(section_index=previous_section_index, chunk_index=0)
+        if session.state is ReaderState.READING:
+            result = self._start_current_chunk(
+                session,
+                document,
+                command_name="previous-chapter",
+                command_source=command_source,
+                recognized_command=recognized_command,
+                message="Session moved to the previous chapter.",
+                publish_started=False,
+            )
+        else:
+            playback_snapshot = self._playback_engine.seek(session.position)
+            self._apply_playback_snapshot(session, playback_snapshot)
+            self._mark_command(
+                session,
+                command_name="previous-chapter",
+                command_source=command_source,
+                recognized_command=recognized_command,
+            )
+            self._session_repository.save_session(session)
+            result = OperationResult.ok(
+                "Session moved to the previous chapter.",
+                data={"session": session, "playback": playback_snapshot},
+            )
+
+        progress = self._reading_progress(document, session)
+        self._publish(
+            EventName.READING_PROGRESSED,
+            session_id=session.session_id,
+            document_id=session.document_id,
+            section_index=session.position.section_index,
+            chunk_index=session.position.chunk_index,
+            anchor=session.position.anchor,
+            section_count=progress["section_count"],
+            section_chunk_count=progress["section_chunk_count"],
+            chunks_read=progress["chunks_read"],
+            total_chunks=progress["total_chunks"],
+        )
+        return result
+
     def restart_chapter(
         self,
         *,

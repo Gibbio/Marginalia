@@ -199,6 +199,10 @@ impl App {
         self.push_message("Press Ctrl-C again within 2s to quit.".to_string());
     }
 
+    pub fn command_input_is_empty(&self) -> bool {
+        self.input.trim().is_empty()
+    }
+
     pub fn autocomplete(&mut self) {
         let suggestions = self.suggestions();
         match suggestions.as_slice() {
@@ -302,7 +306,7 @@ impl App {
     pub fn command_hint(&self) -> String {
         let input = self.input.trim();
         if input.is_empty() {
-            return "Type / to explore commands. Tab completes. Ctrl+P/Ctrl+N browse history."
+            return "Type / to explore commands. Empty input: arrows navigate. Ctrl+P/Ctrl+N browse history."
                 .to_string();
         }
         if !input.starts_with('/') {
@@ -479,8 +483,34 @@ impl App {
         }
     }
 
+    fn run_shortcut_command(&mut self, command_name: &str) {
+        match self.backend.execute_command(command_name, json!({})) {
+            Ok(message) => {
+                self.push_message(message);
+                let _ = self.refresh();
+            }
+            Err(message) => self.push_message(format!("error: {message}")),
+        }
+    }
+
     pub fn animation_frame(&self) -> usize {
         ((self.launched_at.elapsed().as_millis() / 140) % 3) as usize
+    }
+
+    pub fn navigate_previous_chunk(&mut self) {
+        self.run_shortcut_command("previous_chunk");
+    }
+
+    pub fn navigate_next_chunk(&mut self) {
+        self.run_shortcut_command("next_chunk");
+    }
+
+    pub fn navigate_previous_chapter(&mut self) {
+        self.run_shortcut_command("previous_chapter");
+    }
+
+    pub fn navigate_next_chapter(&mut self) {
+        self.run_shortcut_command("next_chapter");
     }
 
     fn suggestions(&self) -> Vec<SuggestionItem> {

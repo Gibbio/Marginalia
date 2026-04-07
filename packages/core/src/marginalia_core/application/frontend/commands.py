@@ -10,8 +10,10 @@ class FrontendCommandName(str, Enum):
 
     CREATE_NOTE = "create_note"
     INGEST_DOCUMENT = "ingest_document"
+    NEXT_CHUNK = "next_chunk"
     NEXT_CHAPTER = "next_chapter"
     PAUSE_SESSION = "pause_session"
+    PREVIOUS_CHAPTER = "previous_chapter"
     PREVIOUS_CHUNK = "previous_chunk"
     REPEAT_CHUNK = "repeat_chunk"
     RESTART_CHAPTER = "restart_chapter"
