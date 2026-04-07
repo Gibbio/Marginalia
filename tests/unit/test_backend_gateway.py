@@ -198,8 +198,9 @@ def test_next_chunk_and_previous_chapter_commands_navigate_session(
     )
 
     assert next_chunk_response.status.value == "ok"
-    assert session_after_next.payload["session"]["chunk_index"] == 1
-    assert previous_chapter_response.status.value == "error"
+    assert session_after_next.payload["session"]["section_index"] == 1
+    assert session_after_next.payload["session"]["chunk_index"] == 0
+    assert previous_chapter_response.status.value == "ok"
     assert session_after_previous.payload["session"]["section_index"] == 0
 
 

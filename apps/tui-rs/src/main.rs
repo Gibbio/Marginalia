@@ -10,10 +10,10 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::env;
 use std::io::stdout;
@@ -58,6 +58,7 @@ fn run_tui(
 ) -> Result<(), String> {
     while !app.should_quit {
         app.refresh_if_due();
+        app.poll_backend_logs();
         terminal
             .draw(|frame| render(frame, app))
             .map_err(|err| format!("Unable to draw terminal frame: {err}"))?;
@@ -88,6 +89,14 @@ fn run_tui(
                         app.navigate_previous_chapter();
                     }
                     KeyCode::Right if app.command_input_is_empty() => app.navigate_next_chapter(),
+                    KeyCode::PageUp if app.command_input_is_empty() => app.scroll_document_up(8),
+                    KeyCode::PageDown if app.command_input_is_empty() => {
+                        app.scroll_document_down(8);
+                    }
+                    KeyCode::Home if app.command_input_is_empty() => app.scroll_document_to_top(),
+                    KeyCode::End if app.command_input_is_empty() => {
+                        app.scroll_document_to_bottom();
+                    }
                     KeyCode::Up => app.select_previous_suggestion(),
                     KeyCode::Down => app.select_next_suggestion(),
                     KeyCode::Backspace => app.pop_char(),
@@ -103,35 +112,34 @@ fn run_tui(
     Ok(())
 }
 
-fn render(frame: &mut Frame, app: &App) {
+fn render(frame: &mut Frame, app: &mut App) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(9),
-            Constraint::Min(12),
-            Constraint::Length(8),
+            Constraint::Min(18),
             Constraint::Length(7),
         ])
         .split(frame.area());
-    let middle = Layout::default()
+    let body = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
+        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
         .split(vertical[1]);
-    let lower = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
-        .split(vertical[2]);
+    let sidebar = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .split(body[1]);
 
     let header = Paragraph::new(render_header_lines(app))
         .block(Block::default().borders(Borders::ALL).title("Overview"))
-        .wrap(Wrap { trim: true });
+        .wrap(Wrap { trim: false });
 
-    let document = Paragraph::new(render_document_lines(app))
+    let (document_lines, active_document_line) = render_document_lines(app);
+    sync_document_scroll(app, body[0], active_document_line, document_lines.len());
+    let document = Paragraph::new(document_lines)
         .block(Block::default().borders(Borders::ALL).title("Document"))
+        .scroll((app.document_scroll(), 0))
         .wrap(Wrap { trim: true });
-
-    let documents = List::new(render_documents(app))
-        .block(Block::default().borders(Borders::ALL).title("Documents"));
 
     let messages = Paragraph::new(render_messages(app))
         .block(Block::default().borders(Borders::ALL).title("Log"))
@@ -146,39 +154,52 @@ fn render(frame: &mut Frame, app: &App) {
         .style(Style::default().fg(Color::Yellow));
 
     frame.render_widget(header, vertical[0]);
-    frame.render_widget(document, middle[0]);
-    frame.render_widget(documents, middle[1]);
-    frame.render_widget(messages, lower[0]);
-    frame.render_widget(status, lower[1]);
-    frame.render_widget(input, vertical[3]);
+    frame.render_widget(document, body[0]);
+    frame.render_widget(messages, sidebar[0]);
+    frame.render_widget(status, sidebar[1]);
+    frame.render_widget(input, vertical[2]);
     frame.set_cursor_position((
-        vertical[3].x + 3 + app.input.chars().count() as u16,
-        vertical[3].y + 1,
+        vertical[2].x + 3 + app.input.chars().count() as u16,
+        vertical[2].y + 1,
     ));
+}
+
+fn sync_document_scroll(
+    app: &mut App,
+    document_area: Rect,
+    active_document_line: Option<usize>,
+    total_lines: usize,
+) {
+    let viewport_height = document_area.height.saturating_sub(2);
+    app.sync_document_scroll(
+        active_document_line,
+        viewport_height.max(1),
+        total_lines.max(1),
+    );
 }
 
 fn render_header_lines(app: &App) -> Vec<Line<'static>> {
     let dinosaur = match app.animation_frame() {
         0 => [
-            "           __",
-            "          / _)",
-            "   .-^^^-/ /  ",
-            "__/       /   ",
-            "<__.|_|-|_|   ",
+            "            __",
+            "           / _)",
+            "    _.----./ / ",
+            " __/         / ",
+            "<__.-'|_|-|_|  ",
         ],
         1 => [
-            "           __",
-            "          / _)",
-            "   .-^^^-/ /  ",
-            "__/       /   ",
-            "<__.|_|-|-|   ",
+            "            __",
+            "           / _)",
+            "    _.----./ / ",
+            " __/         / ",
+            "<__.-'|_|-|-|  ",
         ],
         _ => [
-            "           __",
-            "          / _)",
-            "   .-^^^-/ /  ",
-            "__/       /   ",
-            "<__.|-|_|_|   ",
+            "            __",
+            "           / _)",
+            "    _.----./ / ",
+            " __/         / ",
+            "<__.-'|-|_|_|  ",
         ],
     };
 
@@ -393,12 +414,15 @@ fn render_status_lines(app: &App) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_document_lines(app: &App) -> Vec<Line<'static>> {
+fn render_document_lines(app: &App) -> (Vec<Line<'static>>, Option<usize>) {
     let Some(document) = &app.document_view else {
-        return vec![
-            Line::from("No ingested document selected.".to_string()),
-            Line::from("Use /ingest <path> to load a markdown file.".to_string()),
-        ];
+        return (
+            vec![
+                Line::from("No ingested document selected.".to_string()),
+                Line::from("Use /ingest <path> to load a markdown file.".to_string()),
+            ],
+            None,
+        );
     };
 
     let mut lines = vec![
@@ -417,6 +441,7 @@ fn render_document_lines(app: &App) -> Vec<Line<'static>> {
         )),
         Line::from("".to_string()),
     ];
+    let mut active_line_index = None;
 
     for section in &document.sections {
         let section_style = if Some(section.index) == document.active_section_index {
@@ -431,7 +456,7 @@ fn render_document_lines(app: &App) -> Vec<Line<'static>> {
             section_style,
         )));
 
-        for chunk in section.chunks.iter().take(2) {
+        for chunk in &section.chunks {
             let marker = if chunk.is_active {
                 ">"
             } else if chunk.is_read {
@@ -439,6 +464,19 @@ fn render_document_lines(app: &App) -> Vec<Line<'static>> {
             } else {
                 " "
             };
+            let chunk_style = if chunk.is_active {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else if chunk.is_read {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            let chunk_text = chunk.text.replace('\n', " ");
+            if chunk.is_active {
+                active_line_index = Some(lines.len());
+            }
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{} ", marker),
@@ -452,14 +490,7 @@ fn render_document_lines(app: &App) -> Vec<Line<'static>> {
                     format!("[{}:{}] ", section.index + 1, chunk.index + 1),
                     Style::default().fg(Color::DarkGray),
                 ),
-                Span::styled(
-                    chunk.text.clone(),
-                    if chunk.is_active {
-                        Style::default().fg(Color::Yellow)
-                    } else {
-                        Style::default().fg(Color::Gray)
-                    },
-                ),
+                Span::styled(chunk_text, chunk_style),
             ]));
             if chunk.is_active {
                 lines.push(Line::from(Span::styled(
@@ -472,12 +503,6 @@ fn render_document_lines(app: &App) -> Vec<Line<'static>> {
                 )));
             }
         }
-        if section.chunk_count > 2 {
-            lines.push(Line::from(Span::styled(
-                format!("  ... {} more chunks", section.chunk_count - 2),
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
         if Some(section.index) == document.active_section_index {
             if let Some(active_chunk_index) = document.active_chunk_index {
                 lines.push(Line::from(Span::styled(
@@ -489,38 +514,18 @@ fn render_document_lines(app: &App) -> Vec<Line<'static>> {
         lines.push(Line::from("".to_string()));
     }
 
-    lines
-}
-
-fn render_documents(app: &App) -> Vec<ListItem<'static>> {
-    if app.local_markdown_files.is_empty() {
-        return vec![ListItem::new(
-            "No .md files in the current launch directory.",
-        )];
-    }
-
-    app.local_markdown_files
-        .iter()
-        .map(|file| {
-            ListItem::new(vec![Line::from(vec![
-                Span::styled(
-                    file.name.clone(),
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!("  {}", file.path.display())),
-            ])])
-        })
-        .collect()
+    (lines, active_line_index)
 }
 
 fn render_messages(app: &App) -> Vec<Line<'static>> {
     if app.messages.is_empty() {
         return vec![Line::from("No messages yet.")];
     }
+    let total = app.messages.len();
+    let start = total.saturating_sub(64);
     app.messages
         .iter()
+        .skip(start)
         .map(|message| Line::from(message.clone()))
         .collect()
 }
