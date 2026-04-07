@@ -130,31 +130,66 @@ fn render(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
         .split(body[1]);
 
+    let border_style = Style::default().fg(Color::Rgb(140, 160, 180));
+    let title_style = Style::default()
+        .fg(Color::Rgb(180, 200, 220))
+        .add_modifier(Modifier::BOLD);
+
     let header = Paragraph::new(render_header_lines(app))
-        .block(Block::default().borders(Borders::ALL).title("Overview"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Overview ")
+                .title_style(title_style),
+        )
         .wrap(Wrap { trim: false });
 
     let (document_lines, active_document_line) =
         render_document_lines(app, body[0].width.saturating_sub(2).max(1) as usize);
     sync_document_scroll(app, body[0], active_document_line, document_lines.len());
     let document = Paragraph::new(document_lines)
-        .block(Block::default().borders(Borders::ALL).title("Document"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Document ")
+                .title_style(title_style),
+        )
         .scroll((app.document_scroll(), 0))
         .wrap(Wrap { trim: false });
 
     let messages_widget = Paragraph::new(render_messages(app))
-        .block(Block::default().borders(Borders::ALL).title("Log"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Log ")
+                .title_style(title_style),
+        )
         .wrap(Wrap { trim: true });
     let messages_viewport = sidebar[0].height.saturating_sub(2);
     let messages_total = messages_widget.line_count(sidebar[0].width.saturating_sub(2)) as u16;
     let messages = messages_widget.scroll((messages_total.saturating_sub(messages_viewport), 0));
 
     let status = Paragraph::new(render_status_lines(app))
-        .block(Block::default().borders(Borders::ALL).title("Session"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Session ")
+                .title_style(title_style),
+        )
         .wrap(Wrap { trim: true });
 
     let input = Paragraph::new(render_input_lines(app))
-        .block(Block::default().borders(Borders::ALL).title("Command"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Command ")
+                .title_style(title_style),
+        )
         .style(Style::default().fg(Color::Yellow));
 
     frame.render_widget(header, vertical[0]);
