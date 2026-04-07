@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import traceback
 from dataclasses import asdict
 
 from marginalia_backend.gateway import LocalFrontendGateway
@@ -50,10 +51,19 @@ class StdioFrontendServer:
                 message=str(exc),
             )
 
-        if request.request_type == "command":
-            return self._gateway.execute_command(request)
-        if request.request_type == "query":
-            return self._gateway.execute_query(request)
+        try:
+            if request.request_type == "command":
+                return self._gateway.execute_command(request)
+            if request.request_type == "query":
+                return self._gateway.execute_query(request)
+        except Exception as exc:  # pragma: no cover - defensive transport guard
+            traceback.print_exc(file=sys.stderr)
+            return FrontendResponse(
+                status=FrontendResponseStatus.ERROR,
+                name=request.name,
+                message=f"Backend request failed: {exc.__class__.__name__}: {exc}",
+                request_id=request.request_id,
+            )
         return FrontendResponse(
             status=FrontendResponseStatus.ERROR,
             name=request.name,
