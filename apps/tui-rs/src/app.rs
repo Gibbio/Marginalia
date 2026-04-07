@@ -162,6 +162,19 @@ impl App {
         }
     }
 
+    pub fn confirm_input(&mut self) {
+        if let Some(selected) = self.selected_suggestion() {
+            if selected.value != self.input.trim() {
+                self.input = selected.value;
+                self.history_index = None;
+                self.history_draft = None;
+                self.suggestion_index = 0;
+                return;
+            }
+        }
+        self.submit_input();
+    }
+
     pub fn autocomplete(&mut self) {
         let suggestions = self.suggestions();
         match suggestions.as_slice() {

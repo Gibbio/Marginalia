@@ -81,7 +81,7 @@ fn run_tui(
                     KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.select_next_history();
                     }
-                    KeyCode::Enter => app.submit_input(),
+                    KeyCode::Enter => app.confirm_input(),
                     KeyCode::Up => app.select_previous_suggestion(),
                     KeyCode::Down => app.select_next_suggestion(),
                     KeyCode::Backspace => app.pop_char(),
