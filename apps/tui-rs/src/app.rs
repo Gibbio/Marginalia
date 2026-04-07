@@ -18,12 +18,19 @@ pub struct SuggestionItem {
     pub value: String,
     pub label: String,
     pub summary: String,
+    pub is_terminal: bool,
 }
 
 #[derive(Clone)]
 pub struct LocalMarkdownFile {
     pub name: String,
     pub path: PathBuf,
+}
+
+#[derive(Clone)]
+struct IngestPathCandidate {
+    path: PathBuf,
+    is_directory: bool,
 }
 
 pub const COMMANDS: [CommandSpec; 12] = [
@@ -175,7 +182,7 @@ impl App {
 
     pub fn confirm_input(&mut self) {
         if let Some(selected) = self.selected_suggestion() {
-            if selected.value != self.input.trim() {
+            if selected.value != self.input.trim() || !selected.is_terminal {
                 self.input = selected.value;
                 self.history_index = None;
                 self.history_draft = None;
@@ -528,6 +535,7 @@ impl App {
                 value: command.name.to_string(),
                 label: command.name.to_string(),
                 summary: command.summary.to_string(),
+                is_terminal: true,
             })
             .collect()
     }
@@ -569,6 +577,7 @@ impl App {
                     "{} ({} ch, {} chunks)",
                     document.title, document.chapter_count, document.chunk_count
                 ),
+                is_terminal: true,
             })
             .collect()
     }
@@ -576,15 +585,31 @@ impl App {
     fn ingest_suggestions(&self, argument_prefix: &str) -> Vec<SuggestionItem> {
         discover_ingestable_files(argument_prefix)
             .into_iter()
-            .map(|file| SuggestionItem {
-                value: format!("/ingest {}", file.path.display()),
-                label: file
-                    .path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                summary: file.path.display().to_string(),
+            .map(|candidate| SuggestionItem {
+                value: if candidate.is_directory {
+                    format!("/ingest {}/", candidate.path.display())
+                } else {
+                    format!("/ingest {}", candidate.path.display())
+                },
+                label: if candidate.is_directory {
+                    format!(
+                        "{}/",
+                        candidate
+                            .path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or_default()
+                    )
+                } else {
+                    candidate
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default()
+                        .to_string()
+                },
+                summary: candidate.path.display().to_string(),
+                is_terminal: !candidate.is_directory,
             })
             .collect()
     }
@@ -643,7 +668,7 @@ fn discover_markdown_files() -> Vec<LocalMarkdownFile> {
     files
 }
 
-fn discover_ingestable_files(argument_prefix: &str) -> Vec<LocalMarkdownFile> {
+fn discover_ingestable_files(argument_prefix: &str) -> Vec<IngestPathCandidate> {
     let trimmed = argument_prefix.trim();
     let expanded = expand_shell_like_path(trimmed);
 
@@ -671,11 +696,10 @@ fn discover_ingestable_files(argument_prefix: &str) -> Vec<LocalMarkdownFile> {
         return Vec::new();
     };
 
-    let mut files: Vec<LocalMarkdownFile> = entries
+    let mut candidates: Vec<IngestPathCandidate> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.is_file())
-        .filter(|path| is_ingestable_extension(path))
+        .filter(|path| path.is_dir() || is_ingestable_extension(path))
         .filter(|path| {
             partial_name.is_empty()
                 || path
@@ -683,14 +707,19 @@ fn discover_ingestable_files(argument_prefix: &str) -> Vec<LocalMarkdownFile> {
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| name.to_lowercase().contains(&partial_name))
         })
-        .filter_map(|path| {
-            let name = path.file_name()?.to_str()?.to_string();
-            Some(LocalMarkdownFile { name, path })
+        .map(|path| IngestPathCandidate {
+            is_directory: path.is_dir(),
+            path,
         })
         .collect();
 
-    files.sort_by(|left, right| left.name.cmp(&right.name));
-    files
+    candidates.sort_by(|left, right| {
+        right
+            .is_directory
+            .cmp(&left.is_directory)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    candidates
 }
 
 fn expand_shell_like_path(input: &str) -> PathBuf {
