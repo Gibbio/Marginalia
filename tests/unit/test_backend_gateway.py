@@ -62,6 +62,184 @@ def test_ingest_document_command_then_list_documents_query(
     assert list_response.payload["documents"][0]["title"] == "Sample Document"
 
 
+def test_document_view_query_reports_sections_and_active_chunk(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(tmp_path, monkeypatch)
+    source_path = Path("tests/fixtures/sample_document.txt").resolve()
+
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="ingest_document",
+            payload={"path": str(source_path)},
+        )
+    )
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="start_session",
+            payload={"target": str(source_path)},
+        )
+    )
+
+    response = gateway.execute_query(
+        FrontendRequest(request_type="query", name="get_document_view")
+    )
+
+    assert response.status.value == "ok"
+    document = response.payload["document"]
+    assert document["chapter_count"] == 2
+    assert document["active_section_index"] == 0
+    assert document["sections"][0]["chunks"][0]["is_active"] is True
+
+
+def test_list_notes_query_reports_created_note_for_active_document(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(tmp_path, monkeypatch)
+    source_path = Path("tests/fixtures/sample_document.txt").resolve()
+
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="ingest_document",
+            payload={"path": str(source_path)},
+        )
+    )
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="start_session",
+            payload={"target": str(source_path)},
+        )
+    )
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="create_note",
+            payload={"text": "Remember this chapter."},
+        )
+    )
+
+    response = gateway.execute_query(
+        FrontendRequest(request_type="query", name="list_notes")
+    )
+
+    assert response.status.value == "ok"
+    notes_snapshot = response.payload["notes"]
+    assert len(notes_snapshot["notes"]) == 1
+    assert notes_snapshot["notes"][0]["transcript"] == "Remember this chapter."
+
+
+def test_restart_chapter_command_is_available_in_backend_contract(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(tmp_path, monkeypatch)
+
+    response = gateway.execute_query(
+        FrontendRequest(request_type="query", name="get_backend_capabilities")
+    )
+
+    assert response.status.value == "ok"
+    assert "restart_chapter" in response.payload["commands"]
+
+
+def test_search_documents_query_returns_document_hits(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(tmp_path, monkeypatch)
+    source_path = Path("tests/fixtures/sample_document.txt").resolve()
+
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="ingest_document",
+            payload={"path": str(source_path)},
+        )
+    )
+
+    response = gateway.execute_query(
+        FrontendRequest(
+            request_type="query",
+            name="search_documents",
+            payload={"query": "attentive"},
+        )
+    )
+
+    assert response.status.value == "ok"
+    search = response.payload["search"]
+    assert search["query"] == "attentive"
+    assert len(search["results"]) == 1
+    assert search["results"][0]["entity_kind"] == "document"
+
+
+def test_search_notes_query_returns_note_hits(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(tmp_path, monkeypatch)
+    source_path = Path("tests/fixtures/sample_document.txt").resolve()
+
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="ingest_document",
+            payload={"path": str(source_path)},
+        )
+    )
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="start_session",
+            payload={"target": str(source_path)},
+        )
+    )
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="create_note",
+            payload={"text": "Attentive reminder for later."},
+        )
+    )
+
+    response = gateway.execute_query(
+        FrontendRequest(
+            request_type="query",
+            name="search_notes",
+            payload={"query": "reminder"},
+        )
+    )
+
+    assert response.status.value == "ok"
+    search = response.payload["search"]
+    assert search["query"] == "reminder"
+    assert len(search["results"]) == 1
+    assert search["results"][0]["entity_kind"] == "note"
+
+
+def test_search_documents_query_rejects_empty_query(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(tmp_path, monkeypatch)
+
+    response = gateway.execute_query(
+        FrontendRequest(
+            request_type="query",
+            name="search_documents",
+            payload={"query": "   "},
+        )
+    )
+
+    assert response.status.value == "error"
+    assert "non-empty search query" in response.message.lower()
+
+
 def test_backend_stdio_server_handles_capabilities_query(tmp_path: Path) -> None:
     runner = CliRunner()
     env = {

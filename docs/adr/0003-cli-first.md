@@ -1,6 +1,6 @@
 # ADR 0003: CLI First
 
-- Status: Accepted
+- Status: Superseded by ADR 0008
 
 ## Context
 
@@ -12,12 +12,15 @@ contracts, and local workflow shape.
 
 Use a CLI as the first usable interface.
 
+This ADR served the first product phase. Marginalia now uses a headless backend
+plus client frontends, formalized in ADR 0008.
+
 ## Consequences
 
 - the core can be exercised before desktop decisions are made
 - tests and smoke flows are easier to automate
-- the future desktop shell should reuse the same service graph rather than
-  invent parallel logic
+- the first frontend work can validate the service graph before stronger
+  frontend/backend boundaries are introduced
 
 ## Alternatives Considered
 

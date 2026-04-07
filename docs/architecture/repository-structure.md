@@ -9,10 +9,10 @@ obvious from the start.
 
 ### `apps/`
 
-- `backend/`: target home for the headless local backend process
-- `cli/`: current interface, later a thin client or admin shell
+- `backend/`: headless local backend process
+- `cli/`: thin Python compatibility interface and admin/debug surface
 - `desktop/`: reserved place for a future thin desktop shell
-- `tui-rs/`: reserved place for a future Rust TUI client
+- `tui-rs/`: Rust TUI client over the backend contract
 
 ### `packages/`
 

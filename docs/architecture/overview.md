@@ -8,9 +8,9 @@ Marginalia is a lightweight modular monolith organized as a monorepo.
   machine, and application services
 - `packages/adapters` owns fake and future concrete providers
 - `packages/infra` owns SQLite, config, logging, and event bus wiring
-- `apps/backend` is the target home for the headless local backend process
-- `apps/cli` is the current first interface, but no longer the long-term
-  architectural center
+- `apps/backend` owns the headless local backend process
+- `apps/cli` is now a thin Python compatibility interface
+- `apps/tui-rs` is the first standalone frontend client
 
 This remains effectively a clean or hexagonal architecture with low ceremony.
 
@@ -26,7 +26,7 @@ The architecture therefore optimizes for:
 
 ## Runtime Model
 
-The current runtime is simple but real. The target runtime shape is:
+The current runtime is simple but real. Its current shape is:
 
 1. a headless local backend composes a local container
 2. `DocumentIngestionService`, `ReaderService`, `NoteService`,
@@ -67,6 +67,7 @@ instead of direct service calls.
 - real local playback through `afplay` when configured
 - step-driven runtime loop decoupled from the CLI
 - headless backend contract and stdio transport for external frontends
+- Rust `ratatui + crossterm` frontend client over the backend contract
 - signal handling for graceful shutdown during playback
 - pause and resume state transitions
 - repeat, rewind, chapter restart, chapter advance, stop, help, and bounded
@@ -99,6 +100,9 @@ CLI-first is not an aesthetic choice. It keeps the first implementation honest:
 - provider contracts can be exercised without desktop decisions
 - tests can target deterministic commands and outputs
 - the same service graph can later back a headless backend with many clients
+
+That phase is now complete: the backend/frontend split is the active
+architectural center.
 
 ## Why Monorepo
 

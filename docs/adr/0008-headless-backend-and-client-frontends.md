@@ -38,6 +38,9 @@ IPC, not HTTP:
 - likely second transport: Unix domain socket with the same message envelopes
 - deferred: HTTP APIs and network-exposed services
 
+The first concrete client on top of this model is a Rust TUI built with
+`ratatui + crossterm`.
+
 Frontends must depend only on exported contracts, not on repositories, services,
 or domain objects.
 
