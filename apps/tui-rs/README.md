@@ -27,3 +27,28 @@ If `marginalia.toml` exists, export it before launch:
 MARGINALIA_CONFIG=marginalia.toml \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
+
+## Interaction
+
+Command bar:
+
+- `Tab` completes the selected suggestion
+- `Enter` confirms the selected suggestion, then runs the command once the
+  input is complete
+- `Up` and `Down` navigate suggestions while typing
+- `Ctrl-P` and `Ctrl-N` navigate command history
+- `Ctrl-C` must be pressed twice within 2 seconds to quit
+
+Session navigation:
+
+- with an empty command bar, `Up` triggers `previous_chunk`
+- with an empty command bar, `Down` triggers `next_chunk`
+- with an empty command bar, `Left` triggers `previous_chapter`
+- with an empty command bar, `Right` triggers `next_chapter`
+
+`/ingest` accepts markdown and plain text files. In the current TUI it also:
+
+- expands shell-like paths such as `~/notes/book.md` or `$HOME/notes/book.txt`
+- suggests `.md`, `.markdown`, and `.txt` files from the directory you are
+  currently typing
+- updates the `Document` pane immediately after a successful import

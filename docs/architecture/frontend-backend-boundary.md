@@ -120,7 +120,9 @@ Currently implemented:
 
 - `ingest_document`
 - `start_session`
+- `next_chunk`
 - `pause_session`
+- `previous_chapter`
 - `resume_session`
 - `stop_session`
 - `repeat_chunk`

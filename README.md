@@ -108,6 +108,12 @@ Then inside the TUI command bar:
 /stop
 ```
 
+TUI navigation highlights:
+
+- empty command bar: arrow keys navigate reading position
+- while typing: `Up` and `Down` navigate suggestions
+- `Ctrl-C` must be pressed twice to quit
+
 Fake-provider smoke flow (no external deps):
 
 ```bash

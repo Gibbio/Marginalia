@@ -107,7 +107,7 @@ Every response includes:
 Example response:
 
 ```json
-{"status":"ok","name":"get_backend_capabilities","message":"Backend capabilities reported.","payload":{"protocol_version":1,"commands":["create_note","ingest_document","next_chapter","pause_session","previous_chunk","repeat_chunk","restart_chapter","resume_session","start_session","stop_session"],"queries":["get_app_snapshot","get_backend_capabilities","get_document_view","get_doctor_report","get_session_snapshot","list_notes","list_documents","search_documents","search_notes"],"transports":["stdio-jsonl"],"frontend_event_stream_supported":true,"dictation_enabled":true,"rewrite_enabled":true,"summary_enabled":true},"request_id":"req-1","protocol_version":1}
+{"status":"ok","name":"get_backend_capabilities","message":"Backend capabilities reported.","payload":{"protocol_version":1,"commands":["create_note","ingest_document","next_chapter","next_chunk","pause_session","previous_chapter","previous_chunk","repeat_chunk","restart_chapter","resume_session","start_session","stop_session"],"queries":["get_app_snapshot","get_backend_capabilities","get_document_view","get_doctor_report","get_session_snapshot","list_notes","list_documents","search_documents","search_notes"],"transports":["stdio-jsonl"],"frontend_event_stream_supported":true,"dictation_enabled":true,"rewrite_enabled":true,"summary_enabled":true},"request_id":"req-1","protocol_version":1}
 ```
 
 ## First Handshake
@@ -133,7 +133,9 @@ Currently supported commands:
 - `create_note`
 - `ingest_document`
 - `next_chapter`
+- `next_chunk`
 - `pause_session`
+- `previous_chapter`
 - `previous_chunk`
 - `repeat_chunk`
 - `restart_chapter`
@@ -165,6 +167,14 @@ Payload:
 {"path":"tests/fixtures/sample_document.txt"}
 ```
 
+Client note:
+
+- the backend accepts plain text and markdown files
+- frontend clients may expand shell-like paths such as `~/...`, `$HOME/...`,
+  and `${HOME}/...` before sending the request
+- in the current Rust TUI, `ingest` is used to import a document into the local
+  library and immediately show it in the document preview, even before `play`
+
 #### `create_note`
 
 Payload:
@@ -182,8 +192,21 @@ These use an empty payload:
 - `stop_session`
 - `repeat_chunk`
 - `restart_chapter`
+- `previous_chapter`
 - `previous_chunk`
+- `next_chunk`
 - `next_chapter`
+
+Frontend note:
+
+- the current Rust TUI binds these commands to arrow keys when the command bar
+  is empty
+- `Up` = `previous_chunk`
+- `Down` = `next_chunk`
+- `Left` = `previous_chapter`
+- `Right` = `next_chapter`
+- when the command bar is not empty, `Up` and `Down` remain bound to command
+  suggestion navigation instead
 
 ## Search Queries
 
