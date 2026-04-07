@@ -105,7 +105,7 @@ struct RequestEnvelope<'a> {
 
 pub struct BackendClient {
     child: Child,
-    stdin: BufWriter<ChildStdin>,
+    stdin: Option<BufWriter<ChildStdin>>,
     response_rx: mpsc::Receiver<String>,
     reader_thread: Option<JoinHandle<()>>,
     request_counter: u64,
@@ -158,7 +158,7 @@ impl BackendClient {
 
         Ok(Self {
             child,
-            stdin: BufWriter::new(stdin),
+            stdin: Some(BufWriter::new(stdin)),
             response_rx,
             reader_thread,
             request_counter: 0,
@@ -243,24 +243,23 @@ impl BackendClient {
         };
         let encoded = serde_json::to_string(&request)
             .map_err(|err| format!("Unable to encode backend request: {err}"))?;
-        self.stdin.write_all(encoded.as_bytes()).map_err(|err| {
-            format!(
-                "Unable to write backend request: {err}{}",
+        let write_err = {
+            let stdin = self
+                .stdin
+                .as_mut()
+                .ok_or_else(|| "Backend stdin already closed.".to_string())?;
+            stdin
+                .write_all(encoded.as_bytes())
+                .and_then(|_| stdin.write_all(b"\n"))
+                .and_then(|_| stdin.flush())
+                .err()
+        };
+        if let Some(err) = write_err {
+            return Err(format!(
+                "Unable to send backend request: {err}{}",
                 self.backend_exit_hint()
-            )
-        })?;
-        self.stdin.write_all(b"\n").map_err(|err| {
-            format!(
-                "Unable to terminate backend request: {err}{}",
-                self.backend_exit_hint()
-            )
-        })?;
-        self.stdin.flush().map_err(|err| {
-            format!(
-                "Unable to flush backend request: {err}{}",
-                self.backend_exit_hint()
-            )
-        })?;
+            ));
+        }
 
         let line = self
             .response_rx
@@ -319,7 +318,15 @@ impl BackendClient {
 
 impl Drop for BackendClient {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        // Close stdin so the backend's serve_forever() loop exits and the
+        // finally block calls gateway.shutdown() for a clean provider stop.
+        self.stdin.take();
+
+        // Give the backend a moment to shut down gracefully before killing.
+        std::thread::sleep(Duration::from_millis(500));
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+        }
         let _ = self.child.wait();
         if let Some(handle) = self.reader_thread.take() {
             let _ = handle.join();
