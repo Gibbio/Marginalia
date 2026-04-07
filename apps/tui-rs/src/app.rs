@@ -1,8 +1,9 @@
 use crate::backend::{AppSnapshot, BackendClient, DocumentListItem, DocumentView, SessionSnapshot};
 use serde_json::json;
 use std::collections::VecDeque;
+use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
@@ -411,9 +412,11 @@ impl App {
                 if argument.is_empty() {
                     return Err("Usage: /ingest <path>".to_string());
                 }
-                let response = self
-                    .backend
-                    .execute_command_response("ingest_document", json!({"path": argument}))?;
+                let resolved_path = expand_shell_like_path(argument);
+                let response = self.backend.execute_command_response(
+                    "ingest_document",
+                    json!({"path": resolved_path.display().to_string()}),
+                )?;
                 if response.status != "ok" {
                     return Err(response.message);
                 }
@@ -541,22 +544,16 @@ impl App {
     }
 
     fn ingest_suggestions(&self, argument_prefix: &str) -> Vec<SuggestionItem> {
-        let query = argument_prefix.trim().to_lowercase();
-        self.local_markdown_files
-            .iter()
-            .filter(|file| {
-                query.is_empty()
-                    || file.name.to_lowercase().contains(&query)
-                    || file
-                        .path
-                        .display()
-                        .to_string()
-                        .to_lowercase()
-                        .contains(&query)
-            })
+        discover_ingestable_files(argument_prefix)
+            .into_iter()
             .map(|file| SuggestionItem {
                 value: format!("/ingest {}", file.path.display()),
-                label: file.name.clone(),
+                label: file
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string(),
                 summary: file.path.display().to_string(),
             })
             .collect()
@@ -614,4 +611,87 @@ fn discover_markdown_files() -> Vec<LocalMarkdownFile> {
 
     files.sort_by(|left, right| left.name.cmp(&right.name));
     files
+}
+
+fn discover_ingestable_files(argument_prefix: &str) -> Vec<LocalMarkdownFile> {
+    let trimmed = argument_prefix.trim();
+    let expanded = expand_shell_like_path(trimmed);
+
+    let (directory, partial_name) = if trimmed.is_empty() {
+        (
+            env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            String::new(),
+        )
+    } else if trimmed.ends_with('/') || expanded.is_dir() {
+        (expanded, String::new())
+    } else {
+        let parent = expanded
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let partial = expanded
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        (parent, partial)
+    };
+
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+
+    let mut files: Vec<LocalMarkdownFile> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter(|path| is_ingestable_extension(path))
+        .filter(|path| {
+            partial_name.is_empty()
+                || path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.to_lowercase().contains(&partial_name))
+        })
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?.to_string();
+            Some(LocalMarkdownFile { name, path })
+        })
+        .collect();
+
+    files.sort_by(|left, right| left.name.cmp(&right.name));
+    files
+}
+
+fn expand_shell_like_path(input: &str) -> PathBuf {
+    let mut expanded = input.trim().to_string();
+    if let Ok(home) = env::var("HOME") {
+        if expanded == "~" {
+            expanded = home.clone();
+        } else if let Some(rest) = expanded.strip_prefix("~/") {
+            expanded = format!("{home}/{rest}");
+        }
+        expanded = expanded.replace("${HOME}", &home);
+        expanded = expanded.replace("$HOME", &home);
+    }
+
+    let path = PathBuf::from(expanded);
+    if path.is_absolute() {
+        path
+    } else {
+        env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
+}
+
+fn is_ingestable_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "md" | "markdown" | "txt"
+            )
+        })
 }

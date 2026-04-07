@@ -443,7 +443,11 @@ fn render_document_lines(app: &App) -> Vec<Line<'static>> {
                     },
                 ),
                 Span::styled(
-                    format!("[{}:{}] {}", section.index + 1, chunk.index + 1, chunk.text),
+                    format!("[{}:{}] ", section.index + 1, chunk.index + 1),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    chunk.text.clone(),
                     if chunk.is_active {
                         Style::default().fg(Color::Yellow)
                     } else {
