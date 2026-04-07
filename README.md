@@ -93,13 +93,34 @@ Do not proceed to the real loop until `provider_checks.kokoro.ready`,
 
 ## Quick Start
 
-Rust TUI frontend (recommended):
+### Rust TUI (recommended)
+
+The TUI spawns the Python backend automatically as a child process (via
+stdio JSON Lines) — there is no separate backend to start.
 
 ```bash
 make tui-rs
 ```
 
-Then inside the TUI command bar:
+This requires `marginalia.toml` in the project root.  `make setup`
+generates it automatically.  If you skipped `make setup`, create it
+manually:
+
+```bash
+cp examples/alpha-local-config.toml marginalia.toml
+# edit paths inside to match your machine (python, models, etc.)
+```
+
+Without a valid `marginalia.toml` the backend falls back to fake
+providers and you will not hear any audio.
+
+You can also launch the TUI directly with a custom config path:
+
+```bash
+MARGINALIA_CONFIG=path/to/config.toml cargo run --manifest-path apps/tui-rs/Cargo.toml
+```
+
+Inside the TUI command bar:
 
 ```
 /ingest path/to/document.md
@@ -114,13 +135,13 @@ TUI navigation highlights:
 - while typing: `Up` and `Down` navigate suggestions
 - `Ctrl-C` must be pressed twice to quit
 
-Fake-provider smoke flow (no external deps):
+### Fake-provider smoke flow (no external deps)
 
 ```bash
 make smoke
 ```
 
-Single-command real alpha flow:
+### Single-command real alpha flow (CLI)
 
 ```bash
 .venv/bin/python -m marginalia_cli --config marginalia.toml play path/to/document.md --json
