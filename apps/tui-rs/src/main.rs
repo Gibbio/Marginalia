@@ -73,7 +73,7 @@ fn run_tui(
                 }
                 match key.code {
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.should_quit = true;
+                        app.handle_ctrl_c();
                     }
                     KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.select_previous_history();

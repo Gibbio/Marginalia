@@ -166,8 +166,15 @@ impl BackendClient {
             .map_err(|err| format!("Unable to decode documents payload: {err}"))
     }
 
-    pub fn get_document_view(&mut self) -> Result<Option<DocumentView>, String> {
-        let response = self.send_request("query", "get_document_view", json!({}))?;
+    pub fn get_document_view(
+        &mut self,
+        document_id: Option<&str>,
+    ) -> Result<Option<DocumentView>, String> {
+        let payload = match document_id {
+            Some(document_id) => json!({"document_id": document_id}),
+            None => json!({}),
+        };
+        let response = self.send_request("query", "get_document_view", payload)?;
         if response.status != "ok" {
             return Ok(None);
         }
@@ -178,12 +185,21 @@ impl BackendClient {
     }
 
     pub fn execute_command(&mut self, name: &str, payload: Value) -> Result<String, String> {
-        let response = self.send_request("command", name, payload)?;
+        let response = self.execute_command_response(name, payload)?;
         if response.status == "ok" {
             Ok(response.message)
         } else {
             Err(response.message)
         }
+    }
+
+    pub fn execute_command_response(
+        &mut self,
+        name: &str,
+        payload: Value,
+    ) -> Result<ResponseEnvelope, String> {
+        let response = self.send_request("command", name, payload)?;
+        Ok(response)
     }
 
     fn send_request(
