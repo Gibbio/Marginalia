@@ -148,6 +148,61 @@ def test_restart_chapter_command_is_available_in_backend_contract(
     assert "restart_chapter" in response.payload["commands"]
 
 
+def test_navigation_commands_are_available_in_backend_contract(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(tmp_path, monkeypatch)
+
+    response = gateway.execute_query(
+        FrontendRequest(request_type="query", name="get_backend_capabilities")
+    )
+
+    assert response.status.value == "ok"
+    assert "next_chunk" in response.payload["commands"]
+    assert "previous_chapter" in response.payload["commands"]
+
+
+def test_next_chunk_and_previous_chapter_commands_navigate_session(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(tmp_path, monkeypatch)
+    source_path = Path("tests/fixtures/sample_document.txt").resolve()
+
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="ingest_document",
+            payload={"path": str(source_path)},
+        )
+    )
+    gateway.execute_command(
+        FrontendRequest(
+            request_type="command",
+            name="start_session",
+            payload={"target": str(source_path)},
+        )
+    )
+    next_chunk_response = gateway.execute_command(
+        FrontendRequest(request_type="command", name="next_chunk")
+    )
+    session_after_next = gateway.execute_query(
+        FrontendRequest(request_type="query", name="get_session_snapshot")
+    )
+    previous_chapter_response = gateway.execute_command(
+        FrontendRequest(request_type="command", name="previous_chapter")
+    )
+    session_after_previous = gateway.execute_query(
+        FrontendRequest(request_type="query", name="get_session_snapshot")
+    )
+
+    assert next_chunk_response.status.value == "ok"
+    assert session_after_next.payload["session"]["chunk_index"] == 1
+    assert previous_chapter_response.status.value == "error"
+    assert session_after_previous.payload["session"]["section_index"] == 0
+
+
 def test_search_documents_query_returns_document_hits(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -87,8 +87,14 @@ class LocalFrontendGateway(FrontendGateway):
         if command_name is FrontendCommandName.REPEAT_CHUNK:
             result = self._container.reader_service.repeat_current_chunk(command_source="frontend")
             return self._response_from_result(request, result)
+        if command_name is FrontendCommandName.NEXT_CHUNK:
+            result = self._container.reader_service.next_chunk(command_source="frontend")
+            return self._response_from_result(request, result)
         if command_name is FrontendCommandName.RESTART_CHAPTER:
             result = self._container.reader_service.restart_chapter(command_source="frontend")
+            return self._response_from_result(request, result)
+        if command_name is FrontendCommandName.PREVIOUS_CHAPTER:
+            result = self._container.reader_service.previous_chapter(command_source="frontend")
             return self._response_from_result(request, result)
         if command_name is FrontendCommandName.PREVIOUS_CHUNK:
             result = self._container.reader_service.previous_chunk(command_source="frontend")

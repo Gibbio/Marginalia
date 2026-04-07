@@ -82,6 +82,12 @@ fn run_tui(
                         app.select_next_history();
                     }
                     KeyCode::Enter => app.confirm_input(),
+                    KeyCode::Up if app.command_input_is_empty() => app.navigate_previous_chunk(),
+                    KeyCode::Down if app.command_input_is_empty() => app.navigate_next_chunk(),
+                    KeyCode::Left if app.command_input_is_empty() => {
+                        app.navigate_previous_chapter();
+                    }
+                    KeyCode::Right if app.command_input_is_empty() => app.navigate_next_chapter(),
                     KeyCode::Up => app.select_previous_suggestion(),
                     KeyCode::Down => app.select_next_suggestion(),
                     KeyCode::Backspace => app.pop_char(),
