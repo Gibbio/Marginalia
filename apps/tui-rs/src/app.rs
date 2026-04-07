@@ -563,8 +563,15 @@ impl App {
             return;
         };
         let active_line = active_line_index as u16;
+        let follow_margin = (viewport_height / 4).clamp(1, 4);
+        let viewport_top = self.document_scroll;
         let viewport_bottom = self.document_scroll.saturating_add(viewport_height);
-        if active_line < self.document_scroll || active_line >= viewport_bottom {
+        let top_trigger = viewport_top.saturating_add(follow_margin);
+        let bottom_trigger = viewport_bottom.saturating_sub(follow_margin);
+
+        if active_line < top_trigger {
+            self.document_scroll = active_line.saturating_sub(follow_margin).min(max_scroll);
+        } else if active_line >= bottom_trigger {
             let preferred_offset = viewport_height / 3;
             self.document_scroll = active_line.saturating_sub(preferred_offset).min(max_scroll);
         }
