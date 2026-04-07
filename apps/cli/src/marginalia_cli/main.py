@@ -12,7 +12,7 @@ from typing import Any
 
 import typer
 
-from marginalia_cli.bootstrap import CliContainer, build_container
+from marginalia_backend.bootstrap import BackendContainer, build_backend_container
 from marginalia_core.application.result import OperationResult, OperationStatus
 from marginalia_core.application.services.runtime_loop import StepStatus
 
@@ -74,13 +74,13 @@ def _exit_code(result: OperationResult) -> int:
     return 1 if result.status is OperationStatus.ERROR else 0
 
 
-def _container_from_context(ctx: typer.Context) -> CliContainer:
+def _container_from_context(ctx: typer.Context) -> BackendContainer:
     config_path = ctx.obj.get("config_path") if ctx.obj else None
     verbose = bool(ctx.obj.get("verbose")) if ctx.obj else False
-    return build_container(config_path=config_path, verbose=verbose)
+    return build_backend_container(config_path=config_path, verbose=verbose)
 
 
-def _augment_runtime_details(container: CliContainer, result: OperationResult) -> None:
+def _augment_runtime_details(container: BackendContainer, result: OperationResult) -> None:
     if not result.data:
         return
 
@@ -397,18 +397,6 @@ def doctor(
     result = OperationResult.ok("Marginalia CLI environment looks coherent.", data=report)
     _emit_result(result, as_json=as_json)
     raise typer.Exit(code=0)
-
-
-@app.command("shell")
-def interactive_shell(
-    ctx: typer.Context,
-) -> None:
-    """Start an interactive Marginalia shell."""
-
-    from marginalia_cli.shell import MarginaliaShell
-
-    container = _container_from_context(ctx)
-    MarginaliaShell(container).cmdloop()
 
 
 def run() -> None:

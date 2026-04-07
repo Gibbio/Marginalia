@@ -5,9 +5,9 @@ long-form text aloud, reacts to voice commands, captures notes anchored to the
 current reading position, and can later help rewrite or summarize sections of a
 document.
 
-The repository is structured as a production-minded monorepo. The first usable
-interface is a CLI, the core is Python, storage starts with SQLite, and speech
-plus LLM capabilities stay behind replaceable ports.
+The repository is structured as a production-minded monorepo. The backend is
+Python, storage starts with SQLite, and speech plus LLM capabilities stay
+behind replaceable ports while frontend clients are free to evolve separately.
 
 ## Why It Exists
 
@@ -93,19 +93,19 @@ Do not proceed to the real loop until `provider_checks.kokoro.ready`,
 
 ## Quick Start
 
-Interactive shell (recommended):
+Rust TUI frontend (recommended):
 
 ```bash
-make shell
+make tui-rs
 ```
 
-Then inside the shell:
+Then inside the TUI command bar:
 
 ```
-marginalia> ingest path/to/document.md
-marginalia> play
-marginalia> status
-marginalia> quit
+/ingest path/to/document.md
+/play
+/note prova nota
+/stop
 ```
 
 Fake-provider smoke flow (no external deps):
@@ -135,7 +135,6 @@ What `play` does:
 
 | Command | Description |
 |---|---|
-| `shell` | Interactive REPL with all commands below |
 | `play` | Start or resume reading a document |
 | `pause` | Pause playback |
 | `resume` | Resume playback |
@@ -182,7 +181,9 @@ Marginalia is a lightweight modular monolith:
   adapters (Kokoro, Piper, Vosk, subprocess playback)
 - **`packages/infra`** — configuration, logging, event bus, SQLite
   repositories, and runtime supervision
-- **`apps/cli`** — Typer CLI and composition root
+- **`apps/backend`** — headless local backend and frontend contract transport
+- **`apps/cli`** — thin Python CLI over the same backend composition root
+- **`apps/tui-rs`** — Rust `ratatui + crossterm` frontend client
 
 The core never depends on editor APIs, concrete speech SDKs, or remote service
 contracts. Those concerns sit behind ports and can be replaced without
@@ -191,8 +192,10 @@ distorting the domain model.
 ```text
 .
 ├── apps/
+│   ├── backend/
 │   ├── cli/
-│   └── desktop/
+│   ├── desktop/
+│   └── tui-rs/
 ├── docs/
 │   ├── adr/
 │   ├── architecture/
@@ -218,6 +221,7 @@ make format      # ruff format + autofix
 make lint        # ruff check + mypy
 make test        # pytest (106 tests)
 make smoke       # end-to-end smoke flow with fake providers
+make tui-rs      # Rust TUI frontend over backend stdio
 make shell       # interactive Marginalia shell
 make doctor      # check provider readiness
 make run-cli-help

@@ -2,13 +2,13 @@ PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 VENV_PIP := $(VENV_PYTHON) -m pip
-PYTHONPATH_LOCAL := apps/cli/src:packages/core/src:packages/adapters/src:packages/infra/src
+PYTHONPATH_LOCAL := apps/backend/src:apps/cli/src:packages/core/src:packages/adapters/src:packages/infra/src
 VOSK_MODEL_URL ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
 VOSK_MODEL_NAME ?= vosk-model-small-it-0.22
 MODELS_DIR ?= .models
 
 .PHONY: bootstrap bootstrap-kokoro bootstrap-vosk bootstrap-whisper bootstrap-providers \
-        bootstrap-system-deps setup format lint test smoke run-cli-help doctor
+        bootstrap-system-deps setup format lint test smoke run-cli-help doctor tui-rs
 
 # ---------------------------------------------------------------------------
 # Full setup — one command to get everything running
@@ -24,9 +24,9 @@ setup: bootstrap-system-deps bootstrap bootstrap-runtime-deps bootstrap-provider
 	@echo ""
 	@echo "============================================================"
 	@echo "  Ready! Start with:"
-	@echo "    PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_cli shell"
+	@echo "    make tui-rs"
 	@echo "  or:"
-	@echo "    make shell"
+	@echo "    PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_backend describe-contract"
 	@echo "============================================================"
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ format:
 
 lint:
 	$(VENV_DIR)/bin/ruff check .
-	$(VENV_DIR)/bin/mypy apps/cli/src packages/core/src packages/adapters/src packages/infra/src tests
+	$(VENV_DIR)/bin/mypy apps/backend/src apps/cli/src packages/core/src packages/adapters/src packages/infra/src tests
 
 test:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_DIR)/bin/pytest
@@ -151,8 +151,8 @@ smoke:
 doctor:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_CONFIG=marginalia.toml $(VENV_PYTHON) -m marginalia_cli doctor
 
-shell:
-	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_CONFIG=marginalia.toml $(VENV_PYTHON) -m marginalia_cli shell
+tui-rs:
+	MARGINALIA_CONFIG=marginalia.toml cargo run --manifest-path apps/tui-rs/Cargo.toml
 
 run-cli-help:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_cli --help

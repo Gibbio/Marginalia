@@ -26,25 +26,28 @@ dev = [
 
 [project.scripts]
 marginalia = "marginalia_cli.main:run"
+marginalia-backend = "marginalia_backend.main:run"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
 where = [
+  "apps/backend/src",
   "apps/cli/src",
   "packages/core/src",
   "packages/adapters/src",
   "packages/infra/src",
 ]
 include = [
+  "marginalia_backend*",
   "marginalia_cli*",
   "marginalia_core*",
   "marginalia_adapters*",
   "marginalia_infra*",
 ]
-
 [tool.setuptools.package-data]
+marginalia_backend = ["py.typed"]
 marginalia_cli = ["py.typed"]
 marginalia_core = ["py.typed"]
 marginalia_adapters = ["py.typed"]
@@ -58,6 +61,7 @@ testpaths = ["tests"]
 target-version = "py312"
 line-length = 100
 src = [
+  "apps/backend/src",
   "apps/cli/src",
   "packages/core/src",
   "packages/adapters/src",
@@ -74,6 +78,7 @@ quote-style = "double"
 [tool.mypy]
 python_version = "3.12"
 files = [
+  "apps/backend/src",
   "apps/cli/src",
   "packages/core/src",
   "packages/adapters/src",
@@ -81,6 +86,7 @@ files = [
   "tests",
 ]
 mypy_path = [
+  "apps/backend/src",
   "apps/cli/src",
   "packages/core/src",
   "packages/adapters/src",

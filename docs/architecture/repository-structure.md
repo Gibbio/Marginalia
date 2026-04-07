@@ -9,8 +9,10 @@ obvious from the start.
 
 ### `apps/`
 
-- `cli/`: first usable product interface
+- `backend/`: target home for the headless local backend process
+- `cli/`: current interface, later a thin client or admin shell
 - `desktop/`: reserved place for a future thin desktop shell
+- `tui-rs/`: reserved place for a future Rust TUI client
 
 ### `packages/`
 

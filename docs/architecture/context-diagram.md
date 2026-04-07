@@ -7,11 +7,24 @@
 +---------+--------+
           |
           v
-+------------------+
-|   Marginalia CLI |
-+---------+--------+
-          |
-          v
++--------------------------+
+| Frontends                |
+| - TUI                    |
+| - Desktop GUI            |
+| - Obsidian plugin        |
+| - Future mobile client   |
++------------+-------------+
+             |
+             | commands / queries / events
+             v
++------------------------------+
+| Local Marginalia Backend     |
+| - frontend gateway           |
+| - runtime supervision        |
+| - state projections          |
++-------------+----------------+
+              |
+              v
 +------------------------------+
 | Application Services         |
 | - reader                     |
@@ -19,9 +32,9 @@
 | - rewrite                    |
 | - summary                    |
 | - search                     |
-+---------+--------------------+
-          |
-          v
++-------------+----------------+
+              |
+              v
 +------------------------------+
 | Core Domain + State Machine  |
 | - document                   |
@@ -40,15 +53,11 @@
 | notes     |  | subprocess playback|
 +-----------+  | fake fallbacks     |
                +--------------------+
-
-Future, not implemented now:
-- desktop shell over the same application services
-- local API surface over the same core
-- editor adapters that depend on exported contracts, not on the domain internals
 ```
 
 ## Boundary Notes
 
-- the core does not know about CLI, desktop, or editors
+- the core does not know about TUI, GUI, mobile, or editor frameworks
 - providers are swapped by replacing adapters behind ports
+- frontends depend on exported contracts, not on internal services
 - editor integration remains outside the core until there is a stable contract

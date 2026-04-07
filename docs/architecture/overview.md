@@ -8,7 +8,9 @@ Marginalia is a lightweight modular monolith organized as a monorepo.
   machine, and application services
 - `packages/adapters` owns fake and future concrete providers
 - `packages/infra` owns SQLite, config, logging, and event bus wiring
-- `apps/cli` owns the first usable interface and composition root
+- `apps/backend` is the target home for the headless local backend process
+- `apps/cli` is the current first interface, but no longer the long-term
+  architectural center
 
 This remains effectively a clean or hexagonal architecture with low ceremony.
 
@@ -20,13 +22,13 @@ The architecture therefore optimizes for:
 - clarity of domain vocabulary
 - replaceable infrastructure
 - low-cost local iteration
-- future reuse by a desktop shell or local API
+- future reuse by multiple client frontends over a local backend boundary
 
 ## Runtime Model
 
-The current runtime is simple but real:
+The current runtime is simple but real. The target runtime shape is:
 
-1. the CLI composes a local container
+1. a headless local backend composes a local container
 2. `DocumentIngestionService`, `ReaderService`, `NoteService`,
    `RewriteService`, `SummaryService`, `SearchService`, and
    `SessionQueryService` coordinate domain workflows
@@ -40,10 +42,15 @@ The current runtime is simple but real:
 6. real local Kokoro (default) or Piper TTS, Vosk command STT, and subprocess
    playback adapters can be selected through config, while deterministic fake
    adapters remain available
-7. an in-process event bus publishes standardized domain events
+7. an in-process event bus publishes standardized domain events that can later
+   feed frontend-facing event projections
 8. the read-while-listen runtime is driven by a step-driven `RuntimeLoop`
    whose `step()` function returns a `StepStatus` — the caller owns the loop
-   driver (CLI `while` loop, desktop timer, or async wrapper)
+   driver (backend worker, TUI client driver, desktop timer, or async wrapper)
+
+The backend/frontend boundary is now a first-class architectural concern.
+Frontends should converge on explicit commands, queries, events, and snapshots
+instead of direct service calls.
 
 ## What Is Implemented Now
 
@@ -59,7 +66,7 @@ The current runtime is simple but real:
 - real local note dictation through whisper.cpp when configured
 - real local playback through `afplay` when configured
 - step-driven runtime loop decoupled from the CLI
-- interactive shell (`marginalia shell`) with background RuntimeLoop thread
+- headless backend contract and stdio transport for external frontends
 - signal handling for graceful shutdown during playback
 - pause and resume state transitions
 - repeat, rewind, chapter restart, chapter advance, stop, help, and bounded
@@ -91,7 +98,7 @@ CLI-first is not an aesthetic choice. It keeps the first implementation honest:
 - session transitions can be defined before UI complexity exists
 - provider contracts can be exercised without desktop decisions
 - tests can target deterministic commands and outputs
-- the same service graph can later back a desktop shell
+- the same service graph can later back a headless backend with many clients
 
 ## Why Monorepo
 
