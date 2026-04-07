@@ -152,6 +152,20 @@ def test_no_headings_creates_single_section() -> None:
     assert doc.get_section(0).title == "Section 1"
 
 
+def test_markdown_thematic_breaks_are_not_emitted_as_chunks() -> None:
+    """Standalone markdown separators should not become readable chunks."""
+
+    text = "# Title\n\nIntro paragraph.\n\n---\n\nSecond paragraph.\n\n***\n\nThird paragraph."
+    doc = build_document_outline(Path("test.md"), text, chunk_target_chars=120)
+
+    section_text = " ".join(chunk.text for chunk in doc.get_section(0).chunks)
+    assert "Intro paragraph." in section_text
+    assert "Second paragraph." in section_text
+    assert "Third paragraph." in section_text
+    assert "---" not in section_text
+    assert "***" not in section_text
+
+
 def test_voice_test_document_chunks_reasonably(tmp_path: Path) -> None:
     """The real voice-test-it.txt document produces reasonable chunk sizes."""
 

@@ -10,6 +10,7 @@ from pathlib import Path
 
 _DEFAULT_CHUNK_TARGET_CHARS = 300
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?…])\s+")
+_MARKDOWN_THEMATIC_BREAK = re.compile(r"^\s{0,3}([-*_])(?:\s*\1){2,}\s*$")
 
 
 def _utc_now() -> datetime:
@@ -92,6 +93,10 @@ def build_document_outline(
     """
 
     cleaned_text = raw_text.strip()
+    markdown_source = source_path.suffix.lower() in {".md", ".markdown"}
+    normalized_text = (
+        _strip_markdown_thematic_breaks(cleaned_text) if markdown_source else cleaned_text
+    )
     title = source_path.stem.replace("-", " ").replace("_", " ").title() or "Untitled Document"
     sections: list[DocumentSection] = []
     current_title: str | None = None
@@ -116,7 +121,7 @@ def build_document_outline(
         current_title = None
         current_lines = []
 
-    for line in cleaned_text.splitlines():
+    for line in normalized_text.splitlines():
         if line.lstrip().startswith("#"):
             flush_section()
             current_title = line.lstrip("#").strip() or f"Section {len(sections) + 1}"
@@ -131,13 +136,13 @@ def build_document_outline(
                 index=0,
                 title=title,
                 chunks=_chunk_section_text(
-                    cleaned_text, chunk_target_chars=chunk_target_chars
+                    normalized_text, chunk_target_chars=chunk_target_chars
                 ),
                 source_anchor="section:0",
             )
         ]
 
-    document_hash_input = f"{source_path.resolve()}::{cleaned_text}".encode()
+    document_hash_input = f"{source_path.resolve()}::{normalized_text}".encode()
     document_id = sha256(document_hash_input).hexdigest()[:12]
     return Document(
         document_id=document_id,
@@ -181,6 +186,14 @@ def _chunk_section_text(
         DocumentChunk(index=i, text=text, char_start=start, char_end=end)
         for i, (text, start, end) in enumerate(merged)
     )
+
+
+def _strip_markdown_thematic_breaks(text: str) -> str:
+    """Remove standalone markdown thematic breaks from ingested content."""
+
+    return "\n".join(
+        line for line in text.splitlines() if not _MARKDOWN_THEMATIC_BREAK.match(line)
+    ).strip()
 
 
 def _locate_paragraphs(section_text: str) -> list[tuple[str, int, int]]:
