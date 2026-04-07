@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::VecDeque;
 use std::env;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 
 const PROTOCOL_VERSION: u32 = 1;
 
@@ -97,6 +100,8 @@ pub struct BackendClient {
     stdin: BufWriter<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     request_counter: u64,
+    stderr_lines: Arc<Mutex<VecDeque<String>>>,
+    stderr_thread: Option<JoinHandle<()>>,
 }
 
 impl BackendClient {
@@ -120,7 +125,7 @@ impl BackendClient {
             .env("PYTHONPATH", python_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
 
         let mut child = command
             .spawn()
@@ -133,12 +138,20 @@ impl BackendClient {
             .stdout
             .take()
             .ok_or_else(|| "Backend stdout pipe unavailable.".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Backend stderr pipe unavailable.".to_string())?;
+        let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(24)));
+        let stderr_thread = Some(spawn_stderr_collector(stderr, Arc::clone(&stderr_lines)));
 
         Ok(Self {
             child,
             stdin: BufWriter::new(stdin),
             stdout: BufReader::new(stdout),
             request_counter: 0,
+            stderr_lines,
+            stderr_thread,
         })
     }
 
@@ -218,25 +231,63 @@ impl BackendClient {
         };
         let encoded = serde_json::to_string(&request)
             .map_err(|err| format!("Unable to encode backend request: {err}"))?;
-        self.stdin
-            .write_all(encoded.as_bytes())
-            .map_err(|err| format!("Unable to write backend request: {err}"))?;
-        self.stdin
-            .write_all(b"\n")
-            .map_err(|err| format!("Unable to terminate backend request: {err}"))?;
-        self.stdin
-            .flush()
-            .map_err(|err| format!("Unable to flush backend request: {err}"))?;
+        self.stdin.write_all(encoded.as_bytes()).map_err(|err| {
+            format!(
+                "Unable to write backend request: {err}{}",
+                self.backend_exit_hint()
+            )
+        })?;
+        self.stdin.write_all(b"\n").map_err(|err| {
+            format!(
+                "Unable to terminate backend request: {err}{}",
+                self.backend_exit_hint()
+            )
+        })?;
+        self.stdin.flush().map_err(|err| {
+            format!(
+                "Unable to flush backend request: {err}{}",
+                self.backend_exit_hint()
+            )
+        })?;
 
         let mut line = String::new();
-        self.stdout
-            .read_line(&mut line)
-            .map_err(|err| format!("Unable to read backend response: {err}"))?;
+        self.stdout.read_line(&mut line).map_err(|err| {
+            format!(
+                "Unable to read backend response: {err}{}",
+                self.backend_exit_hint()
+            )
+        })?;
         if line.trim().is_empty() {
-            return Err("Backend closed the stdio channel unexpectedly.".to_string());
+            return Err(format!(
+                "Backend closed the stdio channel unexpectedly.{}",
+                self.backend_exit_hint()
+            ));
         }
         serde_json::from_str(&line)
             .map_err(|err| format!("Unable to decode backend response: {err}"))
+    }
+
+    fn backend_exit_hint(&mut self) -> String {
+        let exit_status = self
+            .child
+            .try_wait()
+            .ok()
+            .flatten()
+            .map(|status| status.to_string());
+        let stderr = self.recent_stderr();
+        match (exit_status, stderr.is_empty()) {
+            (Some(status), false) => format!(". Backend exited with {status}. stderr: {stderr}"),
+            (Some(status), true) => format!(". Backend exited with {status}."),
+            (None, false) => format!(". Recent backend stderr: {stderr}"),
+            (None, true) => String::new(),
+        }
+    }
+
+    fn recent_stderr(&self) -> String {
+        let Ok(lines) = self.stderr_lines.lock() else {
+            return String::new();
+        };
+        lines.iter().cloned().collect::<Vec<_>>().join(" | ")
     }
 }
 
@@ -244,7 +295,31 @@ impl Drop for BackendClient {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(handle) = self.stderr_thread.take() {
+            let _ = handle.join();
+        }
     }
+}
+
+fn spawn_stderr_collector(
+    stderr: ChildStderr,
+    stderr_lines: Arc<Mutex<VecDeque<String>>>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Ok(mut lines) = stderr_lines.lock() {
+                if lines.len() >= 12 {
+                    lines.pop_front();
+                }
+                lines.push_back(trimmed.to_string());
+            }
+        }
+    })
 }
 
 fn build_python_path(repo_root: &Path) -> String {
