@@ -102,22 +102,26 @@ fn render(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(9),
-            Constraint::Min(10),
+            Constraint::Min(12),
             Constraint::Length(8),
             Constraint::Length(7),
         ])
         .split(frame.area());
-    let top = Layout::default()
+    let middle = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
         .split(vertical[1]);
+    let lower = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
+        .split(vertical[2]);
 
-    let header = Paragraph::new(render_header_lines())
+    let header = Paragraph::new(render_header_lines(app))
         .block(Block::default().borders(Borders::ALL).title("Overview"))
         .wrap(Wrap { trim: true });
 
-    let status = Paragraph::new(render_status_lines(app))
-        .block(Block::default().borders(Borders::ALL).title("Session"))
+    let document = Paragraph::new(render_document_lines(app))
+        .block(Block::default().borders(Borders::ALL).title("Document"))
         .wrap(Wrap { trim: true });
 
     let documents = List::new(render_documents(app))
@@ -127,14 +131,19 @@ fn render(frame: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("Log"))
         .wrap(Wrap { trim: true });
 
+    let status = Paragraph::new(render_status_lines(app))
+        .block(Block::default().borders(Borders::ALL).title("Session"))
+        .wrap(Wrap { trim: true });
+
     let input = Paragraph::new(render_input_lines(app))
         .block(Block::default().borders(Borders::ALL).title("Command"))
         .style(Style::default().fg(Color::Yellow));
 
     frame.render_widget(header, vertical[0]);
-    frame.render_widget(status, top[0]);
-    frame.render_widget(documents, top[1]);
-    frame.render_widget(messages, vertical[2]);
+    frame.render_widget(document, middle[0]);
+    frame.render_widget(documents, middle[1]);
+    frame.render_widget(messages, lower[0]);
+    frame.render_widget(status, lower[1]);
     frame.render_widget(input, vertical[3]);
     frame.set_cursor_position((
         vertical[3].x + 3 + app.input.chars().count() as u16,
@@ -142,45 +151,139 @@ fn render(frame: &mut Frame, app: &App) {
     ));
 }
 
-fn render_header_lines() -> Vec<Line<'static>> {
+fn render_header_lines(app: &App) -> Vec<Line<'static>> {
+    let dinosaur = match app.animation_frame() {
+        0 => [
+            "           __",
+            "          / _)",
+            "   .-^^^-/ /  ",
+            "__/       /   ",
+            "<__.|_|-|_|   ",
+        ],
+        1 => [
+            "           __",
+            "          / _)",
+            "   .-^^^-/ /  ",
+            "__/       /   ",
+            "<__.|_|-|-|   ",
+        ],
+        _ => [
+            "           __",
+            "          / _)",
+            "   .-^^^-/ /  ",
+            "__/       /   ",
+            "<__.|-|_|_|   ",
+        ],
+    };
+
     vec![
+        Line::from(vec![
+            Span::styled(
+                dinosaur[0].to_string(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("      "),
+            Span::styled(
+                "M",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "A",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "R",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "G",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "I",
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "N",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "A",
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "L",
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "I",
+                Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "A",
+                Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
         Line::from(Span::styled(
-            " __  __                         _             _ _       ",
+            dinosaur[1].to_string(),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         )),
+        Line::from(vec![
+            Span::styled(
+                dinosaur[2].to_string(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                "Rust TUI over the headless backend",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
         Line::from(Span::styled(
-            "|  \\/  | __ _ _ __ __ _(_)_ __   __ _| (_) __ _ ",
+            dinosaur[3].to_string(),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            "| |\\/| |/ _` | '__/ _` | | '_ \\ / _` | | |/ _` |",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            "| |  | | (_| | | | (_| | | | | | (_| | | | (_| |",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            "|_|  |_|\\__,_|_|  \\__, |_|_| |_|\\__,_|_|_|\\__,_|",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            "                 |___/                            ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from("Rust TUI client over the headless Marginalia backend"),
+        Line::from(vec![
+            Span::styled(
+                dinosaur[4].to_string(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                "Type /ingest to wake the reader",
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
     ]
 }
 
@@ -284,25 +387,119 @@ fn render_status_lines(app: &App) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_documents(app: &App) -> Vec<ListItem<'static>> {
-    if app.documents.is_empty() {
-        return vec![ListItem::new("No ingested documents yet.")];
+fn render_document_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(document) = &app.document_view else {
+        return vec![
+            Line::from("No ingested document selected.".to_string()),
+            Line::from("Use /ingest <path> to load a markdown file.".to_string()),
+        ];
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            document.title.clone(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!(
+            "{}  id={}  {} chapters  {} chunks",
+            document.source_path,
+            document.document_id,
+            document.chapter_count,
+            document.chunk_count
+        )),
+        Line::from("".to_string()),
+    ];
+
+    for section in &document.sections {
+        let section_style = if Some(section.index) == document.active_section_index {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{}. {}", section.index + 1, section.title),
+            section_style,
+        )));
+
+        for chunk in section.chunks.iter().take(2) {
+            let marker = if chunk.is_active {
+                ">"
+            } else if chunk.is_read {
+                "-"
+            } else {
+                " "
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} ", marker),
+                    if chunk.is_active {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                ),
+                Span::styled(
+                    format!("[{}:{}] {}", section.index + 1, chunk.index + 1, chunk.text),
+                    if chunk.is_active {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default().fg(Color::Gray)
+                    },
+                ),
+            ]));
+            if chunk.is_active {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "  anchor={} current_chunk={}",
+                        chunk.anchor,
+                        chunk.index + 1
+                    ),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+        if section.chunk_count > 2 {
+            lines.push(Line::from(Span::styled(
+                format!("  ... {} more chunks", section.chunk_count - 2),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        if Some(section.index) == document.active_section_index {
+            if let Some(active_chunk_index) = document.active_chunk_index {
+                lines.push(Line::from(Span::styled(
+                    format!("  active chunk in section: {}", active_chunk_index + 1),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+        lines.push(Line::from("".to_string()));
     }
 
-    app.documents
+    lines
+}
+
+fn render_documents(app: &App) -> Vec<ListItem<'static>> {
+    if app.local_markdown_files.is_empty() {
+        return vec![ListItem::new(
+            "No .md files in the current launch directory.",
+        )];
+    }
+
+    app.local_markdown_files
         .iter()
-        .map(|document| {
+        .map(|file| {
             ListItem::new(vec![Line::from(vec![
                 Span::styled(
-                    document.document_id.clone(),
+                    file.name.clone(),
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(format!(
-                    "  {} ({} ch, {} chunks)",
-                    document.title, document.chapter_count, document.chunk_count
-                )),
+                Span::raw(format!("  {}", file.path.display())),
             ])])
         })
         .collect()

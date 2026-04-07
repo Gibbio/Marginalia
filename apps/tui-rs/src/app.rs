@@ -1,6 +1,8 @@
-use crate::backend::{AppSnapshot, BackendClient, DocumentListItem, SessionSnapshot};
+use crate::backend::{AppSnapshot, BackendClient, DocumentListItem, DocumentView, SessionSnapshot};
 use serde_json::json;
 use std::collections::VecDeque;
+use std::fs;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
@@ -15,6 +17,12 @@ pub struct SuggestionItem {
     pub value: String,
     pub label: String,
     pub summary: String,
+}
+
+#[derive(Clone)]
+pub struct LocalMarkdownFile {
+    pub name: String,
+    pub path: PathBuf,
 }
 
 pub const COMMANDS: [CommandSpec; 12] = [
@@ -86,11 +94,14 @@ pub struct App {
     pub should_quit: bool,
     pub app_snapshot: Option<AppSnapshot>,
     pub session_snapshot: Option<SessionSnapshot>,
-    pub documents: Vec<DocumentListItem>,
+    pub document_view: Option<DocumentView>,
+    pub library_documents: Vec<DocumentListItem>,
+    pub local_markdown_files: Vec<LocalMarkdownFile>,
     pub messages: VecDeque<String>,
     history: VecDeque<String>,
     history_index: Option<usize>,
     history_draft: Option<String>,
+    launched_at: Instant,
     last_refresh: Instant,
     suggestion_index: usize,
 }
@@ -103,11 +114,14 @@ impl App {
             should_quit: false,
             app_snapshot: None,
             session_snapshot: None,
-            documents: Vec::new(),
+            document_view: None,
+            library_documents: Vec::new(),
+            local_markdown_files: Vec::new(),
             messages: VecDeque::new(),
             history: VecDeque::new(),
             history_index: None,
             history_draft: None,
+            launched_at: Instant::now(),
             last_refresh: Instant::now() - Duration::from_secs(1),
             suggestion_index: 0,
         };
@@ -125,7 +139,9 @@ impl App {
     pub fn refresh(&mut self) -> Result<(), String> {
         self.app_snapshot = Some(self.backend.get_app_snapshot()?);
         self.session_snapshot = self.backend.get_session_snapshot()?;
-        self.documents = self.backend.list_documents()?;
+        self.document_view = self.backend.get_document_view()?;
+        self.library_documents = self.backend.list_documents()?;
+        self.local_markdown_files = discover_markdown_files();
         self.last_refresh = Instant::now();
         Ok(())
     }
@@ -413,6 +429,10 @@ impl App {
         }
     }
 
+    pub fn animation_frame(&self) -> usize {
+        ((self.launched_at.elapsed().as_millis() / 140) % 3) as usize
+    }
+
     fn suggestions(&self) -> Vec<SuggestionItem> {
         if !self.input.trim_start().starts_with('/') {
             return Vec::new();
@@ -448,13 +468,14 @@ impl App {
     ) -> Vec<SuggestionItem> {
         match command_name {
             "/play" => self.play_suggestions(argument_prefix),
+            "/ingest" => self.ingest_suggestions(argument_prefix),
             _ => Vec::new(),
         }
     }
 
     fn play_suggestions(&self, argument_prefix: &str) -> Vec<SuggestionItem> {
         let query = argument_prefix.trim().to_lowercase();
-        self.documents
+        self.library_documents
             .iter()
             .filter(|document| {
                 query.is_empty()
@@ -468,6 +489,28 @@ impl App {
                     "{} ({} ch, {} chunks)",
                     document.title, document.chapter_count, document.chunk_count
                 ),
+            })
+            .collect()
+    }
+
+    fn ingest_suggestions(&self, argument_prefix: &str) -> Vec<SuggestionItem> {
+        let query = argument_prefix.trim().to_lowercase();
+        self.local_markdown_files
+            .iter()
+            .filter(|file| {
+                query.is_empty()
+                    || file.name.to_lowercase().contains(&query)
+                    || file
+                        .path
+                        .display()
+                        .to_string()
+                        .to_lowercase()
+                        .contains(&query)
+            })
+            .map(|file| SuggestionItem {
+                value: format!("/ingest {}", file.path.display()),
+                label: file.name.clone(),
+                summary: file.path.display().to_string(),
             })
             .collect()
     }
@@ -497,4 +540,31 @@ fn longest_common_prefix(input: &str, matches: &[SuggestionItem]) -> Option<Stri
     } else {
         None
     }
+}
+
+fn discover_markdown_files() -> Vec<LocalMarkdownFile> {
+    let Ok(current_dir) = std::env::current_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(current_dir) else {
+        return Vec::new();
+    };
+
+    let mut files: Vec<LocalMarkdownFile> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        })
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?.to_string();
+            Some(LocalMarkdownFile { name, path })
+        })
+        .collect();
+
+    files.sort_by(|left, right| left.name.cmp(&right.name));
+    files
 }

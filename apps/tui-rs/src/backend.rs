@@ -53,6 +53,35 @@ pub struct DocumentListItem {
     pub title: String,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct DocumentChunkView {
+    pub anchor: String,
+    pub index: u32,
+    pub is_active: bool,
+    pub is_read: bool,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct DocumentSectionView {
+    pub chunk_count: u32,
+    pub chunks: Vec<DocumentChunkView>,
+    pub index: u32,
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct DocumentView {
+    pub active_chunk_index: Option<u32>,
+    pub active_section_index: Option<u32>,
+    pub chapter_count: u32,
+    pub chunk_count: u32,
+    pub document_id: String,
+    pub sections: Vec<DocumentSectionView>,
+    pub source_path: String,
+    pub title: String,
+}
+
 #[derive(Debug, Serialize)]
 struct RequestEnvelope<'a> {
     #[serde(rename = "type")]
@@ -135,6 +164,17 @@ impl BackendClient {
             .ok_or_else(|| "Backend omitted documents list.".to_string())?;
         serde_json::from_value(documents)
             .map_err(|err| format!("Unable to decode documents payload: {err}"))
+    }
+
+    pub fn get_document_view(&mut self) -> Result<Option<DocumentView>, String> {
+        let response = self.send_request("query", "get_document_view", json!({}))?;
+        if response.status != "ok" {
+            return Ok(None);
+        }
+        match response.payload.get("document") {
+            Some(Value::Null) | None => Ok(None),
+            Some(_) => decode_payload(response.payload, "document").map(Some),
+        }
     }
 
     pub fn execute_command(&mut self, name: &str, payload: Value) -> Result<String, String> {
