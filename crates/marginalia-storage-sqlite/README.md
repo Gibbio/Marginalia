@@ -1,7 +1,11 @@
 # marginalia-storage-sqlite
 
-Planned shared engine crate for:
+SQLite persistence for the Marginalia Beta engine.
 
-- SQLite database integration
-- repositories
+The first version provides:
+
 - schema migrations
+- SQLite-backed document, session, note, and rewrite repositories
+- in-memory and file-backed database opening
+
+It mirrors the Alpha schema direction closely enough to keep migration simple.
