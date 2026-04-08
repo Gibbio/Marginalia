@@ -47,6 +47,17 @@ MARGINALIA_TUI_BETA_DB=/tmp/marginalia-beta.sqlite3 \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
+To try desktop host playback instead of the in-memory fake playback engine:
+
+```bash
+MARGINALIA_TUI_BACKEND=beta \
+MARGINALIA_TUI_PLAYBACK=host \
+cargo run --manifest-path apps/tui-rs/Cargo.toml
+```
+
+The current host playback adapter auto-detects `afplay`, `aplay`, or `ffplay`
+when available.
+
 If you still need the Alpha Python bridge, enable the feature first:
 
 ```bash

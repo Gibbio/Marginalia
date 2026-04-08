@@ -455,6 +455,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "marginalia-playback-host"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "marginalia-core",
+]
+
+[[package]]
 name = "marginalia-provider-fake"
 version = "0.1.0"
 dependencies = [
@@ -490,6 +498,7 @@ name = "marginalia-tui"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "marginalia-playback-host",
  "marginalia-runtime",
  "ratatui",
  "serde",

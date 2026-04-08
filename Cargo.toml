@@ -4,6 +4,7 @@ members = [
     "crates/marginalia-core",
     "crates/marginalia-devtools",
     "crates/marginalia-import-text",
+    "crates/marginalia-playback-host",
     "crates/marginalia-provider-fake",
     "crates/marginalia-runtime",
     "crates/marginalia-storage-sqlite",
