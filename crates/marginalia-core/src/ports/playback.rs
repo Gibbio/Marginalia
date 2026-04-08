@@ -28,3 +28,45 @@ pub trait PlaybackEngine {
     fn seek(&mut self, position: &ReadingPosition) -> PlaybackSnapshot;
     fn snapshot(&self) -> PlaybackSnapshot;
 }
+
+impl<T> PlaybackEngine for &mut T
+where
+    T: PlaybackEngine + ?Sized,
+{
+    fn describe_capabilities(&self) -> ProviderCapabilities {
+        (**self).describe_capabilities()
+    }
+
+    fn hydrate(&mut self, snapshot: Option<PlaybackSnapshot>) {
+        (**self).hydrate(snapshot);
+    }
+
+    fn start(
+        &mut self,
+        document: &Document,
+        position: &ReadingPosition,
+        synthesis: Option<SynthesisResult>,
+    ) -> PlaybackSnapshot {
+        (**self).start(document, position, synthesis)
+    }
+
+    fn pause(&mut self) -> PlaybackSnapshot {
+        (**self).pause()
+    }
+
+    fn resume(&mut self) -> PlaybackSnapshot {
+        (**self).resume()
+    }
+
+    fn stop(&mut self) -> PlaybackSnapshot {
+        (**self).stop()
+    }
+
+    fn seek(&mut self, position: &ReadingPosition) -> PlaybackSnapshot {
+        (**self).seek(position)
+    }
+
+    fn snapshot(&self) -> PlaybackSnapshot {
+        (**self).snapshot()
+    }
+}

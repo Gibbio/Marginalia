@@ -1,7 +1,10 @@
 # marginalia-runtime
 
-Planned shared engine crate for:
+Host-neutral runtime composition for the Marginalia Beta engine.
 
-- runtime composition
-- lifecycle orchestration
-- host-neutral bootstrap
+The first implementation in this crate is intentionally small:
+
+- assembles `marginalia-core`
+- uses `marginalia-import-text`
+- uses `marginalia-provider-fake`
+- exposes a fake bootstrap runtime for integration tests and early hosts

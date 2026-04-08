@@ -3,5 +3,6 @@ members = [
     "crates/marginalia-core",
     "crates/marginalia-import-text",
     "crates/marginalia-provider-fake",
+    "crates/marginalia-runtime",
 ]
 resolver = "2"
