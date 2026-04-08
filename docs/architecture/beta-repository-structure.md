@@ -27,6 +27,11 @@ Shared engine crates:
 - `marginalia-ffi`: bindings and API boundary for host shells
 - `marginalia-devtools`: doctor, smoke, benchmark, and migration helpers
 
+Reserved for later, not immediate Beta bootstrap:
+
+- `marginalia-secrets`: secure storage abstraction for API keys, OAuth tokens,
+  and other user credentials via host-native secret stores
+
 ### `apps/`
 
 Host applications:
@@ -34,6 +39,8 @@ Host applications:
 - `desktop/`: desktop reference host
 - `ios/`: iOS shell
 - `android/`: Android shell
+- `tui-rs/`: retained as a Rust desktop development and administration tool
+  during Beta migration
 
 ### `models/`
 
@@ -59,3 +66,7 @@ longer define the target Beta structure.
 
 The Beta tree is introduced first so that implementation work can move into the
 correct ownership boundaries incrementally.
+
+`apps/tui-rs/` remains intentionally present during Beta. It is not treated as
+obsolete Alpha residue; it is a useful desktop tool while the shared engine and
+desktop host boundaries are still moving.
