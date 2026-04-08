@@ -9,6 +9,7 @@ import subprocess
 from hashlib import sha1
 from io import BufferedWriter
 from pathlib import Path
+from typing import Any
 
 from marginalia_core.ports.capabilities import ProviderCapabilities
 from marginalia_core.ports.tts import SynthesisRequest, SynthesisResult
@@ -126,11 +127,7 @@ class KokoroSpeechSynthesizer:
             stderr=subprocess.PIPE,
         )
         assert self._process.stdout is not None
-        ready_line = self._process.stdout.readline()
-        if not ready_line:
-            stderr = self._process.stderr.read().decode("utf-8", errors="replace") if self._process.stderr else ""
-            raise RuntimeError(f"Kokoro worker failed to start: {stderr}")
-        ready = json.loads(ready_line)
+        ready = self._read_json_message("start")
         if ready.get("status") != "ready":
             raise RuntimeError(f"Kokoro worker unexpected ready response: {ready}")
         logger.info("Kokoro worker ready (pid=%d)", self._process.pid)
@@ -153,17 +150,37 @@ class KokoroSpeechSynthesizer:
             self._process = None
             raise RuntimeError("Kokoro worker process died unexpectedly.")
 
-        response_line = self._process.stdout.readline()
-        if not response_line:
-            stderr = ""
-            if self._process.stderr:
-                stderr = self._process.stderr.read().decode("utf-8", errors="replace")
-            self._process = None
-            raise RuntimeError(f"Kokoro worker closed unexpectedly: {stderr}")
-
-        response = json.loads(response_line)
+        response = self._read_json_message("synthesis response")
         if response.get("status") != "ok":
             raise RuntimeError(f"Kokoro synthesis failed: {response.get('message', 'unknown')}")
+
+    def _read_json_message(self, context: str) -> dict[str, Any]:
+        assert self._process is not None
+        assert self._process.stdout is not None
+
+        skipped_lines: list[str] = []
+        while True:
+            response_line = self._process.stdout.readline()
+            if not response_line:
+                stderr = ""
+                if self._process.stderr:
+                    stderr = self._process.stderr.read().decode("utf-8", errors="replace")
+                self._process = None
+                skipped_suffix = ""
+                if skipped_lines:
+                    skipped_suffix = f" Ignored stdout: {' | '.join(skipped_lines)}"
+                raise RuntimeError(
+                    f"Kokoro worker closed unexpectedly during {context}: {stderr}{skipped_suffix}"
+                )
+
+            decoded_line = response_line.decode("utf-8", errors="replace").strip()
+            if not decoded_line:
+                continue
+            try:
+                return json.loads(decoded_line)
+            except json.JSONDecodeError:
+                skipped_lines.append(decoded_line)
+                logger.warning("Ignoring non-JSON Kokoro worker stdout during %s: %s", context, decoded_line)
 
 
 def _default_voice_for_lang_code(lang_code: str) -> str:
