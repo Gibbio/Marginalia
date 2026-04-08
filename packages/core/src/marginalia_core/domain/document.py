@@ -132,8 +132,20 @@ def build_document_outline(
 _MD_PARSER = MarkdownIt()
 front_matter_plugin(_MD_PARSER)
 
-# Token types whose inline content is readable prose.
-_PROSE_CONTAINERS = {"paragraph_open", "blockquote_open"}
+_INLINE_TEXT_TYPES = {"text", "code_inline", "softbreak"}
+
+
+def _extract_inline_text(token: object) -> str:
+    """Extract plain text from an inline token's children, stripping markup."""
+
+    children = getattr(token, "children", None)
+    if not children:
+        return getattr(token, "content", "").strip()
+    parts: list[str] = []
+    for child in children:
+        if child.type in _INLINE_TEXT_TYPES:
+            parts.append(" " if child.type == "softbreak" else child.content)
+    return "".join(parts).strip()
 
 
 def _parse_markdown_sections(
@@ -179,11 +191,13 @@ def _parse_markdown_sections(
             continue
 
         if in_heading and token.type == "inline":
-            current_title = token.content.strip() or f"Section {len(sections) + 1}"
+            current_title = _extract_inline_text(token) or f"Section {len(sections) + 1}"
             continue
 
-        if token.type == "inline" and token.content.strip():
-            current_paragraphs.append(token.content.strip())
+        if token.type == "inline":
+            plain = _extract_inline_text(token)
+            if plain:
+                current_paragraphs.append(plain)
 
     flush_section()
     return sections

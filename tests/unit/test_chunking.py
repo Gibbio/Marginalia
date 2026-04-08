@@ -200,6 +200,28 @@ def test_code_fences_are_excluded_from_chunks() -> None:
     assert "# this is code" not in all_text
 
 
+def test_inline_markup_is_stripped_from_chunks() -> None:
+    """Bold, italic, links and inline code should become plain text."""
+
+    text = (
+        "# Chapter\n\n"
+        "This has **bold** and *italic* words.\n\n"
+        "A [link](http://example.com) and `inline code` here."
+    )
+    doc = build_document_outline(Path("test.md"), text, chunk_target_chars=300)
+
+    all_text = " ".join(chunk.text for chunk in doc.get_section(0).chunks)
+    assert "bold" in all_text
+    assert "**" not in all_text
+    assert "*italic*" not in all_text
+    assert "italic" in all_text
+    assert "[link]" not in all_text
+    assert "link" in all_text
+    assert "http://example.com" not in all_text
+    assert "inline code" in all_text
+    assert "`" not in all_text
+
+
 def test_heading_inside_code_fence_is_not_a_section() -> None:
     """A '#' inside a code fence must not create a section boundary."""
 
