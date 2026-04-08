@@ -115,12 +115,24 @@ pub(crate) enum BackendClient {
 impl BackendClient {
     pub fn spawn(config_path: Option<&Path>) -> Result<Self, String> {
         let mode = env::var("MARGINALIA_TUI_BACKEND")
-            .unwrap_or_else(|_| "python".to_string())
-            .to_ascii_lowercase();
+            .ok()
+            .map(|value| value.to_ascii_lowercase());
 
-        match mode.as_str() {
-            "beta" => BetaBackendClient::spawn().map(Self::Beta),
-            _ => ProcessBackendClient::spawn(config_path).map(Self::Process),
+        match mode.as_deref() {
+            None | Some("beta") | Some("rust") => BetaBackendClient::spawn().map(Self::Beta),
+            Some("python") | Some("alpha") => {
+                ProcessBackendClient::spawn(config_path).map(Self::Process)
+            }
+            Some(other) => Err(format!(
+                "Unsupported MARGINALIA_TUI_BACKEND value: {other}. Expected beta, rust, python, or alpha."
+            )),
+        }
+    }
+
+    pub fn mode_label(&self) -> &'static str {
+        match self {
+            Self::Process(_) => "Alpha Python backend",
+            Self::Beta(_) => "Beta Rust runtime",
         }
     }
 

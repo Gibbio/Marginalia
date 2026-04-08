@@ -81,7 +81,7 @@ fn wait_for_app(
     let (tx, rx) = mpsc::channel();
     let worker_logger = logger.clone();
     thread::spawn(move || {
-        let _ = tx.send(StartupEvent::Stage("Spawning backend process...".to_string()));
+        let _ = tx.send(StartupEvent::Stage("Starting Marginalia engine...".to_string()));
         let backend = match BackendClient::spawn(config_path.as_deref()) {
             Ok(backend) => backend,
             Err(message) => {
@@ -90,7 +90,10 @@ fn wait_for_app(
             }
         };
 
-        let _ = tx.send(StartupEvent::Stage("Loading backend snapshots...".to_string()));
+        let _ = tx.send(StartupEvent::Stage(format!(
+            "Loading {} snapshots...",
+            backend.mode_label()
+        )));
         let mut app = match App::new(backend, worker_logger.clone()) {
             Ok(app) => app,
             Err(message) => {
@@ -105,7 +108,7 @@ fn wait_for_app(
         let _ = tx.send(StartupEvent::Ready(app));
     });
 
-    let mut stage = "Starting Marginalia backend...".to_string();
+    let mut stage = "Starting Marginalia engine...".to_string();
     let started_at = Instant::now();
     loop {
         terminal
