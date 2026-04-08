@@ -1,5 +1,6 @@
 use marginalia_core::frontend::{AppSnapshot, SessionSnapshot};
 use marginalia_runtime::{FakeRuntime, SqliteRuntime};
+use marginalia_tts_kokoro::KokoroConfig;
 use std::env;
 use std::path::Path;
 use std::path::PathBuf;
@@ -8,6 +9,7 @@ use std::process::ExitCode;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Command {
     FakePlay { document_path: PathBuf },
+    KokoroDoctor { assets_root: PathBuf },
     SqliteIngest { db_path: PathBuf, document_path: PathBuf },
     SqliteListDocuments { db_path: PathBuf },
     SqlitePlay { db_path: PathBuf, document_path: PathBuf },
@@ -52,6 +54,12 @@ where
     match collected.as_slice() {
         [command, document_path] if command == "fake-play" => Ok(Command::FakePlay {
             document_path: PathBuf::from(document_path),
+        }),
+        [command] if command == "kokoro-doctor" => Ok(Command::KokoroDoctor {
+            assets_root: PathBuf::from("models/tts/kokoro"),
+        }),
+        [command, assets_root] if command == "kokoro-doctor" => Ok(Command::KokoroDoctor {
+            assets_root: PathBuf::from(assets_root),
         }),
         [command, db_path, document_path] if command == "sqlite-ingest" => {
             Ok(Command::SqliteIngest {
@@ -138,6 +146,41 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             print_app_snapshot(&app_snapshot);
             print_session_snapshot(&session_snapshot);
             print_events(runtime.published_events().len());
+            Ok(())
+        }
+        Command::KokoroDoctor { assets_root } => {
+            let config = KokoroConfig::from_assets_root(&assets_root);
+            let report = config.readiness_report();
+            let capabilities = report.provider_capabilities();
+
+            println!("provider={}", capabilities.provider_name);
+            println!("provider.ready={}", report.is_ready());
+            println!("provider.assets_root={}", report.assets_root.display());
+            println!(
+                "provider.model_path={}",
+                report
+                    .model_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            );
+            println!(
+                "provider.voice_path={}",
+                report
+                    .voice_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            );
+            println!("provider.default_language={}", report.default_language);
+            println!("provider.sample_rate_hz={}", report.sample_rate_hz);
+            if report.missing.is_empty() {
+                println!("provider.missing=none");
+            } else {
+                for (index, item) in report.missing.iter().enumerate() {
+                    println!("provider.missing[{index}]={item}");
+                }
+            }
             Ok(())
         }
         Command::SqliteIngest {
@@ -337,6 +380,7 @@ fn print_events(count: usize) {
 fn usage() -> &'static str {
     "Usage:
   cargo run -p marginalia-devtools -- fake-play <document>
+  cargo run -p marginalia-devtools -- kokoro-doctor [assets_root]
   cargo run -p marginalia-devtools -- sqlite-ingest <db> <document>
   cargo run -p marginalia-devtools -- sqlite-list-documents <db>
   cargo run -p marginalia-devtools -- sqlite-play <db> <document>
@@ -366,6 +410,17 @@ mod tests {
             command,
             Command::FakePlay {
                 document_path: PathBuf::from("/tmp/doc.md"),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_args_accepts_kokoro_doctor_default() {
+        let command = parse_args(["kokoro-doctor"]).unwrap();
+        assert_eq!(
+            command,
+            Command::KokoroDoctor {
+                assets_root: PathBuf::from("models/tts/kokoro"),
             }
         );
     }

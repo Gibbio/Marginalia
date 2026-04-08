@@ -93,7 +93,7 @@ pub struct FakeRuntime {
     importer: TextDocumentImporter,
     event_publisher: RecordingEventPublisher,
     playback_engine: Box<dyn PlaybackEngine + Send>,
-    tts: FakeSpeechSynthesizer,
+    tts: Box<dyn SpeechSynthesizer + Send>,
     command_recognizer: FakeCommandRecognizer,
     dictation_transcriber: FakeDictationTranscriber,
     rewrite_generator: FakeRewriteGenerator,
@@ -110,7 +110,7 @@ pub struct SqliteRuntime {
     importer: TextDocumentImporter,
     event_publisher: RecordingEventPublisher,
     playback_engine: Box<dyn PlaybackEngine + Send>,
-    tts: FakeSpeechSynthesizer,
+    tts: Box<dyn SpeechSynthesizer + Send>,
     command_recognizer: FakeCommandRecognizer,
     dictation_transcriber: FakeDictationTranscriber,
     rewrite_generator: FakeRewriteGenerator,
@@ -128,7 +128,7 @@ impl Default for FakeRuntime {
             importer: TextDocumentImporter,
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
-            tts: FakeSpeechSynthesizer::new(),
+            tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: FakeCommandRecognizer::default(),
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
@@ -158,6 +158,13 @@ impl FakeRuntime {
         playback_engine: impl PlaybackEngine + Send + 'static,
     ) {
         self.playback_engine = Box::new(playback_engine);
+    }
+
+    pub fn set_speech_synthesizer(
+        &mut self,
+        synthesizer: impl SpeechSynthesizer + Send + 'static,
+    ) {
+        self.tts = Box::new(synthesizer);
     }
 
     pub fn ingest_path(
@@ -392,15 +399,16 @@ impl FakeRuntime {
 
     pub fn doctor_report(&self) -> serde_json::Value {
         let playback_provider = self.playback_engine.describe_capabilities().provider_name;
+        let tts_provider = self.tts.describe_capabilities().provider_name;
         serde_json::json!({
             "providers": {
-                "tts": "fake-tts",
+                "tts": tts_provider,
                 "command_stt": "fake-command-stt",
                 "dictation_stt": "fake-dictation",
                 "playback": playback_provider,
             },
             "resolved_providers": {
-                "tts": "fake-tts",
+                "tts": tts_provider,
                 "command_stt": "fake-command-stt",
                 "dictation_stt": "fake-dictation",
                 "playback": playback_provider,
@@ -655,7 +663,7 @@ impl SqliteRuntime {
             importer: TextDocumentImporter,
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
-            tts: FakeSpeechSynthesizer::new(),
+            tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: FakeCommandRecognizer::default(),
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
@@ -684,7 +692,7 @@ impl SqliteRuntime {
             importer: TextDocumentImporter,
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
-            tts: FakeSpeechSynthesizer::new(),
+            tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: FakeCommandRecognizer::default(),
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
@@ -701,6 +709,13 @@ impl SqliteRuntime {
         playback_engine: impl PlaybackEngine + Send + 'static,
     ) {
         self.playback_engine = Box::new(playback_engine);
+    }
+
+    pub fn set_speech_synthesizer(
+        &mut self,
+        synthesizer: impl SpeechSynthesizer + Send + 'static,
+    ) {
+        self.tts = Box::new(synthesizer);
     }
 
     pub fn database(&self) -> &SQLiteDatabase {

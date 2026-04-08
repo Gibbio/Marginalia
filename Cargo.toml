@@ -8,5 +8,6 @@ members = [
     "crates/marginalia-provider-fake",
     "crates/marginalia-runtime",
     "crates/marginalia-storage-sqlite",
+    "crates/marginalia-tts-kokoro",
 ]
 resolver = "2"

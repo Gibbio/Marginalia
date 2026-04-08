@@ -7,3 +7,4 @@ description = "Development tooling for the Marginalia Beta engine"
 [dependencies]
 marginalia-core = { path = "../marginalia-core" }
 marginalia-runtime = { path = "../marginalia-runtime" }
+marginalia-tts-kokoro = { path = "../marginalia-tts-kokoro" }
