@@ -8,6 +8,7 @@ Python backend or the TUI.
 Current commands:
 
 - `fake-play <document>`
+- `kokoro-doctor [assets_root]`
 - `sqlite-ingest <db> <document>`
 - `sqlite-list-documents <db>`
 - `sqlite-play <db> <document>`

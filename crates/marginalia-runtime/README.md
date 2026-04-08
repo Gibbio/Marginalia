@@ -30,3 +30,7 @@ the shared Rust runtime.
 The runtime can now also accept a replacement playback engine at construction
 time, which allows desktop hosts such as `apps/tui-rs` to swap the fake
 playback implementation for a host-side subprocess playback adapter.
+
+The same runtime boundary now supports replacing the speech synthesizer, so the
+future Kokoro ONNX provider can be wired into the same desktop and mobile host
+paths without changing the runtime API again.

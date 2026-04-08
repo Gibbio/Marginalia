@@ -444,6 +444,7 @@ version = "0.1.0"
 dependencies = [
  "marginalia-core",
  "marginalia-runtime",
+ "marginalia-tts-kokoro",
 ]
 
 [[package]]
@@ -491,6 +492,13 @@ dependencies = [
  "marginalia-core",
  "rusqlite",
  "serde_json",
+]
+
+[[package]]
+name = "marginalia-tts-kokoro"
+version = "0.1.0"
+dependencies = [
+ "marginalia-core",
 ]
 
 [[package]]
