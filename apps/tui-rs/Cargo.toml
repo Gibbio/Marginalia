@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Rust TUI frontend for Marginalia"
 
+[features]
+default = []
+alpha-compat = []
+
 [dependencies]
 crossterm = "0.28"
 marginalia-core = { path = "../../crates/marginalia-core" }
