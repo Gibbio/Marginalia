@@ -8,7 +8,8 @@ VOSK_MODEL_NAME ?= vosk-model-small-it-0.22
 MODELS_DIR ?= .models
 
 .PHONY: bootstrap bootstrap-kokoro bootstrap-vosk bootstrap-whisper bootstrap-providers \
-        bootstrap-system-deps setup format lint test smoke run-cli-help doctor tui-rs
+        bootstrap-system-deps setup format lint test smoke run-cli-help doctor tui-rs \
+        clean clean-session
 
 # ---------------------------------------------------------------------------
 # Full setup — one command to get everything running
@@ -156,3 +157,18 @@ tui-rs:
 
 run-cli-help:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_cli --help
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+
+clean:
+	rm -rf build/ dist/ *.egg-info .eggs/
+	rm -rf .mypy_cache/ .pytest_cache/ .ruff_cache/ .coverage htmlcov/
+	rm -rf target/
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@echo "Build artifacts cleaned."
+
+clean-session:
+	rm -rf .marginalia/
+	@echo "Session data cleaned (database, audio cache, runtime)."

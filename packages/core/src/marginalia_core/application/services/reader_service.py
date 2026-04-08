@@ -853,6 +853,8 @@ class ReaderService:
         publish_started: bool,
     ) -> OperationResult:
         section, chunk = self._current_location(document, session)
+        if not chunk.text.strip():
+            return OperationResult.ok("Skipped empty chunk.", data={"skipped": True})
         return self._start_playback_for_text(
             session,
             document,

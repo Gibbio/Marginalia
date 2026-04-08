@@ -109,6 +109,7 @@ pub struct App {
     last_refresh: Instant,
     quit_armed_at: Option<Instant>,
     suggestion_index: usize,
+    pending_play: Option<String>,
 }
 
 impl App {
@@ -132,6 +133,7 @@ impl App {
             last_refresh: Instant::now() - Duration::from_secs(1),
             quit_armed_at: None,
             suggestion_index: 0,
+            pending_play: None,
         };
         app.refresh()?;
         app.poll_backend_logs();
@@ -142,6 +144,23 @@ impl App {
     pub fn refresh_if_due(&mut self) {
         if self.last_refresh.elapsed() >= Duration::from_millis(750) {
             let _ = self.refresh();
+        }
+    }
+
+    pub fn flush_pending_play(&mut self) {
+        let Some(document_id) = self.pending_play.take() else {
+            return;
+        };
+        self.push_message("Starting playback...".to_string());
+        match self
+            .backend
+            .execute_command("start_session", json!({"target": document_id}))
+        {
+            Ok(message) => {
+                self.push_message(message);
+                let _ = self.refresh();
+            }
+            Err(message) => self.push_message(format!("error: {message}")),
         }
     }
 
@@ -437,12 +456,14 @@ impl App {
                 if response.status != "ok" {
                     return Err(response.message);
                 }
-                self.selected_document_id = response
+                let document_id = response
                     .payload
                     .get("document")
                     .and_then(|document| document.get("document_id"))
                     .and_then(|document_id| document_id.as_str())
                     .map(ToString::to_string);
+                self.selected_document_id = document_id.clone();
+                self.pending_play = document_id;
                 response.message
             }
             "pause" => self.backend.execute_command("pause_session", json!({}))?,

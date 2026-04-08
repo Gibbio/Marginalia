@@ -63,6 +63,8 @@ fn run_tui(
             .draw(|frame| render(frame, app))
             .map_err(|err| format!("Unable to draw terminal frame: {err}"))?;
 
+        app.flush_pending_play();
+
         if event::poll(Duration::from_millis(100))
             .map_err(|err| format!("Unable to poll terminal events: {err}"))?
         {
