@@ -140,7 +140,10 @@ impl App {
         };
         app.refresh()?;
         app.poll_backend_logs();
-        app.push_message("Connected to Marginalia backend. Type /play <path|id>.".to_string());
+        app.push_message(format!(
+            "Connected to {}. Type /play <path|id>.",
+            app.backend.mode_label()
+        ));
         Ok(app)
     }
 

@@ -9,22 +9,23 @@ runtime model.
 
 It can currently run in two modes:
 
+- Beta development mode, now the default on the `beta` branch: talks directly
+  to the Rust `SqliteRuntime`
 - Alpha compatibility mode: talks to the Python backend over `stdio` using the
   frontend contract exposed by `marginalia_backend serve-stdio`
-- Beta development mode: talks directly to the Rust `SqliteRuntime`
 
 During Beta migration, the Rust mode is the preferred path for local engine
 work, while the Python transport remains available as a compatibility bridge.
 
 ## Run
 
-From the repository root:
+From the repository root, the TUI now starts in Beta mode by default:
 
 ```bash
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
-To launch the Beta runtime path instead of the Alpha Python backend:
+To be explicit about Beta mode:
 
 ```bash
 MARGINALIA_TUI_BACKEND=beta \
@@ -43,6 +44,7 @@ cargo run --manifest-path apps/tui-rs/Cargo.toml
 If needed, point it at a specific Python interpreter or repo root:
 
 ```bash
+MARGINALIA_TUI_BACKEND=python \
 MARGINALIA_BACKEND_PYTHON=/path/to/.venv/bin/python \
 MARGINALIA_REPO_ROOT=/path/to/Marginalia \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
@@ -51,6 +53,7 @@ cargo run --manifest-path apps/tui-rs/Cargo.toml
 If `marginalia.toml` exists, export it before launch:
 
 ```bash
+MARGINALIA_TUI_BACKEND=python \
 MARGINALIA_CONFIG=marginalia.toml \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
