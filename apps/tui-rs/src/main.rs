@@ -21,6 +21,9 @@ use ratatui::{Frame, Terminal};
 use std::env;
 use std::io::stdout;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Instant;
 use std::time::Duration;
 
 fn main() -> Result<(), String> {
@@ -35,9 +38,6 @@ fn main() -> Result<(), String> {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "-".to_string())
     ));
-    let backend = BackendClient::spawn(config_path.as_deref())
-        .map_err(|err| log_error(&logger, err))?;
-    let mut app = App::new(backend, logger.clone()).map_err(|err| log_error(&logger, err))?;
 
     enable_raw_mode()
         .map_err(|err| log_error(&logger, format!("Unable to enable raw mode: {err}")))?;
@@ -51,6 +51,7 @@ fn main() -> Result<(), String> {
         .show_cursor()
         .map_err(|err| log_error(&logger, format!("Unable to show terminal cursor: {err}")))?;
 
+    let mut app = wait_for_app(&mut terminal, &logger, config_path)?;
     let result = run_tui(&mut terminal, &mut app, &logger);
 
     disable_raw_mode()
@@ -70,6 +71,63 @@ fn main() -> Result<(), String> {
         Err(message) => logger.error(format!("TUI exited with error: {message}")),
     }
     result
+}
+
+fn wait_for_app(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    logger: &AppLogger,
+    config_path: Option<PathBuf>,
+) -> Result<App, String> {
+    let (tx, rx) = mpsc::channel();
+    let worker_logger = logger.clone();
+    thread::spawn(move || {
+        let _ = tx.send(StartupEvent::Stage("Spawning backend process...".to_string()));
+        let backend = match BackendClient::spawn(config_path.as_deref()) {
+            Ok(backend) => backend,
+            Err(message) => {
+                let _ = tx.send(StartupEvent::Failed(message));
+                return;
+            }
+        };
+
+        let _ = tx.send(StartupEvent::Stage("Loading backend snapshots...".to_string()));
+        let mut app = match App::new(backend, worker_logger.clone()) {
+            Ok(app) => app,
+            Err(message) => {
+                let _ = tx.send(StartupEvent::Failed(message));
+                return;
+            }
+        };
+
+        let _ = tx.send(StartupEvent::Stage("Checking configured providers...".to_string()));
+        app.run_startup_checks();
+
+        let _ = tx.send(StartupEvent::Ready(app));
+    });
+
+    let mut stage = "Starting Marginalia backend...".to_string();
+    let started_at = Instant::now();
+    loop {
+        terminal
+            .draw(|frame| render_loading(frame, &stage, started_at.elapsed()))
+            .map_err(|err| log_error(logger, format!("Unable to draw loading frame: {err}")))?;
+
+        match rx.recv_timeout(Duration::from_millis(80)) {
+            Ok(StartupEvent::Stage(next_stage)) => {
+                logger.info(format!("startup-stage {next_stage}"));
+                stage = next_stage;
+            }
+            Ok(StartupEvent::Ready(app)) => return Ok(app),
+            Ok(StartupEvent::Failed(message)) => return Err(log_error(logger, message)),
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(log_error(
+                    logger,
+                    "Backend startup thread disconnected unexpectedly.".to_string(),
+                ))
+            }
+        }
+    }
 }
 
 fn run_tui(
@@ -139,6 +197,53 @@ fn run_tui(
 fn log_error(logger: &AppLogger, message: String) -> String {
     logger.error(&message);
     message
+}
+
+fn render_loading(frame: &mut Frame, stage: &str, elapsed: Duration) {
+    let border_style = Style::default().fg(Color::Rgb(140, 160, 180));
+    let title_style = Style::default()
+        .fg(Color::Rgb(180, 200, 220))
+        .add_modifier(Modifier::BOLD);
+    let shell = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title_alignment(Alignment::Left)
+        .title(Line::from(vec![
+            Span::styled("─── ", border_style),
+            Span::styled("starting backends", title_style),
+            Span::styled(" ───", border_style),
+        ]));
+    let inner = shell.inner(frame.area());
+    frame.render_widget(shell, frame.area());
+
+    let dots = ".".repeat(((elapsed.as_millis() / 400) % 4) as usize);
+    let spinner_frames = ["⠁", "⠂", "⠄", "⠂"];
+    let spinner = spinner_frames[((elapsed.as_millis() / 120) as usize) % spinner_frames.len()];
+    let content = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(45), Constraint::Length(3), Constraint::Min(0)])
+        .split(inner);
+    let loading = Paragraph::new(vec![
+        Line::from(Span::styled(
+            format!("{spinner} Marginalia tui-rs"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(stage.to_string(), Style::default().fg(Color::Gray))),
+        Line::from(Span::styled(
+            format!("Loading providers{dots}"),
+            Style::default().fg(Color::DarkGray),
+        )),
+    ]);
+    frame.render_widget(loading, content[1]);
+}
+
+enum StartupEvent {
+    Stage(String),
+    Ready(App),
+    Failed(String),
 }
 
 fn render(frame: &mut Frame, app: &mut App) {

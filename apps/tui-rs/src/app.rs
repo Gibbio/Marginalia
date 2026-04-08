@@ -1,6 +1,6 @@
 use crate::backend::{AppSnapshot, BackendClient, DocumentListItem, DocumentView, SessionSnapshot};
 use crate::logger::AppLogger;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::env;
 use std::fs;
@@ -142,6 +142,24 @@ impl App {
         app.poll_backend_logs();
         app.push_message("Connected to Marginalia backend. Type /play <path|id>.".to_string());
         Ok(app)
+    }
+
+    pub fn run_startup_checks(&mut self) {
+        match self.backend.get_doctor_report() {
+            Ok(report) => {
+                let warnings = startup_warnings(&report);
+                if warnings.is_empty() {
+                    self.push_message("Startup checks: configured providers look ready.".to_string());
+                    return;
+                }
+                for warning in warnings {
+                    self.push_message(format!("startup: {warning}"));
+                }
+            }
+            Err(message) => {
+                self.push_message(format!("startup: unable to load doctor report: {message}"));
+            }
+        }
     }
 
     pub fn refresh_if_due(&mut self) {
@@ -815,4 +833,120 @@ fn is_ingestable_extension(path: &Path) -> bool {
                 "md" | "markdown" | "txt"
             )
         })
+}
+
+fn startup_warnings(report: &Value) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    let providers = report.get("providers").and_then(Value::as_object);
+    let resolved = report.get("resolved_providers").and_then(Value::as_object);
+    let checks = report.get("provider_checks").and_then(Value::as_object);
+
+    let playback_provider = providers
+        .and_then(|providers| providers.get("playback"))
+        .and_then(Value::as_str)
+        .unwrap_or("-");
+    if playback_provider == "subprocess" {
+        let playback_checks = checks.and_then(|checks| checks.get("playback"));
+        let command = playback_checks
+            .and_then(|value| value.get("command"))
+            .and_then(Value::as_str)
+            .unwrap_or("-");
+        let ready = playback_checks
+            .and_then(|value| value.get("ready"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let resolved_provider = resolved
+            .and_then(|providers| providers.get("playback"))
+            .and_then(Value::as_str)
+            .unwrap_or("-");
+        if !ready && resolved_provider == "subprocess-playback" {
+            warnings.push(format!(
+                "playback command '{command}' is missing; /play will fail until the playback config is fixed."
+            ));
+        } else if !ready && resolved_provider == "fake-playback" {
+            warnings.push(format!(
+                "playback command '{command}' is missing; backend fell back to fake playback."
+            ));
+        }
+    }
+
+    push_provider_warning(
+        &mut warnings,
+        providers,
+        resolved,
+        checks,
+        "command_stt",
+        "vosk",
+        "Vosk command STT is not ready",
+    );
+    push_provider_warning(
+        &mut warnings,
+        providers,
+        resolved,
+        checks,
+        "dictation_stt",
+        "whisper-cpp",
+        "whisper.cpp dictation STT is not ready",
+    );
+    push_provider_warning(
+        &mut warnings,
+        providers,
+        resolved,
+        checks,
+        "tts",
+        "kokoro",
+        "Kokoro TTS is not ready",
+    );
+    push_provider_warning(
+        &mut warnings,
+        providers,
+        resolved,
+        checks,
+        "tts",
+        "piper",
+        "Piper TTS is not ready",
+    );
+
+    warnings
+}
+
+fn push_provider_warning(
+    warnings: &mut Vec<String>,
+    providers: Option<&serde_json::Map<String, Value>>,
+    resolved: Option<&serde_json::Map<String, Value>>,
+    checks: Option<&serde_json::Map<String, Value>>,
+    provider_slot: &str,
+    configured_name: &str,
+    message: &str,
+) {
+    let Some(configured) = providers
+        .and_then(|providers| providers.get(provider_slot))
+        .and_then(Value::as_str)
+    else {
+        return;
+    };
+    if configured != configured_name {
+        return;
+    }
+
+    let check_key = configured_name.replace('-', "_");
+    let ready = checks
+        .and_then(|checks| checks.get(&check_key))
+        .and_then(|value| value.get("ready"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if ready {
+        return;
+    }
+
+    let resolved_name = resolved
+        .and_then(|resolved| resolved.get(provider_slot))
+        .and_then(Value::as_str)
+        .unwrap_or("-");
+    if resolved_name.starts_with("fake-") {
+        warnings.push(format!("{message}; backend fell back to {resolved_name}."));
+    } else {
+        warnings.push(format!("{message}; the configured provider may fail at runtime."));
+    }
 }
