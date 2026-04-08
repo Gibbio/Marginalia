@@ -1,170 +1,114 @@
 # Development Setup
 
-## Baseline
+## Two Working Tracks
 
-Marginalia is developed as a Python monorepo with a CLI-first workflow.
+Marginalia currently has two active development tracks:
+
+- Beta engine work in Rust
+- Alpha reference runtime work in Python
+
+Pick the setup that matches the part of the repository you are changing.
+
+## Beta Engine Setup
+
+Use this when working under:
+
+- `crates/`
+- `models/`
+- Beta ADRs and migration docs
+
+Baseline prerequisites:
+
+- Rust toolchain
+- `cargo`
+
+Current bootstrap:
+
+```bash
+cargo test -p marginalia-core
+```
+
+At the moment the Rust workspace is intentionally small. The first shared crate
+is `marginalia-core`, and more Beta crates will be added incrementally.
+
+Useful Beta documents:
+
+- [`NEXT.md`](/home/debian/sources/Marginalia/NEXT.md)
+- [`docs/architecture/beta-repository-structure.md`](/home/debian/sources/Marginalia/docs/architecture/beta-repository-structure.md)
+- [`docs/migration/alpha-to-beta-repo-mapping.md`](/home/debian/sources/Marginalia/docs/migration/alpha-to-beta-repo-mapping.md)
+
+## Alpha Reference Setup
+
+Use this when working under:
+
+- `packages/`
+- `apps/backend`
+- `apps/cli`
+- Alpha runtime verification docs
 
 Recommended prerequisites:
 
 - Python 3.12+
 - `make`
-- optional: VS Code with the recommended Python and Ruff extensions
 
-## Bootstrap
-
-The fastest way to get a fully working Marginalia with all real providers:
-
-```bash
-make setup
-```
-
-This installs system dependencies (portaudio, espeak-ng, uv via Homebrew),
-creates the Python venv with runtime packages (vosk, sounddevice, numpy),
-sets up Kokoro TTS, downloads the Vosk Italian model, builds whisper.cpp,
-generates a starter `marginalia.toml` config, and runs `doctor` to verify.
-
-For development-only setup (fake providers, no external deps):
+Development-only setup with fake providers:
 
 ```bash
 make bootstrap
 ```
 
-This creates `.venv`, upgrades `pip`, and installs the project plus development
-dependencies in editable mode. Running without `--config` uses all-fake
-providers by default.
-
-## Daily Commands
+Full Alpha setup with current real providers:
 
 ```bash
-make format
-make lint
+make setup
+```
+
+That path still bootstraps the current Python local loop, including Kokoro,
+Vosk, whisper.cpp, config generation, and `doctor`.
+
+## Common Commands
+
+Beta engine:
+
+```bash
+cargo test -p marginalia-core
+```
+
+Alpha Python reference:
+
+```bash
 make test
 make smoke
-make shell           # interactive Marginalia shell
-make doctor          # check provider readiness
-make run-cli-help
+make doctor
+make tui-rs
 ```
 
 ## Configuration
 
-Useful environment variables:
+For Beta engine work, there is not yet a host-level runtime configuration story
+to set up locally.
 
-- `MARGINALIA_HOME`
-- `MARGINALIA_DATA_DIR`
-- `MARGINALIA_DB_PATH`
-- `MARGINALIA_AUDIO_CACHE_DIR`
-- `MARGINALIA_LOG_LEVEL`
-- `MARGINALIA_CONFIG`
-- `MARGINALIA_COMMAND_LANGUAGE`
-- `MARGINALIA_COMMAND_LEXICON_DIR`
-- `MARGINALIA_FAKE_COMMANDS`
-- `MARGINALIA_FAKE_DICTATION_TEXT`
-- `MARGINALIA_FAKE_PLAYBACK_AUTO_COMPLETE_POLLS`
-- `MARGINALIA_DEFAULT_VOICE`
-- `MARGINALIA_TTS_PROVIDER`
-- `MARGINALIA_KOKORO_PYTHON_EXECUTABLE`
-- `MARGINALIA_KOKORO_LANG_CODE`
-- `MARGINALIA_KOKORO_SPEED`
-- `MARGINALIA_COMMAND_STT_PROVIDER`
-- `MARGINALIA_DICTATION_STT_PROVIDER`
-- `MARGINALIA_PLAYBACK_PROVIDER`
-- `MARGINALIA_ALLOW_PROVIDER_FALLBACK`
-- `MARGINALIA_PIPER_EXECUTABLE`
-- `MARGINALIA_PIPER_MODEL_PATH`
-- `MARGINALIA_VOSK_MODEL_PATH`
-- `MARGINALIA_WHISPER_CPP_EXECUTABLE`
-- `MARGINALIA_WHISPER_CPP_MODEL_PATH`
-- `MARGINALIA_WHISPER_CPP_LANGUAGE`
-- `MARGINALIA_WHISPER_CPP_MAX_RECORD_SECONDS`
-- `MARGINALIA_CHUNK_TARGET_CHARS`
-- `MARGINALIA_SESSION_MAX_INACTIVE_HOURS`
-- `MARGINALIA_AUDIO_CACHE_MAX_AGE_HOURS`
-
-The CLI `doctor` command reports the effective local configuration.
-
-Example:
+For Alpha reference work, the main config remains `marginalia.toml`. The
+quickest way to validate it is:
 
 ```bash
 .venv/bin/python -m marginalia_cli doctor --json
 ```
 
-`doctor` is currently the fastest way to validate:
-
-- resolved paths
-- writable database location
-- active provider names
-- command language and lexicon path
-- provider capabilities
-- Kokoro, Piper, Vosk, and playback readiness
-- default audio device visibility for real speech testing
-- SQLite schema version, profile, and current table counts
-
-## Real Provider Setup
-
-The recommended path is `make setup`, which handles everything automatically.
-
-For manual setup, the real provider stack targets macOS Apple Silicon and needs:
-
-- a dedicated Python 3.12 or 3.11 runtime for Kokoro (`make bootstrap-kokoro`)
-- `kokoro` and `soundfile` installed in that runtime
-- `espeak-ng` on `PATH` for better non-English coverage
-- a local Vosk Italian model directory (`make bootstrap-vosk`)
-- Python packages `vosk`, `sounddevice`, and `numpy` (`make bootstrap-runtime-deps`)
-- optionally whisper.cpp for note dictation (`make bootstrap-whisper`)
-- optionally a local `piper` executable plus a Piper `.onnx` voice model
-- microphone permission for the terminal app
-
-On macOS Apple Silicon, the Kokoro worker is started with
-`PYTORCH_ENABLE_MPS_FALLBACK=1` so the runtime can use MPS acceleration when
-available.
-
-Configure providers through `marginalia.toml` (generated by `make setup`)
-or `examples/alpha-local-config.toml`, then verify with `doctor`.
-
-## Single Runtime Verification
-
-The supported runtime is a single flow:
+The example Alpha config remains:
 
 ```bash
-.venv/bin/python -m marginalia_cli --config examples/alpha-local-config.toml play path/to/document.md --json
+examples/alpha-local-config.toml
 ```
 
-That command now:
+## Verification Guidance
 
-- ingests the file if needed
-- starts reading automatically
-- opens the microphone automatically
-- keeps command listening active during playback
-- uses the OS default input and output devices
-- cleans up a stale previous Marginalia runtime before starting
+Use the Beta path when you are changing shared engine code or migration
+documents.
 
-The full manual verification flow lives in
-[`docs/testing/alpha-0.1-runtime-loop.md`](../testing/alpha-0.1-runtime-loop.md).
+Use the Alpha path when you are validating current runtime behavior, providers,
+or the still-runnable desktop reference loop.
 
-## Smoke Flow
-
-`make smoke` exercises the current reference workflow:
-
-- doctor
-- play
-- status after a scripted stop command sequence
-- play again through clean document completion
-- final status check
-
-This flow is deterministic and uses fake providers by default, including a
-scripted read-while-listening runtime.
-
-## Devcontainer
-
-A lightweight devcontainer is included so work can resume quickly on another
-machine. It intentionally mirrors the local setup instead of introducing a
-separate orchestration layer.
-
-## Home And Office Development
-
-The product is expected to evolve across mixed contexts:
-
-- home: better for architecture, docs, ADRs, deeper model thinking, provider research
-- office: better for bounded implementation, test hardening, CI fixes, and routine polishing
-
-This distinction is reflected in the backlog seed with explicit context tags.
+The detailed Alpha runtime verification flow remains in
+[`docs/testing/alpha-0.1-runtime-loop.md`](../testing/alpha-0.1-runtime-loop.md)
+and should be treated as Alpha-specific reference material.

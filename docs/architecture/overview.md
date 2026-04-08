@@ -1,136 +1,121 @@
 # Architecture Overview
 
-## Shape
+## Status
 
-Marginalia is a lightweight modular monolith organized as a monorepo.
+This document describes the active Beta architecture direction.
 
-- `packages/core` owns domain concepts, events, ports, the session state
-  machine, and application services
-- `packages/adapters` owns fake and future concrete providers
-- `packages/infra` owns SQLite, config, logging, and event bus wiring
-- `apps/backend` owns the headless local backend process
-- `apps/cli` is now a thin Python compatibility interface
-- `apps/tui-rs` is the first standalone frontend client
+The repository currently contains:
 
-This remains effectively a clean or hexagonal architecture with low ceremony.
+- the Alpha Python implementation, still usable as a reference host and
+  migration source
+- the Beta Rust engine migration, now the target architecture
+
+When Alpha-era documents disagree with this one, the Beta ADRs and migration
+documents win.
+
+## Target Shape
+
+Marginalia Beta is a monorepo organized around a shared engine and
+host-specific shells.
+
+- `crates/` owns the shared Rust engine
+- `apps/` owns desktop, iOS, Android, and tool hosts
+- `models/` owns local AI asset layout
+- `packages/` remains the Alpha Python reference during migration
+
+This is still a modular monolith. The difference is that the durable center of
+the product is no longer a Python backend process. It is the shared engine.
+
+## Engine vs Host
+
+The shared engine owns:
+
+- domain models
+- application services
+- commands, queries, events, and snapshots
+- provider and repository ports
+- persistence rules
+- reading-session and playback state semantics
+
+Hosts own:
+
+- UI
+- audio session behavior
+- device permissions
+- app lifecycle
+- OS integration
+- concrete embedding of the shared engine
+
+This is the main Beta boundary.
+
+## Current Repository Reality
+
+Today the repository is transitional.
+
+The runnable Alpha loop still lives in Python:
+
+- `packages/core`
+- `packages/adapters`
+- `packages/infra`
+- `apps/backend`
+- `apps/cli`
+
+The new Beta engine work now starts in Rust:
+
+- [`crates/marginalia-core`](/home/debian/sources/Marginalia/crates/marginalia-core)
+
+The Rust TUI remains in
+[`apps/tui-rs`](/home/debian/sources/Marginalia/apps/tui-rs) as a desktop
+development and administration tool during migration.
+
+## Boundary Principles That Still Hold
+
+The following Alpha principles are still correct:
+
+- keep domain logic independent from concrete providers
+- keep playback, TTS, STT, storage, and LLM work behind ports
+- keep SQLite as the initial local persistence layer
+- treat commands, queries, events, and snapshots as explicit product contracts
+- keep the repository as one monorepo
+
+## What Changed For Beta
+
+The following Alpha assumptions are no longer architectural targets:
+
+- Python as the durable engine language
+- a headless backend child process as the mandatory runtime shape
+- stdio as the assumed long-term frontend boundary
+- desktop and Unix process assumptions as the center of the product
+
+The replacement direction is:
+
+- Rust engine crates
+- native or host-specific shells
+- FFI or host embedding at the engine boundary
+- Kokoro plus ONNX Runtime as the common local TTS direction
 
 ## Why This Shape
 
-The early product needs strong boundaries more than it needs scale mechanics.
-The architecture therefore optimizes for:
+Beta must support one product model across:
 
-- clarity of domain vocabulary
-- replaceable infrastructure
-- low-cost local iteration
-- future reuse by multiple client frontends over a local backend boundary
+- desktop
+- iOS
+- Android
 
-## Runtime Model
+That requires:
 
-The current runtime is simple but real. Its current shape is:
+- a shared systems-level engine
+- host-aware boundaries
+- portable local persistence
+- portable model/runtime planning
+- the ability to keep UI and OS integration native where needed
 
-1. a headless local backend composes a local container
-2. `DocumentIngestionService`, `ReaderService`, `NoteService`,
-   `RewriteService`, `SummaryService`, `SearchService`, and
-   `SessionQueryService` coordinate domain workflows
-3. ports abstract command STT, dictation STT, synthesis, playback, rewrite,
-   summarization, storage, and event publishing
-4. `SQLiteDatabase` runs sequential file-based migrations (numbered `.sql`
-   files tracked in a `schema_migrations` table), uses WAL mode, and applies
-   a busy timeout for concurrent reader/writer safety
-5. SQLite repositories persist documents, normalized sections and chunks,
-   sessions, notes, rewrite drafts, and playback-related session metadata
-6. real local Kokoro (default) or Piper TTS, Vosk command STT, and subprocess
-   playback adapters can be selected through config, while deterministic fake
-   adapters remain available
-7. an in-process event bus publishes standardized domain events that can later
-   feed frontend-facing event projections
-8. the read-while-listen runtime is driven by a step-driven `RuntimeLoop`
-   whose `step()` function returns a `StepStatus` — the caller owns the loop
-   driver (backend worker, TUI client driver, desktop timer, or async wrapper)
+## Source Of Truth
 
-The backend/frontend boundary is now a first-class architectural concern.
-Frontends should converge on explicit commands, queries, events, and snapshots
-instead of direct service calls.
+Read these together:
 
-## What Is Implemented Now
-
-- document ingestion with markdown heading and sentence-aware chunk parsing
-  (configurable `chunk_target_chars`)
-- normalized document persistence for documents, sections, and chunks
-- session creation and persistence with explicit `is_active` flag
-- persisted provider metadata and playback runtime metadata for the active
-  session
-- real local Kokoro synthesis to WAV artifacts by default, Piper as optional
-  alternate adapter
-- real local command recognition through Vosk when configured
-- real local note dictation through whisper.cpp when configured
-- real local playback through `afplay` when configured
-- step-driven runtime loop decoupled from the CLI
-- headless backend contract and stdio transport for external frontends
-- Rust `ratatui + crossterm` frontend client over the backend contract
-- signal handling for graceful shutdown during playback
-- pause and resume state transitions
-- repeat, rewind, chapter restart, chapter advance, stop, help, and bounded
-  voice-command loop commands
-- automatic chunk and chapter progression until completion or stop
-- background pre-synthesis of the next chunk to eliminate inter-chunk TTS gaps
-- reading progress tracking (section/chunk fractions, overall progress)
-- note capture lifecycle with anchored notes
-- rewrite draft generation through a deterministic fake provider
-- topic summary generation through a deterministic fake provider
-- local document and note search
-- database and provider diagnostics through `doctor`
-- session and playback projection reporting through `status`
-- sequential file-based SQLite migrations
-- audio cache cleanup with configurable max age
-- structured logging with optional file handler
-- `make setup` bootstraps the full stack in one command
-
-## What Is Still Stubbed
-
-- persistent event history or out-of-process subscribers
-- draft review workflows beyond generation
-- sentence-level playback tracking
-
-## Why CLI First
-
-CLI-first is not an aesthetic choice. It keeps the first implementation honest:
-
-- session transitions can be defined before UI complexity exists
-- provider contracts can be exercised without desktop decisions
-- tests can target deterministic commands and outputs
-- the same service graph can later back a headless backend with many clients
-
-That phase is now complete: the backend/frontend split is the active
-architectural center.
-
-## Why Monorepo
-
-The product is small enough that repo fragmentation would increase coordination
-cost immediately. A monorepo makes cross-cutting changes to docs, CLI, core,
-and infra cheap while keeping boundaries explicit in the folder structure.
-
-## Why Python Core
-
-Python is the practical choice for:
-
-- local AI tooling and model integration
-- text manipulation
-- CLI ergonomics
-- future provider ecosystem compatibility
-
-It is also fast enough for the current control-plane work, while the hot-path
-audio or model details can stay isolated behind adapters later.
-
-## Why SQLite Now
-
-SQLite is sufficient for early persistence requirements:
-
-- single-user local workflow
-- low operational overhead
-- transactional storage for documents, sessions, notes, and drafts
-- easy backup and inspection
-- a clear path from bootstrap schema to explicit migrations later
-
-It is intentionally not treated as a forever constraint, but it is the right
-starting point for a local-first product.
+- [`NEXT.md`](/home/debian/sources/Marginalia/NEXT.md)
+- [`docs/adr/0011-beta-target-desktop-ios-android.md`](/home/debian/sources/Marginalia/docs/adr/0011-beta-target-desktop-ios-android.md)
+- [`docs/adr/0013-adopt-rust-engine-with-native-host-shells.md`](/home/debian/sources/Marginalia/docs/adr/0013-adopt-rust-engine-with-native-host-shells.md)
+- [`docs/architecture/beta-repository-structure.md`](/home/debian/sources/Marginalia/docs/architecture/beta-repository-structure.md)
+- [`docs/migration/alpha-to-beta-repo-mapping.md`](/home/debian/sources/Marginalia/docs/migration/alpha-to-beta-repo-mapping.md)

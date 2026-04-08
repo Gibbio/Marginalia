@@ -32,20 +32,22 @@ The high-level reader state maps to a projected playback state:
 - `IDLE` projects to `stopped`
 - all other active workflow states project to `paused`
 
-This matters because frontends may reconnect to a long-running backend process.
-Playback state is therefore synchronized from persisted session metadata plus
-the current playback adapter snapshot rather than from frontend-local state.
+This matters because hosts may reconnect to, re-embed, or restore the shared
+engine across sessions. Playback state is therefore synchronized from persisted
+session metadata plus the current playback adapter snapshot rather than from
+host-local UI state.
 
 ## Why Explicit State Matters
 
 - voice-driven tools become confusing when note capture and playback overlap
-- future TUI, desktop, editor, and mobile clients will need a single state
+- desktop, iOS, Android, and tool hosts will need a single state
   vocabulary
 - tests can assert lifecycle transitions before real speech providers exist
 
 ## Alpha 0.2 Implementation Notes
 
-The repository implements the state graph and uses it in real CLI flows:
+The Alpha Python reference implementation already exercises this state graph in
+real flows:
 
 - `play`
 - `pause`
@@ -88,9 +90,10 @@ class that exposes a `step()` function returning a `StepStatus`:
 - `STOPPED` — the session was stopped by a command or signal
 - `ERROR` — a fatal runtime fault occurred
 
-The caller owns the loop driver. The backend can run it in a worker thread; a
-client may poll snapshots on a timer; an async wrapper may use `asyncio`. The
-core does not assume any specific concurrency model.
+The caller owns the loop driver. An Alpha backend can run it in a worker
+thread; a host shell can drive it through polling or callbacks; an async
+wrapper may use `asyncio` or a future Rust runtime. The core does not assume
+any specific concurrency model.
 
 ### Voice Command Dispatch
 

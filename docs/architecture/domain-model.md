@@ -27,7 +27,8 @@ Tracks:
 - active note capture id if one exists
 
 The reading session is the backbone for pause/resume, note anchoring, rewrite
-context, and coherent CLI behavior across separate invocations.
+context, and coherent host behavior across restarts, reconnections, and future
+platform shells.
 
 ## Voice Note
 
