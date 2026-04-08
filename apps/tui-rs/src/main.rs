@@ -9,11 +9,12 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use ratatui::layout::Alignment;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::env;
 use std::io::stdout;
@@ -115,93 +116,125 @@ fn run_tui(
 }
 
 fn render(frame: &mut Frame, app: &mut App) {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(9),
-            Constraint::Min(18),
-            Constraint::Length(7),
-        ])
-        .split(frame.area());
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
-        .split(vertical[1]);
-    let sidebar = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(body[1]);
-
+    let version = env!("CARGO_PKG_VERSION");
     let border_style = Style::default().fg(Color::Rgb(140, 160, 180));
     let title_style = Style::default()
         .fg(Color::Rgb(180, 200, 220))
         .add_modifier(Modifier::BOLD);
+    let section_style = Style::default().fg(Color::Rgb(102, 118, 136));
 
-    let header = Paragraph::new(render_header_lines(app))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border_style)
-                .title(" Overview ")
-                .title_style(title_style),
-        )
-        .wrap(Wrap { trim: false });
+    let shell = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title_alignment(Alignment::Left)
+        .title(shell_title(app, border_style, title_style, section_style));
+    let inner = shell.inner(frame.area());
+    frame.render_widget(shell, frame.area());
 
+    if inner.width < 12 || inner.height < 12 {
+        return;
+    }
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(6),
+            Constraint::Length(1),
+            Constraint::Min(12),
+            Constraint::Length(1),
+            Constraint::Length(6),
+        ])
+        .split(inner);
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(72),
+            Constraint::Length(3),
+            Constraint::Percentage(28),
+        ])
+        .split(vertical[2]);
+    let sidebar = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(70),
+            Constraint::Length(1),
+            Constraint::Percentage(30),
+        ])
+        .split(body[2]);
+
+    let overview_title = format!("Marginalia tui-rs {version}");
+    let header = Paragraph::new(section_lines(
+        &overview_title,
+        render_header_lines(app, vertical[0].width),
+        vertical[0].width,
+        title_style,
+        section_style,
+    ));
+
+    let document_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(body[0]);
     let (document_lines, active_document_line) =
-        render_document_lines(app, body[0].width.saturating_sub(2).max(1) as usize);
-    sync_document_scroll(app, body[0], active_document_line, document_lines.len());
+        render_document_lines(app, document_area[1].width.saturating_sub(2).max(1) as usize);
+    let document_heading = Paragraph::new(section_heading(
+        "Document",
+        document_area[0].width,
+        title_style,
+        section_style,
+    ));
+    let document_lines = indented_lines(document_lines, "  ");
+    sync_document_scroll(app, document_area[1], active_document_line, document_lines.len());
     let document = Paragraph::new(document_lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border_style)
-                .title(" Document ")
-                .title_style(title_style),
-        )
         .scroll((app.document_scroll(), 0))
         .wrap(Wrap { trim: false });
 
-    let messages_widget = Paragraph::new(render_messages(app))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border_style)
-                .title(" Log ")
-                .title_style(title_style),
-        )
+    let log_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(sidebar[0]);
+    let log_heading = Paragraph::new(section_heading(
+        "Log",
+        log_area[0].width,
+        title_style,
+        section_style,
+    ));
+    let messages_widget = Paragraph::new(indented_lines(render_messages(app), "  "))
         .wrap(Wrap { trim: true });
-    let messages_viewport = sidebar[0].height.saturating_sub(2);
-    let messages_total = messages_widget.line_count(sidebar[0].width.saturating_sub(2)) as u16;
+    let messages_viewport = log_area[1].height;
+    let messages_total = messages_widget.line_count(log_area[1].width) as u16;
     let messages = messages_widget.scroll((messages_total.saturating_sub(messages_viewport), 0));
 
-    let status = Paragraph::new(render_status_lines(app))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border_style)
-                .title(" Session ")
-                .title_style(title_style),
-        )
-        .wrap(Wrap { trim: true });
+    let status = Paragraph::new(section_lines(
+        "Session",
+        render_status_lines(app),
+        sidebar[2].width,
+        title_style,
+        section_style,
+    ))
+    .wrap(Wrap { trim: true });
 
-    let input = Paragraph::new(render_input_lines(app))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border_style)
-                .title(" Command ")
-                .title_style(title_style),
-        )
+    let input = Paragraph::new(section_lines(
+        "Command",
+        render_input_lines(app),
+        vertical[4].width,
+        title_style,
+        section_style,
+    ))
         .style(Style::default().fg(Color::Yellow));
 
     frame.render_widget(header, vertical[0]);
-    frame.render_widget(document, body[0]);
-    frame.render_widget(messages, sidebar[0]);
-    frame.render_widget(status, sidebar[1]);
-    frame.render_widget(input, vertical[2]);
+    frame.render_widget(document_heading, document_area[0]);
+    frame.render_widget(document, document_area[1]);
+    render_vertical_separator(frame, body[1], section_style);
+    frame.render_widget(log_heading, log_area[0]);
+    frame.render_widget(messages, log_area[1]);
+    frame.render_widget(status, sidebar[2]);
+    frame.render_widget(input, vertical[4]);
     frame.set_cursor_position((
-        vertical[2].x + 3 + app.input.chars().count() as u16,
-        vertical[2].y + 1,
+        vertical[4].x + 4 + app.input.chars().count() as u16,
+        vertical[4].y + 1,
     ));
 }
 
@@ -211,7 +244,7 @@ fn sync_document_scroll(
     active_document_line: Option<usize>,
     total_lines: usize,
 ) {
-    let viewport_height = document_area.height.saturating_sub(2);
+    let viewport_height = document_area.height;
     app.sync_document_scroll(
         active_document_line,
         viewport_height.max(1),
@@ -219,7 +252,84 @@ fn sync_document_scroll(
     );
 }
 
-fn render_header_lines(app: &App) -> Vec<Line<'static>> {
+fn shell_title(
+    app: &App,
+    border_style: Style,
+    active_style: Style,
+    idle_style: Style,
+) -> Line<'static> {
+    let phase = (app.animation_tick() / 5) % 3;
+    let mut spans = vec![Span::styled("─── ", border_style)];
+    for index in 0..3 {
+        let style = if index == phase { active_style } else { idle_style };
+        let glyph = if index == phase { "•" } else { "·" };
+        spans.push(Span::styled(glyph, style));
+        if index < 2 {
+            spans.push(Span::raw(" "));
+        }
+    }
+    spans.push(Span::styled(" ───", border_style));
+    Line::from(spans)
+}
+
+fn section_lines(
+    title: &str,
+    lines: Vec<Line<'static>>,
+    width: u16,
+    title_style: Style,
+    separator_style: Style,
+) -> Vec<Line<'static>> {
+    let mut result = Vec::with_capacity(lines.len() + 1);
+    result.push(section_heading(
+        title,
+        width,
+        title_style,
+        separator_style,
+    ));
+    result.extend(indented_lines(lines, "  "));
+    result
+}
+
+fn indented_lines(lines: Vec<Line<'static>>, indent: &str) -> Vec<Line<'static>> {
+    let mut result = Vec::with_capacity(lines.len());
+    for line in lines {
+        let mut spans = Vec::with_capacity(line.spans.len() + 1);
+        spans.push(Span::raw(indent.to_string()));
+        spans.extend(line.spans);
+        result.push(Line::from(spans));
+    }
+    result
+}
+
+fn section_heading(
+    title: &str,
+    width: u16,
+    title_style: Style,
+    separator_style: Style,
+) -> Line<'static> {
+    let separator_width = width
+        .saturating_sub(title.chars().count() as u16)
+        .saturating_sub(3) as usize;
+
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(title.to_string(), title_style),
+        Span::styled(format!(" {}", "─".repeat(separator_width)), separator_style),
+    ])
+}
+
+fn render_vertical_separator(frame: &mut Frame, area: Rect, style: Style) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let lines = (0..area.height)
+        .map(|_| Line::from(Span::styled(" │ ", style)))
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_header_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let dinosaur = match app.animation_frame() {
         0 => [
             "            __",
@@ -244,115 +354,33 @@ fn render_header_lines(app: &App) -> Vec<Line<'static>> {
         ],
     };
 
-    vec![
-        Line::from(vec![
-            Span::styled(
-                dinosaur[0].to_string(),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("      "),
-            Span::styled(
-                "M",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "A",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "R",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "G",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "I",
-                Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "N",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "A",
-                Style::default()
-                    .fg(Color::LightRed)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "L",
-                Style::default()
-                    .fg(Color::LightYellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "I",
-                Style::default()
-                    .fg(Color::LightGreen)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "A",
-                Style::default()
-                    .fg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(Span::styled(
-            dinosaur[1].to_string(),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(vec![
-            Span::styled(
-                dinosaur[2].to_string(),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("   "),
-            Span::styled(
-                "Rust TUI over the headless backend",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(Span::styled(
-            dinosaur[3].to_string(),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(vec![
-            Span::styled(
-                dinosaur[4].to_string(),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("   "),
-            Span::styled(
-                "Type /ingest to wake the reader",
-                Style::default().fg(Color::Gray),
-            ),
-        ]),
-    ]
+    let content_width = width.saturating_sub(2) as usize;
+    let style = Style::default()
+        .fg(Color::Green)
+        .add_modifier(Modifier::BOLD);
+
+    dinosaur
+        .iter()
+        .map(|line| {
+            Line::from(Span::styled(
+                wrap_sprite_line(line, app.animation_tick(), content_width),
+                style,
+            ))
+        })
+        .collect()
+}
+
+fn wrap_sprite_line(line: &str, offset: usize, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+
+    let mut cells = vec![' '; width];
+    for (index, ch) in line.chars().enumerate() {
+        let position = (offset + index) % width;
+        cells[position] = ch;
+    }
+    cells.into_iter().collect()
 }
 
 fn render_input_lines(app: &App) -> Vec<Line<'static>> {
