@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import shutil
 import subprocess
 from hashlib import sha1
+from io import BufferedWriter
 from pathlib import Path
 
 from marginalia_core.ports.capabilities import ProviderCapabilities
 from marginalia_core.ports.tts import SynthesisRequest, SynthesisResult
+
+logger = logging.getLogger(__name__)
 
 KOKORO_CAPABILITIES = ProviderCapabilities(
     provider_name="kokoro",
@@ -23,7 +28,12 @@ KOKORO_CAPABILITIES = ProviderCapabilities(
 
 
 class KokoroSpeechSynthesizer:
-    """Synthesize speech through a dedicated Kokoro Python runtime."""
+    """Synthesize speech through a dedicated Kokoro Python runtime.
+
+    On the first synthesis call, a persistent worker process is spawned.
+    The Kokoro model is loaded once and reused for all subsequent requests,
+    avoiding the ~3s cold start per chunk.
+    """
 
     def __init__(
         self,
@@ -39,19 +49,13 @@ class KokoroSpeechSynthesizer:
         self._lang_code = lang_code
         self._speed = speed
         self._worker_script = worker_script or Path(__file__).with_name("kokoro_worker.py")
+        self._process: subprocess.Popen[bytes] | None = None
+        self._stdin: BufferedWriter | None = None
 
     def describe_capabilities(self) -> ProviderCapabilities:
         return KOKORO_CAPABILITIES
 
     def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
-        python_path = shutil.which(self._python_executable)
-        if python_path is None:
-            raise RuntimeError(
-                f"Kokoro python executable '{self._python_executable}' is not available."
-            )
-        if not self._worker_script.exists():
-            raise RuntimeError(f"Kokoro worker script '{self._worker_script}' is missing.")
-
         self._output_dir.mkdir(parents=True, exist_ok=True)
         selected_voice = request.voice or _default_voice_for_lang_code(self._lang_code)
         cache_key = sha1(
@@ -63,30 +67,8 @@ class KokoroSpeechSynthesizer:
         output_path = self._output_dir / f"{cache_key}.wav"
 
         if not output_path.exists():
-            command = [
-                python_path,
-                str(self._worker_script),
-                "--output-path",
-                str(output_path),
-                "--lang-code",
-                self._lang_code,
-                "--voice",
-                selected_voice,
-                "--speed",
-                str(self._speed),
-            ]
-            try:
-                subprocess.run(
-                    command,
-                    input=request.text.encode("utf-8"),
-                    capture_output=True,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                stderr = exc.stderr.decode("utf-8", errors="replace").strip()
-                stdout = exc.stdout.decode("utf-8", errors="replace").strip()
-                details = stderr or stdout or "unknown Kokoro worker failure"
-                raise RuntimeError(f"Kokoro synthesis failed: {details}") from exc
+            self._ensure_worker()
+            self._send_request(request.text, selected_voice, output_path)
 
         return SynthesisResult(
             provider_name=KOKORO_CAPABILITIES.provider_name,
@@ -98,9 +80,90 @@ class KokoroSpeechSynthesizer:
             metadata={
                 "language": request.language,
                 "lang_code": self._lang_code,
-                "python_executable": python_path,
+                "python_executable": self._python_executable,
             },
         )
+
+    def shutdown(self) -> None:
+        if self._process is not None:
+            try:
+                if self._process.stdin:
+                    self._process.stdin.close()
+                self._process.wait(timeout=5)
+            except Exception:
+                self._process.kill()
+                self._process.wait()
+            self._process = None
+            self._stdin = None
+
+    def _ensure_worker(self) -> None:
+        if self._process is not None and self._process.poll() is None:
+            return
+
+        python_path = shutil.which(self._python_executable)
+        if python_path is None:
+            raise RuntimeError(
+                f"Kokoro python executable '{self._python_executable}' is not available."
+            )
+        if not self._worker_script.exists():
+            raise RuntimeError(f"Kokoro worker script '{self._worker_script}' is missing.")
+
+        logger.info("Spawning persistent Kokoro worker (lang=%s)", self._lang_code)
+        self._process = subprocess.Popen(
+            [
+                python_path,
+                str(self._worker_script),
+                "--serve",
+                "--lang-code",
+                self._lang_code,
+                "--voice",
+                _default_voice_for_lang_code(self._lang_code),
+                "--speed",
+                str(self._speed),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert self._process.stdout is not None
+        ready_line = self._process.stdout.readline()
+        if not ready_line:
+            stderr = self._process.stderr.read().decode("utf-8", errors="replace") if self._process.stderr else ""
+            raise RuntimeError(f"Kokoro worker failed to start: {stderr}")
+        ready = json.loads(ready_line)
+        if ready.get("status") != "ready":
+            raise RuntimeError(f"Kokoro worker unexpected ready response: {ready}")
+        logger.info("Kokoro worker ready (pid=%d)", self._process.pid)
+
+    def _send_request(self, text: str, voice: str, output_path: Path) -> None:
+        assert self._process is not None
+        assert self._process.stdin is not None
+        assert self._process.stdout is not None
+
+        request = json.dumps({
+            "text": text,
+            "voice": voice,
+            "speed": self._speed,
+            "output_path": str(output_path),
+        })
+        try:
+            self._process.stdin.write((request + "\n").encode("utf-8"))
+            self._process.stdin.flush()
+        except BrokenPipeError:
+            self._process = None
+            raise RuntimeError("Kokoro worker process died unexpectedly.")
+
+        response_line = self._process.stdout.readline()
+        if not response_line:
+            stderr = ""
+            if self._process.stderr:
+                stderr = self._process.stderr.read().decode("utf-8", errors="replace")
+            self._process = None
+            raise RuntimeError(f"Kokoro worker closed unexpectedly: {stderr}")
+
+        response = json.loads(response_line)
+        if response.get("status") != "ok":
+            raise RuntimeError(f"Kokoro synthesis failed: {response.get('message', 'unknown')}")
 
 
 def _default_voice_for_lang_code(lang_code: str) -> str:
