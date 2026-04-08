@@ -1,0 +1,9 @@
+[package]
+name = "marginalia-import-text"
+version = "0.1.0"
+edition = "2021"
+description = "Text and markdown importer for the Marginalia Beta engine"
+
+[dependencies]
+marginalia-core = { path = "../marginalia-core" }
+pulldown-cmark = "0.13"

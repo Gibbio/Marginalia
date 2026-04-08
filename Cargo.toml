@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "crates/marginalia-core",
+    "crates/marginalia-import-text",
 ]
 resolver = "2"

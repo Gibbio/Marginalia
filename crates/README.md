@@ -5,6 +5,7 @@ This directory is the target home for the shared Marginalia Beta engine.
 Planned crates include:
 
 - `marginalia-core`
+- `marginalia-import-*`
 - `marginalia-runtime`
 - `marginalia-storage-sqlite`
 - `marginalia-provider-fake`
