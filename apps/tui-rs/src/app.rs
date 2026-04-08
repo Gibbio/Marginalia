@@ -1,4 +1,5 @@
 use crate::backend::{AppSnapshot, BackendClient, DocumentListItem, DocumentView, SessionSnapshot};
+use crate::logger::AppLogger;
 use serde_json::json;
 use std::collections::VecDeque;
 use std::env;
@@ -92,6 +93,7 @@ pub const COMMANDS: [CommandSpec; 12] = [
 
 pub struct App {
     backend: BackendClient,
+    logger: AppLogger,
     pub input: String,
     pub should_quit: bool,
     pub app_snapshot: Option<AppSnapshot>,
@@ -113,9 +115,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(backend: BackendClient) -> Result<Self, String> {
+    pub fn new(backend: BackendClient, logger: AppLogger) -> Result<Self, String> {
         let mut app = Self {
             backend,
+            logger,
             input: String::new(),
             should_quit: false,
             app_snapshot: None,
@@ -143,7 +146,9 @@ impl App {
 
     pub fn refresh_if_due(&mut self) {
         if self.last_refresh.elapsed() >= Duration::from_millis(750) {
-            let _ = self.refresh();
+            if let Err(message) = self.refresh() {
+                self.logger.warn(format!("Scheduled refresh failed: {message}"));
+            }
         }
     }
 
@@ -200,6 +205,7 @@ impl App {
         if command.is_empty() {
             return;
         }
+        self.logger.info(format!("Submitting command: {command}"));
         match self.execute_command(&command) {
             Ok(message) => self.push_message(message),
             Err(message) => self.push_message(format!("error: {message}")),
@@ -494,6 +500,7 @@ impl App {
     }
 
     fn push_message(&mut self, message: String) {
+        self.logger.info(format!("ui-log {message}"));
         self.messages.push_back(message);
         while self.messages.len() > 200 {
             self.messages.pop_front();

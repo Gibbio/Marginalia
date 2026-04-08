@@ -28,6 +28,14 @@ MARGINALIA_CONFIG=marginalia.toml \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
+The TUI also appends its own client-side logs to `marginalia-tui.log` in the
+current working directory. To choose a different path:
+
+```bash
+MARGINALIA_TUI_LOG_FILE=/tmp/marginalia-tui.log \
+cargo run --manifest-path apps/tui-rs/Cargo.toml
+```
+
 ## Interaction
 
 Command bar:

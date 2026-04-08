@@ -1,5 +1,6 @@
 mod app;
 mod backend;
+mod logger;
 
 use app::App;
 use backend::BackendClient;
@@ -9,6 +10,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use logger::AppLogger;
 use ratatui::layout::Alignment;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -22,55 +24,74 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 fn main() -> Result<(), String> {
+    let logger = AppLogger::from_env()?;
     let config_path = env::var("MARGINALIA_CONFIG").ok().map(PathBuf::from);
-    let backend = BackendClient::spawn(config_path.as_deref())?;
-    let mut app = App::new(backend)?;
+    logger.info(format!(
+        "Starting Marginalia tui-rs (version={}, log_file={}, config={})",
+        env!("CARGO_PKG_VERSION"),
+        logger.path().display(),
+        config_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string())
+    ));
+    let backend = BackendClient::spawn(config_path.as_deref())
+        .map_err(|err| log_error(&logger, err))?;
+    let mut app = App::new(backend, logger.clone()).map_err(|err| log_error(&logger, err))?;
 
-    enable_raw_mode().map_err(|err| format!("Unable to enable raw mode: {err}"))?;
+    enable_raw_mode()
+        .map_err(|err| log_error(&logger, format!("Unable to enable raw mode: {err}")))?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen, EnableBlinking)
-        .map_err(|err| format!("Unable to enter alternate screen: {err}"))?;
+        .map_err(|err| log_error(&logger, format!("Unable to enter alternate screen: {err}")))?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)
-        .map_err(|err| format!("Unable to create terminal backend: {err}"))?;
+        .map_err(|err| log_error(&logger, format!("Unable to create terminal backend: {err}")))?;
     terminal
         .show_cursor()
-        .map_err(|err| format!("Unable to show terminal cursor: {err}"))?;
+        .map_err(|err| log_error(&logger, format!("Unable to show terminal cursor: {err}")))?;
 
-    let result = run_tui(&mut terminal, &mut app);
+    let result = run_tui(&mut terminal, &mut app, &logger);
 
-    disable_raw_mode().map_err(|err| format!("Unable to disable raw mode: {err}"))?;
+    disable_raw_mode()
+        .map_err(|err| log_error(&logger, format!("Unable to disable raw mode: {err}")))?;
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableBlinking
     )
-    .map_err(|err| format!("Unable to leave alternate screen: {err}"))?;
+    .map_err(|err| log_error(&logger, format!("Unable to leave alternate screen: {err}")))?;
     terminal
         .show_cursor()
-        .map_err(|err| format!("Unable to restore terminal cursor: {err}"))?;
+        .map_err(|err| log_error(&logger, format!("Unable to restore terminal cursor: {err}")))?;
 
+    match &result {
+        Ok(()) => logger.info("TUI shutdown completed."),
+        Err(message) => logger.error(format!("TUI exited with error: {message}")),
+    }
     result
 }
 
 fn run_tui(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     app: &mut App,
+    logger: &AppLogger,
 ) -> Result<(), String> {
     while !app.should_quit {
         app.refresh_if_due();
         app.poll_backend_logs();
         terminal
             .draw(|frame| render(frame, app))
-            .map_err(|err| format!("Unable to draw terminal frame: {err}"))?;
+            .map_err(|err| log_error(logger, format!("Unable to draw terminal frame: {err}")))?;
 
         app.flush_pending_play();
 
         if event::poll(Duration::from_millis(100))
-            .map_err(|err| format!("Unable to poll terminal events: {err}"))?
+            .map_err(|err| log_error(logger, format!("Unable to poll terminal events: {err}")))?
         {
             if let Event::Key(key) =
-                event::read().map_err(|err| format!("Unable to read terminal event: {err}"))?
+                event::read()
+                    .map_err(|err| log_error(logger, format!("Unable to read terminal event: {err}")))?
             {
                 if key.kind != KeyEventKind::Press {
                     continue;
@@ -113,6 +134,11 @@ fn run_tui(
     }
 
     Ok(())
+}
+
+fn log_error(logger: &AppLogger, message: String) -> String {
+    logger.error(&message);
+    message
 }
 
 fn render(frame: &mut Frame, app: &mut App) {
