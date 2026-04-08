@@ -18,7 +18,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::env;
 use std::io::stdout;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 fn main() -> Result<(), String> {
@@ -179,26 +179,25 @@ fn render(frame: &mut Frame, app: &mut App) {
     let (document_lines, active_document_line) =
         render_document_lines(app, document_area[1].width.saturating_sub(2).max(1) as usize);
     let document_heading = Paragraph::new(section_heading(
-        "Document",
+        &document_heading_title(app),
         document_area[0].width,
         title_style,
         section_style,
     ));
     let document_lines = indented_lines(document_lines, "  ");
     sync_document_scroll(app, document_area[1], active_document_line, document_lines.len());
-    let document = Paragraph::new(document_lines)
-        .scroll((app.document_scroll(), 0))
-        .wrap(Wrap { trim: false });
+    let document = Paragraph::new(document_lines).scroll((app.document_scroll(), 0));
 
     let log_area = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(sidebar[0]);
-    let log_heading = Paragraph::new(section_heading(
+    let log_heading = Paragraph::new(section_heading_with_indent(
         "Log",
         log_area[0].width,
         title_style,
         section_style,
+        "",
     ));
     let messages_widget = Paragraph::new(indented_lines(render_messages(app), "  "))
         .wrap(Wrap { trim: true });
@@ -307,15 +306,40 @@ fn section_heading(
     title_style: Style,
     separator_style: Style,
 ) -> Line<'static> {
+    section_heading_with_indent(title, width, title_style, separator_style, "  ")
+}
+
+fn section_heading_with_indent(
+    title: &str,
+    width: u16,
+    title_style: Style,
+    separator_style: Style,
+    indent: &str,
+) -> Line<'static> {
     let separator_width = width
         .saturating_sub(title.chars().count() as u16)
-        .saturating_sub(3) as usize;
+        .saturating_sub(indent.chars().count() as u16)
+        .saturating_sub(1) as usize;
 
     Line::from(vec![
-        Span::raw("  "),
+        Span::raw(indent.to_string()),
         Span::styled(title.to_string(), title_style),
         Span::styled(format!(" {}", "─".repeat(separator_width)), separator_style),
     ])
+}
+
+fn document_heading_title(app: &App) -> String {
+    let Some(document) = &app.document_view else {
+        return "Document".to_string();
+    };
+
+    let file_name = Path::new(&document.source_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(document.title.as_str());
+
+    format!("Document: {file_name}")
 }
 
 fn render_vertical_separator(frame: &mut Frame, area: Rect, style: Style) {
@@ -495,18 +519,9 @@ fn render_document_lines(app: &App, content_width: usize) -> (Vec<Line<'static>>
     };
 
     let mut lines = vec![
-        Line::from(Span::styled(
-            document.title.clone(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
         Line::from(format!(
-            "{}  id={}  {} chapters  {} chunks",
-            document.source_path,
-            document.document_id,
-            document.chapter_count,
-            document.chunk_count
+            "id={}  {} chapters  {} chunks",
+            document.document_id, document.chapter_count, document.chunk_count
         )),
         Line::from("".to_string()),
     ];
