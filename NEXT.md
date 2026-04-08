@@ -201,6 +201,21 @@ Longer-term architecture to reserve explicitly:
 5. Write the iOS and Android feasibility plans.
 6. Only then reopen feature delivery against the Beta architecture.
 
+## Python Removal Sequence
+
+Python removal is now treated as a phased migration, not a single deletion
+event.
+
+Sequence:
+
+1. make the normal Beta desktop path run without Python
+2. replace Beta-critical Python reference components with Rust equivalents
+3. remove `alpha-compat` and archive/delete the Alpha Python tree
+
+Reference:
+
+- [python-removal-plan.md](/home/debian/sources/Marginalia/docs/migration/python-removal-plan.md)
+
 ## Open Questions
 
 - Which parts of the current Python backend remain the long-lived reference
