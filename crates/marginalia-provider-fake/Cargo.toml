@@ -1,0 +1,11 @@
+[package]
+name = "marginalia-provider-fake"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic fake providers for the Marginalia Beta engine"
+
+[dependencies]
+marginalia-core = { path = "../marginalia-core" }
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
