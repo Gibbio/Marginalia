@@ -2,14 +2,19 @@ use marginalia_core::application::{
     DocumentIngestionOutcome, DocumentIngestionService, SessionQueryError, SessionQueryService,
 };
 use marginalia_core::domain::{
-    ReadingPosition, ReadingSession, ReaderState, DEFAULT_CHUNK_TARGET_CHARS,
+    ReadingPosition, ReadingSession, ReaderState, VoiceNote, DEFAULT_CHUNK_TARGET_CHARS,
 };
 use marginalia_core::events::{DomainEvent, EventName};
-use marginalia_core::frontend::{AppSnapshot, SessionSnapshot};
+use marginalia_core::frontend::{
+    AppSnapshot, DocumentChunkView, DocumentListItem, DocumentSectionView, DocumentView,
+    SessionSnapshot,
+};
 use marginalia_core::ports::{
     PlaybackEngine, SpeechSynthesizer, SynthesisRequest,
 };
-use marginalia_core::ports::storage::{DocumentRepository, SessionRepository};
+use marginalia_core::ports::storage::{
+    DocumentRepository, NoteRepository, SessionRepository,
+};
 use marginalia_import_text::TextDocumentImporter;
 use marginalia_provider_fake::{
     FakeCommandRecognizer, FakeDictationTranscriber, FakePlaybackEngine, FakeRewriteGenerator,
@@ -28,6 +33,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +51,7 @@ impl Default for RuntimeConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
+    MissingActiveSession,
     MissingDocument { document_id: String },
     EmptyDocument { document_id: String },
     Query(SessionQueryError),
@@ -53,6 +60,7 @@ pub enum RuntimeError {
 impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::MissingActiveSession => write!(f, "No active session is available in the runtime."),
             Self::MissingDocument { document_id } => {
                 write!(f, "Document {} was not found in the runtime.", document_id)
             }
@@ -240,6 +248,161 @@ impl FakeRuntime {
         self.event_publisher.published_events()
     }
 
+    pub fn list_documents(&self) -> Vec<DocumentListItem> {
+        self.document_repository
+            .list_documents()
+            .into_iter()
+            .map(|document| DocumentListItem {
+                chapter_count: document.chapter_count(),
+                chunk_count: document.total_chunk_count(),
+                document_id: document.document_id,
+                title: document.title,
+            })
+            .collect()
+    }
+
+    pub fn document_view(&self, document_id: Option<&str>) -> Option<DocumentView> {
+        build_document_view(
+            &self.document_repository,
+            &self.session_repository,
+            document_id,
+        )
+    }
+
+    pub fn pause_session(&mut self) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let playback = self.playback_engine.pause();
+        session.state = ReaderState::Paused;
+        session.playback_state = playback.state;
+        session.last_command = Some("pause_session".to_string());
+        session.runtime_status = Some("paused".to_string());
+        session.touch();
+        self.session_repository.save_session(session);
+        Ok(())
+    }
+
+    pub fn resume_session(&mut self) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let playback = self.playback_engine.resume();
+        session.state = ReaderState::Reading;
+        session.playback_state = playback.state;
+        session.last_command = Some("resume_session".to_string());
+        session.runtime_status = Some("active".to_string());
+        session.touch();
+        self.session_repository.save_session(session);
+        Ok(())
+    }
+
+    pub fn stop_session(&mut self) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let playback = self.playback_engine.stop();
+        session.state = ReaderState::Idle;
+        session.playback_state = playback.state;
+        session.last_command = Some("stop_session".to_string());
+        session.runtime_status = Some("stopped".to_string());
+        session.command_listening_active = false;
+        session.is_active = false;
+        session.touch();
+        self.session_repository.save_session(session);
+        Ok(())
+    }
+
+    pub fn next_chunk(&mut self) -> Result<(), RuntimeError> {
+        self.seek_relative_chunk(1)
+    }
+
+    pub fn previous_chunk(&mut self) -> Result<(), RuntimeError> {
+        self.seek_relative_chunk(-1)
+    }
+
+    pub fn next_chapter(&mut self) -> Result<(), RuntimeError> {
+        self.seek_chapter(1, false)
+    }
+
+    pub fn previous_chapter(&mut self) -> Result<(), RuntimeError> {
+        self.seek_chapter(-1, false)
+    }
+
+    pub fn restart_chapter(&mut self) -> Result<(), RuntimeError> {
+        self.seek_chapter(0, true)
+    }
+
+    pub fn repeat_chunk(&mut self) -> Result<(), RuntimeError> {
+        self.replay_current_position("repeat_chunk")
+    }
+
+    pub fn create_note(&mut self, text: &str) -> Result<VoiceNote, RuntimeError> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Err(RuntimeError::MissingActiveSession);
+        }
+
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let note = VoiceNote {
+            note_id: format!("note-{}", NOTE_COUNTER.fetch_add(1, Ordering::Relaxed)),
+            session_id: session.session_id.clone(),
+            document_id: session.document_id.clone(),
+            position: session.position.clone(),
+            transcript: trimmed.to_string(),
+            transcription_provider: "manual".to_string(),
+            language: session
+                .command_language
+                .clone()
+                .unwrap_or_else(|| "und".to_string()),
+            raw_audio_path: None,
+            created_at: chrono::Utc::now(),
+        };
+        self.note_repository.save_note(note.clone());
+        session.last_command = Some("create_note".to_string());
+        session.touch();
+        self.session_repository.save_session(session.clone());
+        self.publish_runtime_event(
+            EventName::NoteSaved,
+            HashMap::from([
+                ("note_id".to_string(), note.note_id.clone()),
+                ("document_id".to_string(), note.document_id.clone()),
+                ("anchor".to_string(), note.anchor()),
+            ]),
+        );
+        Ok(note)
+    }
+
+    pub fn doctor_report(&self) -> serde_json::Value {
+        serde_json::json!({
+            "providers": {
+                "tts": "fake-tts",
+                "command_stt": "fake-command-stt",
+                "dictation_stt": "fake-dictation",
+                "playback": "fake-playback",
+            },
+            "resolved_providers": {
+                "tts": "fake-tts",
+                "command_stt": "fake-command-stt",
+                "dictation_stt": "fake-dictation",
+                "playback": "fake-playback",
+            },
+            "provider_checks": {
+                "playback": { "ready": true, "command": "beta-runtime" },
+                "kokoro": { "ready": false },
+                "piper": { "ready": false },
+                "vosk": { "ready": false },
+                "whisper_cpp": { "ready": false },
+            }
+        })
+    }
+
     pub fn command_recognizer(&self) -> &FakeCommandRecognizer {
         &self.command_recognizer
     }
@@ -266,6 +429,199 @@ impl FakeRuntime {
             occurred_at: chrono::Utc::now(),
         });
     }
+
+    fn seek_relative_chunk(&mut self, delta: isize) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let document = self
+            .document_repository
+            .get_document(&session.document_id)
+            .ok_or_else(|| RuntimeError::MissingDocument {
+                document_id: session.document_id.clone(),
+            })?;
+
+        let mut positions = Vec::new();
+        for section in &document.sections {
+            for chunk in &section.chunks {
+                positions.push((section.index, chunk.index));
+            }
+        }
+        let current_index = positions
+            .iter()
+            .position(|(section_index, chunk_index)| {
+                *section_index == session.position.section_index
+                    && *chunk_index == session.position.chunk_index
+            })
+            .ok_or_else(|| RuntimeError::EmptyDocument {
+                document_id: session.document_id.clone(),
+            })?;
+
+        let target_index = if delta < 0 {
+            current_index.saturating_sub(delta.unsigned_abs())
+        } else {
+            (current_index + delta as usize).min(positions.len().saturating_sub(1))
+        };
+        let (section_index, chunk_index) = positions[target_index];
+
+        session.position.section_index = section_index;
+        session.position.chunk_index = chunk_index;
+        session.position.char_offset = 0;
+        self.replay_session_at_position(session, "seek_chunk")
+    }
+
+    fn seek_chapter(&mut self, delta: isize, restart_current: bool) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let document = self
+            .document_repository
+            .get_document(&session.document_id)
+            .ok_or_else(|| RuntimeError::MissingDocument {
+                document_id: session.document_id.clone(),
+            })?;
+
+        let current = session.position.section_index as isize;
+        let target_section = if restart_current {
+            current
+        } else {
+            (current + delta).clamp(0, document.sections.len().saturating_sub(1) as isize)
+        } as usize;
+
+        session.position.section_index = target_section;
+        session.position.chunk_index = 0;
+        session.position.char_offset = 0;
+        self.replay_session_at_position(session, "seek_chapter")
+    }
+
+    fn replay_current_position(&mut self, command_name: &str) -> Result<(), RuntimeError> {
+        let session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        self.replay_session_at_position(session, command_name)
+    }
+
+    fn replay_session_at_position(
+        &mut self,
+        mut session: ReadingSession,
+        command_name: &str,
+    ) -> Result<(), RuntimeError> {
+        let document = self
+            .document_repository
+            .get_document(&session.document_id)
+            .ok_or_else(|| RuntimeError::MissingDocument {
+                document_id: session.document_id.clone(),
+            })?;
+        let chunk = document
+            .get_chunk(session.position.section_index, session.position.chunk_index)
+            .ok_or_else(|| RuntimeError::EmptyDocument {
+                document_id: session.document_id.clone(),
+            })?;
+
+        let synthesis = self.tts.synthesize(SynthesisRequest {
+            text: chunk.text.clone(),
+            voice: session.voice.clone().or(Some("narrator".to_string())),
+            language: session
+                .command_language
+                .clone()
+                .unwrap_or_else(|| "it".to_string()),
+        });
+        let playback = self
+            .playback_engine
+            .start(&document, &session.position, Some(synthesis));
+
+        session.state = ReaderState::Reading;
+        session.playback_state = playback.state;
+        session.last_command = Some(command_name.to_string());
+        session.audio_reference = playback.audio_reference.clone();
+        session.playback_process_id = playback.process_id;
+        session.runtime_status = Some("active".to_string());
+        session.touch();
+        self.session_repository.save_session(session);
+        Ok(())
+    }
+}
+
+fn build_document_view<D, S>(
+    document_repository: &D,
+    session_repository: &S,
+    document_id: Option<&str>,
+) -> Option<DocumentView>
+where
+    D: DocumentRepository,
+    S: SessionRepository,
+{
+    let active_session = session_repository.get_active_session();
+    let target_document_id = document_id
+        .map(ToString::to_string)
+        .or_else(|| active_session.as_ref().map(|session| session.document_id.clone()))
+        .or_else(|| {
+            document_repository
+                .list_documents()
+                .into_iter()
+                .next()
+                .map(|document| document.document_id)
+        })?;
+
+    let document = document_repository.get_document(&target_document_id)?;
+    let active_section_index = active_session
+        .as_ref()
+        .filter(|session| session.document_id == document.document_id)
+        .map(|session| session.position.section_index);
+    let active_chunk_index = active_session
+        .as_ref()
+        .filter(|session| session.document_id == document.document_id)
+        .map(|session| session.position.chunk_index);
+
+    Some(DocumentView {
+        active_chunk_index,
+        active_section_index,
+        chapter_count: document.chapter_count(),
+        chunk_count: document.total_chunk_count(),
+        document_id: document.document_id.clone(),
+        sections: document
+            .sections
+            .iter()
+            .map(|section| DocumentSectionView {
+                chunk_count: section.chunk_count(),
+                chunks: section
+                    .chunks
+                    .iter()
+                    .map(|chunk| {
+                        let is_active = active_section_index == Some(section.index)
+                            && active_chunk_index == Some(chunk.index);
+                        let is_read = active_section_index
+                            .map(|active_section| {
+                                section.index < active_section
+                                    || (section.index == active_section
+                                        && active_chunk_index
+                                            .map(|active_chunk| chunk.index < active_chunk)
+                                            .unwrap_or(false))
+                            })
+                            .unwrap_or(false);
+
+                        DocumentChunkView {
+                            anchor: format!("section:{}/chunk:{}", section.index, chunk.index),
+                            char_end: chunk.char_end,
+                            char_start: chunk.char_start,
+                            index: chunk.index,
+                            is_active,
+                            is_read,
+                            text: chunk.text.clone(),
+                        }
+                    })
+                    .collect(),
+                index: section.index,
+                source_anchor: section.source_anchor.clone(),
+                title: section.title.clone(),
+            })
+            .collect(),
+        source_path: document.source_path.display().to_string(),
+        title: document.title,
+    })
 }
 
 impl SqliteRuntime {
@@ -428,6 +784,161 @@ impl SqliteRuntime {
         self.event_publisher.published_events()
     }
 
+    pub fn list_documents(&self) -> Vec<DocumentListItem> {
+        self.document_repository
+            .list_documents()
+            .into_iter()
+            .map(|document| DocumentListItem {
+                chapter_count: document.chapter_count(),
+                chunk_count: document.total_chunk_count(),
+                document_id: document.document_id,
+                title: document.title,
+            })
+            .collect()
+    }
+
+    pub fn document_view(&self, document_id: Option<&str>) -> Option<DocumentView> {
+        build_document_view(
+            &self.document_repository,
+            &self.session_repository,
+            document_id,
+        )
+    }
+
+    pub fn pause_session(&mut self) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let playback = self.playback_engine.pause();
+        session.state = ReaderState::Paused;
+        session.playback_state = playback.state;
+        session.last_command = Some("pause_session".to_string());
+        session.runtime_status = Some("paused".to_string());
+        session.touch();
+        self.session_repository.save_session(session);
+        Ok(())
+    }
+
+    pub fn resume_session(&mut self) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let playback = self.playback_engine.resume();
+        session.state = ReaderState::Reading;
+        session.playback_state = playback.state;
+        session.last_command = Some("resume_session".to_string());
+        session.runtime_status = Some("active".to_string());
+        session.touch();
+        self.session_repository.save_session(session);
+        Ok(())
+    }
+
+    pub fn stop_session(&mut self) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let playback = self.playback_engine.stop();
+        session.state = ReaderState::Idle;
+        session.playback_state = playback.state;
+        session.last_command = Some("stop_session".to_string());
+        session.runtime_status = Some("stopped".to_string());
+        session.command_listening_active = false;
+        session.is_active = false;
+        session.touch();
+        self.session_repository.save_session(session);
+        Ok(())
+    }
+
+    pub fn next_chunk(&mut self) -> Result<(), RuntimeError> {
+        self.seek_relative_chunk(1)
+    }
+
+    pub fn previous_chunk(&mut self) -> Result<(), RuntimeError> {
+        self.seek_relative_chunk(-1)
+    }
+
+    pub fn next_chapter(&mut self) -> Result<(), RuntimeError> {
+        self.seek_chapter(1, false)
+    }
+
+    pub fn previous_chapter(&mut self) -> Result<(), RuntimeError> {
+        self.seek_chapter(-1, false)
+    }
+
+    pub fn restart_chapter(&mut self) -> Result<(), RuntimeError> {
+        self.seek_chapter(0, true)
+    }
+
+    pub fn repeat_chunk(&mut self) -> Result<(), RuntimeError> {
+        self.replay_current_position("repeat_chunk")
+    }
+
+    pub fn create_note(&mut self, text: &str) -> Result<VoiceNote, RuntimeError> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Err(RuntimeError::MissingActiveSession);
+        }
+
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let note = VoiceNote {
+            note_id: format!("note-{}", NOTE_COUNTER.fetch_add(1, Ordering::Relaxed)),
+            session_id: session.session_id.clone(),
+            document_id: session.document_id.clone(),
+            position: session.position.clone(),
+            transcript: trimmed.to_string(),
+            transcription_provider: "manual".to_string(),
+            language: session
+                .command_language
+                .clone()
+                .unwrap_or_else(|| "und".to_string()),
+            raw_audio_path: None,
+            created_at: chrono::Utc::now(),
+        };
+        self.note_repository.save_note(note.clone());
+        session.last_command = Some("create_note".to_string());
+        session.touch();
+        self.session_repository.save_session(session.clone());
+        self.publish_runtime_event(
+            EventName::NoteSaved,
+            HashMap::from([
+                ("note_id".to_string(), note.note_id.clone()),
+                ("document_id".to_string(), note.document_id.clone()),
+                ("anchor".to_string(), note.anchor()),
+            ]),
+        );
+        Ok(note)
+    }
+
+    pub fn doctor_report(&self) -> serde_json::Value {
+        serde_json::json!({
+            "providers": {
+                "tts": "fake-tts",
+                "command_stt": "fake-command-stt",
+                "dictation_stt": "fake-dictation",
+                "playback": "fake-playback",
+            },
+            "resolved_providers": {
+                "tts": "fake-tts",
+                "command_stt": "fake-command-stt",
+                "dictation_stt": "fake-dictation",
+                "playback": "fake-playback",
+            },
+            "provider_checks": {
+                "playback": { "ready": true, "command": "beta-runtime" },
+                "kokoro": { "ready": false },
+                "piper": { "ready": false },
+                "vosk": { "ready": false },
+                "whisper_cpp": { "ready": false },
+            }
+        })
+    }
+
     pub fn command_recognizer(&self) -> &FakeCommandRecognizer {
         &self.command_recognizer
     }
@@ -453,6 +964,120 @@ impl SqliteRuntime {
             event_id: format!("event-{}", EVENT_COUNTER.fetch_add(1, Ordering::Relaxed)),
             occurred_at: chrono::Utc::now(),
         });
+    }
+
+    fn seek_relative_chunk(&mut self, delta: isize) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let document = self
+            .document_repository
+            .get_document(&session.document_id)
+            .ok_or_else(|| RuntimeError::MissingDocument {
+                document_id: session.document_id.clone(),
+            })?;
+
+        let mut positions = Vec::new();
+        for section in &document.sections {
+            for chunk in &section.chunks {
+                positions.push((section.index, chunk.index));
+            }
+        }
+        let current_index = positions
+            .iter()
+            .position(|(section_index, chunk_index)| {
+                *section_index == session.position.section_index
+                    && *chunk_index == session.position.chunk_index
+            })
+            .ok_or_else(|| RuntimeError::EmptyDocument {
+                document_id: session.document_id.clone(),
+            })?;
+
+        let target_index = if delta < 0 {
+            current_index.saturating_sub(delta.unsigned_abs())
+        } else {
+            (current_index + delta as usize).min(positions.len().saturating_sub(1))
+        };
+        let (section_index, chunk_index) = positions[target_index];
+
+        session.position.section_index = section_index;
+        session.position.chunk_index = chunk_index;
+        session.position.char_offset = 0;
+        self.replay_session_at_position(session, "seek_chunk")
+    }
+
+    fn seek_chapter(&mut self, delta: isize, restart_current: bool) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let document = self
+            .document_repository
+            .get_document(&session.document_id)
+            .ok_or_else(|| RuntimeError::MissingDocument {
+                document_id: session.document_id.clone(),
+            })?;
+
+        let current = session.position.section_index as isize;
+        let target_section = if restart_current {
+            current
+        } else {
+            (current + delta).clamp(0, document.sections.len().saturating_sub(1) as isize)
+        } as usize;
+
+        session.position.section_index = target_section;
+        session.position.chunk_index = 0;
+        session.position.char_offset = 0;
+        self.replay_session_at_position(session, "seek_chapter")
+    }
+
+    fn replay_current_position(&mut self, command_name: &str) -> Result<(), RuntimeError> {
+        let session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        self.replay_session_at_position(session, command_name)
+    }
+
+    fn replay_session_at_position(
+        &mut self,
+        mut session: ReadingSession,
+        command_name: &str,
+    ) -> Result<(), RuntimeError> {
+        let document = self
+            .document_repository
+            .get_document(&session.document_id)
+            .ok_or_else(|| RuntimeError::MissingDocument {
+                document_id: session.document_id.clone(),
+            })?;
+        let chunk = document
+            .get_chunk(session.position.section_index, session.position.chunk_index)
+            .ok_or_else(|| RuntimeError::EmptyDocument {
+                document_id: session.document_id.clone(),
+            })?;
+
+        let synthesis = self.tts.synthesize(SynthesisRequest {
+            text: chunk.text.clone(),
+            voice: session.voice.clone().or(Some("narrator".to_string())),
+            language: session
+                .command_language
+                .clone()
+                .unwrap_or_else(|| "it".to_string()),
+        });
+        let playback = self
+            .playback_engine
+            .start(&document, &session.position, Some(synthesis));
+
+        session.state = ReaderState::Reading;
+        session.playback_state = playback.state;
+        session.last_command = Some(command_name.to_string());
+        session.audio_reference = playback.audio_reference.clone();
+        session.playback_process_id = playback.process_id;
+        session.runtime_status = Some("active".to_string());
+        session.touch();
+        self.session_repository.save_session(session);
+        Ok(())
     }
 }
 

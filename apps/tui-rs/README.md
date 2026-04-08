@@ -7,17 +7,36 @@ tool. It is not assumed to be the final consumer desktop shell, but it remains
 an important Rust host during the migration away from the Alpha Python-centered
 runtime model.
 
-It talks to the Python backend over `stdio` using the frontend contract exposed
-by `marginalia_backend serve-stdio`.
+It can currently run in two modes:
 
-During Beta migration, that transport may change as the shared engine boundary
-stabilizes. The TUI itself is still expected to survive and evolve.
+- Alpha compatibility mode: talks to the Python backend over `stdio` using the
+  frontend contract exposed by `marginalia_backend serve-stdio`
+- Beta development mode: talks directly to the Rust `SqliteRuntime`
+
+During Beta migration, the Rust mode is the preferred path for local engine
+work, while the Python transport remains available as a compatibility bridge.
 
 ## Run
 
 From the repository root:
 
 ```bash
+cargo run --manifest-path apps/tui-rs/Cargo.toml
+```
+
+To launch the Beta runtime path instead of the Alpha Python backend:
+
+```bash
+MARGINALIA_TUI_BACKEND=beta \
+cargo run --manifest-path apps/tui-rs/Cargo.toml
+```
+
+By default the Beta mode stores its SQLite state in `.marginalia-beta.sqlite3`
+at the repository root. To choose a different database path:
+
+```bash
+MARGINALIA_TUI_BACKEND=beta \
+MARGINALIA_TUI_BETA_DB=/tmp/marginalia-beta.sqlite3 \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
@@ -44,10 +63,10 @@ MARGINALIA_TUI_LOG_FILE=/tmp/marginalia-tui.log \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
-On startup the TUI now shows a lightweight loading screen while the backend and
-its configured providers initialize. As soon as the backend is ready, the TUI
-fetches the backend doctor report and surfaces missing executables or provider
-fallbacks in the `Log` pane.
+On startup the TUI now shows a lightweight loading screen while the selected
+backend initializes. As soon as the backend is ready, the TUI fetches the
+doctor report and surfaces provider fallbacks or missing tooling in the `Log`
+pane.
 
 ## Interaction
 
