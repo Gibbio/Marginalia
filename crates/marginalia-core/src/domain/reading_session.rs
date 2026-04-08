@@ -19,6 +19,31 @@ pub enum ReaderState {
     Error,
 }
 
+impl PlaybackState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Stopped => "stopped",
+            Self::Playing => "playing",
+            Self::Paused => "paused",
+        }
+    }
+}
+
+impl ReaderState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Reading => "reading",
+            Self::Paused => "paused",
+            Self::ListeningForCommand => "listening_for_command",
+            Self::RecordingNote => "recording_note",
+            Self::ProcessingRewrite => "processing_rewrite",
+            Self::ReadingRewrite => "reading_rewrite",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReadingPosition {
     pub section_index: usize,
