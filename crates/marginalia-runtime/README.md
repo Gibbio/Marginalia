@@ -17,3 +17,12 @@ Current runtime entry points:
 
 `apps/tui-rs` can now run directly against `SqliteRuntime` by setting
 `MARGINALIA_TUI_BACKEND=beta`.
+
+`SqliteRuntime` also exposes the first embedded frontend gateway for Beta:
+
+- command handling for ingest, playback navigation, and note creation
+- query handling for snapshots, document views, doctor report, capabilities,
+  note listing, and basic search
+
+This moves the frontend contract out of the legacy Python backend path and into
+the shared Rust runtime.
