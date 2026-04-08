@@ -185,15 +185,21 @@ impl DocumentRepository for SQLiteDocumentRepository {
     }
 
     fn list_documents(&self) -> Vec<Document> {
-        let connection = self.connection.lock().expect("sqlite connection lock poisoned");
-        let mut statement = connection
-            .prepare("SELECT document_id FROM documents ORDER BY imported_at DESC")
-            .unwrap();
-        let rows = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap();
+        let document_ids = {
+            let connection = self.connection.lock().expect("sqlite connection lock poisoned");
+            let mut statement = connection
+                .prepare("SELECT document_id FROM documents ORDER BY imported_at DESC")
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap();
 
-        rows.filter_map(|row| self.get_document(&row.unwrap()))
+            rows.map(|row| row.unwrap()).collect::<Vec<_>>()
+        };
+
+        document_ids
+            .into_iter()
+            .filter_map(|document_id| self.get_document(&document_id))
             .collect()
     }
 

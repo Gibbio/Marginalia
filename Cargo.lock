@@ -262,6 +262,8 @@ dependencies = [
  "marginalia-core",
  "marginalia-import-text",
  "marginalia-provider-fake",
+ "marginalia-storage-sqlite",
+ "rusqlite",
 ]
 
 [[package]]
