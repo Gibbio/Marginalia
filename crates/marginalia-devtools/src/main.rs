@@ -150,15 +150,27 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::KokoroDoctor { assets_root } => {
             let config = KokoroConfig::from_assets_root(&assets_root);
-            let report = config.readiness_report();
-            let capabilities = report.provider_capabilities();
+            let report = config.doctor_report();
+            let capabilities = report.readiness.provider_capabilities();
 
             println!("provider={}", capabilities.provider_name);
             println!("provider.ready={}", report.is_ready());
-            println!("provider.assets_root={}", report.assets_root.display());
+            println!(
+                "provider.assets_ready={}",
+                report.readiness.is_ready()
+            );
+            println!(
+                "provider.onnx_ready={}",
+                report.onnx_probe.is_ready()
+            );
+            println!(
+                "provider.assets_root={}",
+                report.readiness.assets_root.display()
+            );
             println!(
                 "provider.model_path={}",
                 report
+                    .readiness
                     .model_path
                     .as_ref()
                     .map(|path| path.display().to_string())
@@ -167,17 +179,49 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             println!(
                 "provider.voice_path={}",
                 report
+                    .readiness
                     .voice_path
                     .as_ref()
                     .map(|path| path.display().to_string())
                     .unwrap_or_else(|| "-".to_string())
             );
-            println!("provider.default_language={}", report.default_language);
-            println!("provider.sample_rate_hz={}", report.sample_rate_hz);
-            if report.missing.is_empty() {
+            println!(
+                "provider.onnx_runtime_path={}",
+                report
+                    .onnx_probe
+                    .runtime_library_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            );
+            println!(
+                "provider.onnx_input_count={}",
+                report.onnx_probe.input_count
+            );
+            println!(
+                "provider.onnx_output_count={}",
+                report.onnx_probe.output_count
+            );
+            println!(
+                "provider.onnx_error={}",
+                report
+                    .onnx_probe
+                    .error
+                    .as_deref()
+                    .unwrap_or("-")
+            );
+            println!(
+                "provider.default_language={}",
+                report.readiness.default_language
+            );
+            println!(
+                "provider.sample_rate_hz={}",
+                report.readiness.sample_rate_hz
+            );
+            if report.readiness.missing.is_empty() {
                 println!("provider.missing=none");
             } else {
-                for (index, item) in report.missing.iter().enumerate() {
+                for (index, item) in report.readiness.missing.iter().enumerate() {
                     println!("provider.missing[{index}]={item}");
                 }
             }

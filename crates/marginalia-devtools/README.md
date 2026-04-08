@@ -9,6 +9,9 @@ Current commands:
 
 - `fake-play <document>`
 - `kokoro-doctor [assets_root]`
+  - checks Kokoro assets
+  - resolves the ONNX Runtime dynamic library
+  - attempts to open the ONNX model
 - `sqlite-ingest <db> <document>`
 - `sqlite-list-documents <db>`
 - `sqlite-play <db> <document>`
