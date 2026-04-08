@@ -1,3 +1,5 @@
+mod frontend;
+
 use marginalia_core::application::{
     DocumentIngestionOutcome, DocumentIngestionService, SessionQueryError, SessionQueryService,
 };
@@ -31,6 +33,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+pub use frontend::RuntimeFrontendResponse;
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);

@@ -1,4 +1,3 @@
-use marginalia_core::frontend as core_frontend;
 use marginalia_runtime::SqliteRuntime;
 use serde::Deserialize;
 #[cfg(feature = "alpha-compat")]
@@ -502,34 +501,46 @@ impl BetaBackendClient {
     }
 
     fn get_app_snapshot(&mut self) -> Result<AppSnapshot, String> {
-        Ok(self.runtime.app_snapshot().into())
+        let response = self.send_request("query", "get_app_snapshot", json!({}));
+        decode_payload(response.payload, "app")
     }
 
     fn get_session_snapshot(&mut self) -> Result<Option<SessionSnapshot>, String> {
-        self.runtime
-            .session_snapshot()
-            .map(|snapshot| snapshot.map(Into::into))
-            .map_err(|err| err.to_string())
+        let response = self.send_request("query", "get_session_snapshot", json!({}));
+        match response.payload.get("session") {
+            Some(Value::Null) | None => Ok(None),
+            Some(_) => decode_payload(response.payload, "session").map(Some),
+        }
     }
 
     fn get_doctor_report(&mut self) -> Result<Value, String> {
-        Ok(self.runtime.doctor_report())
+        Ok(self.send_request("query", "get_doctor_report", json!({})).payload)
     }
 
     fn list_documents(&mut self) -> Result<Vec<DocumentListItem>, String> {
-        Ok(self
-            .runtime
-            .list_documents()
-            .into_iter()
-            .map(Into::into)
-            .collect())
+        let response = self.send_request("query", "list_documents", json!({}));
+        let documents = response
+            .payload
+            .get("documents")
+            .cloned()
+            .ok_or_else(|| "Beta runtime omitted documents list.".to_string())?;
+        serde_json::from_value(documents)
+            .map_err(|err| format!("Unable to decode documents payload: {err}"))
     }
 
     fn get_document_view(
         &mut self,
         document_id: Option<&str>,
     ) -> Result<Option<DocumentView>, String> {
-        Ok(self.runtime.document_view(document_id).map(Into::into))
+        let payload = match document_id {
+            Some(document_id) => json!({ "document_id": document_id }),
+            None => json!({}),
+        };
+        let response = self.send_request("query", "get_document_view", payload);
+        match response.payload.get("document") {
+            Some(Value::Null) | None => Ok(None),
+            Some(_) => decode_payload(response.payload, "document").map(Some),
+        }
     }
 
     fn execute_command_response(
@@ -537,120 +548,7 @@ impl BetaBackendClient {
         name: &str,
         payload: Value,
     ) -> Result<ResponseEnvelope, String> {
-        match name {
-            "ingest_document" => {
-                let path = payload
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| "ingest_document requires a path.".to_string())?;
-                let outcome = self
-                    .runtime
-                    .ingest_path(Path::new(path))
-                    .map_err(|err| err.to_string())?;
-                self.push_log(format!("beta ingest path={path} document_id={}", outcome.document.document_id));
-                Ok(ResponseEnvelope {
-                    status: "ok".to_string(),
-                    message: "Document ingested into local SQLite storage.".to_string(),
-                    payload: json!({
-                        "document": {
-                            "document_id": outcome.document.document_id,
-                            "title": outcome.document.title,
-                        }
-                    }),
-                    request_id: None,
-                })
-            }
-            "start_session" => {
-                let target = payload
-                    .get("target")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                if target.is_empty() {
-                    return Err("start_session requires a target.".to_string());
-                }
-
-                let document_id = if Path::new(&target).exists() {
-                    self.runtime
-                        .ingest_path(Path::new(&target))
-                        .map_err(|err| err.to_string())?
-                        .document
-                        .document_id
-                } else {
-                    target
-                };
-
-                let session = self
-                    .runtime
-                    .start_session(&document_id)
-                    .map_err(|err| err.to_string())?;
-                self.push_log(format!(
-                    "beta start session_id={} document_id={}",
-                    session.session_id, session.document_id
-                ));
-                Ok(ok_response("Reading session started."))
-            }
-            "pause_session" => {
-                self.runtime.pause_session().map_err(|err| err.to_string())?;
-                self.push_log("beta pause".to_string());
-                Ok(ok_response("Reading session paused."))
-            }
-            "resume_session" => {
-                self.runtime.resume_session().map_err(|err| err.to_string())?;
-                self.push_log("beta resume".to_string());
-                Ok(ok_response("Reading session resumed."))
-            }
-            "stop_session" => {
-                self.runtime.stop_session().map_err(|err| err.to_string())?;
-                self.push_log("beta stop".to_string());
-                Ok(ok_response("Reading session stopped."))
-            }
-            "repeat_chunk" => {
-                self.runtime.repeat_chunk().map_err(|err| err.to_string())?;
-                self.push_log("beta repeat_chunk".to_string());
-                Ok(ok_response("Current chunk repeated."))
-            }
-            "restart_chapter" => {
-                self.runtime
-                    .restart_chapter()
-                    .map_err(|err| err.to_string())?;
-                self.push_log("beta restart_chapter".to_string());
-                Ok(ok_response("Current chapter restarted."))
-            }
-            "previous_chunk" => {
-                self.runtime.previous_chunk().map_err(|err| err.to_string())?;
-                self.push_log("beta previous_chunk".to_string());
-                Ok(ok_response("Moved to previous chunk."))
-            }
-            "next_chunk" => {
-                self.runtime.next_chunk().map_err(|err| err.to_string())?;
-                self.push_log("beta next_chunk".to_string());
-                Ok(ok_response("Moved to next chunk."))
-            }
-            "previous_chapter" => {
-                self.runtime
-                    .previous_chapter()
-                    .map_err(|err| err.to_string())?;
-                self.push_log("beta previous_chapter".to_string());
-                Ok(ok_response("Moved to previous chapter."))
-            }
-            "next_chapter" => {
-                self.runtime.next_chapter().map_err(|err| err.to_string())?;
-                self.push_log("beta next_chapter".to_string());
-                Ok(ok_response("Moved to next chapter."))
-            }
-            "create_note" => {
-                let text = payload
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let note = self.runtime.create_note(text).map_err(|err| err.to_string())?;
-                self.push_log(format!("beta create_note note_id={}", note.note_id));
-                Ok(ok_response("Note saved."))
-            }
-            other => Err(format!("Unsupported beta backend command: {other}")),
-        }
+        Ok(self.send_request("command", name, payload))
     }
 
     fn recent_stderr_entries(&self, after_sequence: u64) -> Vec<BackendLogEntry> {
@@ -671,97 +569,23 @@ impl BetaBackendClient {
             line,
         });
     }
-}
+    fn send_request(&mut self, request_type: &str, name: &str, payload: Value) -> ResponseEnvelope {
+        let response = match request_type {
+            "query" => self.runtime.execute_frontend_query(name, payload),
+            "command" => self.runtime.execute_frontend_command(name, payload),
+            other => marginalia_runtime::RuntimeFrontendResponse {
+                status: "error".to_string(),
+                message: format!("Unsupported beta request type: {other}"),
+                payload: json!({}),
+            },
+        };
 
-fn ok_response(message: impl Into<String>) -> ResponseEnvelope {
-    ResponseEnvelope {
-        status: "ok".to_string(),
-        message: message.into(),
-        payload: json!({}),
-        request_id: None,
-    }
-}
-
-impl From<core_frontend::AppSnapshot> for AppSnapshot {
-    fn from(value: core_frontend::AppSnapshot) -> Self {
-        Self {
-            active_session_id: value.active_session_id,
-            document_count: value.document_count as u32,
-            latest_document_id: value.latest_document_id,
-            playback_state: value.playback_state,
-            runtime_status: value.runtime_status,
-            state: value.state,
-        }
-    }
-}
-
-impl From<core_frontend::SessionSnapshot> for SessionSnapshot {
-    fn from(value: core_frontend::SessionSnapshot) -> Self {
-        Self {
-            anchor: value.anchor,
-            chunk_index: value.chunk_index as u32,
-            chunk_text: value.chunk_text,
-            command_listening_active: value.command_listening_active,
-            command_stt_provider: value.command_stt_provider,
-            document_id: value.document_id,
-            notes_count: value.notes_count as u32,
-            playback_provider: value.playback_provider,
-            playback_state: value.playback_state,
-            section_count: value.section_count as u32,
-            section_index: value.section_index as u32,
-            section_title: value.section_title,
-            session_id: value.session_id,
-            state: value.state,
-            tts_provider: value.tts_provider,
-            voice: value.voice,
-        }
-    }
-}
-
-impl From<core_frontend::DocumentListItem> for DocumentListItem {
-    fn from(value: core_frontend::DocumentListItem) -> Self {
-        Self {
-            chapter_count: value.chapter_count as u32,
-            chunk_count: value.chunk_count as u32,
-            document_id: value.document_id,
-            title: value.title,
-        }
-    }
-}
-
-impl From<core_frontend::DocumentView> for DocumentView {
-    fn from(value: core_frontend::DocumentView) -> Self {
-        Self {
-            active_chunk_index: value.active_chunk_index.map(|value| value as u32),
-            active_section_index: value.active_section_index.map(|value| value as u32),
-            chapter_count: value.chapter_count as u32,
-            chunk_count: value.chunk_count as u32,
-            document_id: value.document_id,
-            sections: value.sections.into_iter().map(Into::into).collect(),
-            source_path: value.source_path,
-            title: value.title,
-        }
-    }
-}
-
-impl From<core_frontend::DocumentSectionView> for DocumentSectionView {
-    fn from(value: core_frontend::DocumentSectionView) -> Self {
-        Self {
-            chunks: value.chunks.into_iter().map(Into::into).collect(),
-            index: value.index as u32,
-            title: value.title,
-        }
-    }
-}
-
-impl From<core_frontend::DocumentChunkView> for DocumentChunkView {
-    fn from(value: core_frontend::DocumentChunkView) -> Self {
-        Self {
-            anchor: value.anchor,
-            index: value.index as u32,
-            is_active: value.is_active,
-            is_read: value.is_read,
-            text: value.text,
+        self.push_log(format!("beta {request_type} {name} => {}", response.status));
+        ResponseEnvelope {
+            status: response.status,
+            message: response.message,
+            payload: response.payload,
+            request_id: None,
         }
     }
 }
@@ -831,7 +655,6 @@ fn build_python_path(repo_root: &Path) -> String {
     rendered.join(":")
 }
 
-#[cfg(feature = "alpha-compat")]
 fn decode_payload<T>(payload: Value, field: &str) -> Result<T, String>
 where
     T: for<'de> Deserialize<'de>,

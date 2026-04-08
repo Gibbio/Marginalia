@@ -17,6 +17,9 @@ It can currently run in two modes:
 In the normal Beta build, only the Rust mode is compiled. The Python bridge is
 available only if you build the TUI with `--features alpha-compat`.
 
+In Beta mode the TUI now talks to the embedded frontend gateway exposed by
+`marginalia-runtime`, not to a TUI-local command adapter.
+
 During Beta migration, the Rust mode is the preferred path for local engine
 work, while the Python transport remains available as a compatibility bridge.
 

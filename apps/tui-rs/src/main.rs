@@ -18,6 +18,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
+#[cfg(feature = "alpha-compat")]
 use std::env;
 use std::io::stdout;
 use std::path::{Path, PathBuf};
@@ -28,7 +29,10 @@ use std::time::Duration;
 
 fn main() -> Result<(), String> {
     let logger = AppLogger::from_env()?;
+    #[cfg(feature = "alpha-compat")]
     let config_path = env::var("MARGINALIA_CONFIG").ok().map(PathBuf::from);
+    #[cfg(not(feature = "alpha-compat"))]
+    let config_path: Option<PathBuf> = None;
     logger.info(format!(
         "Starting Marginalia tui-rs (version={}, log_file={}, config={})",
         env!("CARGO_PKG_VERSION"),
