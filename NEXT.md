@@ -21,6 +21,7 @@ Windows is explicitly not a Beta priority.
 The Beta goal is not "more Alpha features". The Beta goal is:
 
 - one portable product model
+- one shared Rust engine
 - one portable local TTS direction
 - host-aware runtime boundaries
 - platform-specific shells over shared engine contracts
@@ -30,7 +31,7 @@ The Beta goal is not "more Alpha features". The Beta goal is:
 These Alpha decisions still look correct and should be preserved:
 
 - modular monorepo
-- Python as the current reference implementation
+- Python as the current reference implementation during migration
 - SQLite as the local persistence layer
 - explicit ports for TTS, STT, playback, storage, runtime, and LLM features
 - command/query/event contract between engine and clients
@@ -96,7 +97,22 @@ Exit condition:
 - the core engine can be described without assuming stdio, PID management, or
   Unix signals
 
-## Priority 3 — Standardize on Kokoro + ONNX Runtime
+## Priority 3 — Build the Shared Rust Engine
+
+Beta needs one durable shared implementation language for the engine itself.
+
+Deliverables:
+
+- Rust becomes the target language for shared engine crates
+- FFI boundary defined for desktop, iOS, and Android hosts
+- Alpha Python code treated as migration reference, not Beta center
+
+Exit condition:
+
+- the new shared engine ownership is visible in repository structure and first
+  migration slices
+
+## Priority 4 — Standardize on Kokoro + ONNX Runtime
 
 Beta needs one credible local TTS path across desktop and mobile.
 
@@ -112,7 +128,7 @@ Exit condition:
 - desktop and mobile can converge on one TTS direction instead of forking into
   separate provider families
 
-## Priority 4 — Rebuild Desktop as the Reference Product Host
+## Priority 5 — Rebuild Desktop as the Reference Product Host
 
 Desktop remains the first Beta host, but now as a reference implementation for
 the cross-platform architecture rather than a special-case endpoint.
@@ -130,7 +146,7 @@ Exit condition:
 
 - the desktop host exercises the same engine boundaries that mobile will need
 
-## Priority 5 — Mobile Feasibility Spikes
+## Priority 6 — Mobile Feasibility Spikes
 
 Beta must stop calling mobile "future work" and instead produce concrete
 answers.
@@ -148,7 +164,7 @@ Exit condition:
 - mobile is no longer conceptual; the blocking technical unknowns are named
   and bounded
 
-## Priority 6 — Re-scope Beta Feature Work
+## Priority 7 — Re-scope Beta Feature Work
 
 Feature work now follows platform architecture, not the other way around.
 
@@ -168,10 +184,10 @@ Deferred unless required by the platform plan:
 
 ## Immediate Beta Sequence
 
-1. Finalize Beta ADR set for target platforms, runtime separation, and TTS
-   direction.
+1. Finalize Beta ADR set for target platforms, Rust engine ownership, runtime
+   separation, and TTS direction.
 2. Audit the current backend for process-bound and Unix-bound assumptions.
-3. Define the Beta engine boundary in concrete DTO and host terms.
+3. Define the Rust engine boundary in concrete DTO and host terms.
 4. Write the desktop reference-host plan.
 5. Write the iOS and Android feasibility plans.
 6. Only then reopen feature delivery against the Beta architecture.
