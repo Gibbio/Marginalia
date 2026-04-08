@@ -36,6 +36,11 @@ MARGINALIA_TUI_LOG_FILE=/tmp/marginalia-tui.log \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
+On startup the TUI now shows a lightweight loading screen while the backend and
+its configured providers initialize. As soon as the backend is ready, the TUI
+fetches the backend doctor report and surfaces missing executables or provider
+fallbacks in the `Log` pane.
+
 ## Interaction
 
 Command bar:

@@ -182,6 +182,11 @@ impl BackendClient {
         }
     }
 
+    pub fn get_doctor_report(&mut self) -> Result<Value, String> {
+        let response = self.send_request("query", "get_doctor_report", json!({}))?;
+        Ok(response.payload)
+    }
+
     pub fn list_documents(&mut self) -> Result<Vec<DocumentListItem>, String> {
         let response = self.send_request("query", "list_documents", json!({}))?;
         let documents = response
