@@ -239,6 +239,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "marginalia-devtools"
+version = "0.1.0"
+dependencies = [
+ "marginalia-core",
+ "marginalia-runtime",
+]
+
+[[package]]
 name = "marginalia-import-text"
 version = "0.1.0"
 dependencies = [
