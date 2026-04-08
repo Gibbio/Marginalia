@@ -9,3 +9,5 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 marginalia-core = { path = "../marginalia-core" }
 marginalia-import-text = { path = "../marginalia-import-text" }
 marginalia-provider-fake = { path = "../marginalia-provider-fake" }
+marginalia-storage-sqlite = { path = "../marginalia-storage-sqlite" }
+rusqlite = { version = "0.32", features = ["bundled"] }
