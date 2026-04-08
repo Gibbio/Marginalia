@@ -5,6 +5,14 @@
 The repository is laid out to make domain boundaries and future product surfaces
 obvious from the start.
 
+This document describes the original Alpha-oriented structure. The Beta branch
+now introduces a new target layout centered on shared engine crates and
+host-specific shells. See
+[`docs/architecture/beta-repository-structure.md`](./beta-repository-structure.md)
+and
+[`docs/migration/alpha-to-beta-repo-mapping.md`](../migration/alpha-to-beta-repo-mapping.md)
+for the active migration direction.
+
 ## Top-Level Map
 
 ### `apps/`
