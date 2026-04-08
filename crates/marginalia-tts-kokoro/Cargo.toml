@@ -6,3 +6,4 @@ description = "Kokoro TTS asset discovery and Beta runtime integration scaffoldi
 
 [dependencies]
 marginalia-core = { path = "../marginalia-core" }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-24"] }
