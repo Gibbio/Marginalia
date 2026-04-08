@@ -34,3 +34,12 @@ impl Error for DocumentImportError {}
 pub trait DocumentImporter {
     fn import_path(&self, source_path: &Path) -> Result<ImportedDocument, DocumentImportError>;
 }
+
+impl<T> DocumentImporter for &T
+where
+    T: DocumentImporter + ?Sized,
+{
+    fn import_path(&self, source_path: &Path) -> Result<ImportedDocument, DocumentImportError> {
+        (**self).import_path(source_path)
+    }
+}

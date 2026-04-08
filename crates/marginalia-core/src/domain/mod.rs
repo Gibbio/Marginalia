@@ -7,7 +7,7 @@ pub mod summary;
 
 pub use document::{
     build_document_from_import, Document, DocumentChunk, DocumentSection, ImportedDocument,
-    ImportedSection,
+    ImportedSection, DEFAULT_CHUNK_TARGET_CHARS,
 };
 pub use note::VoiceNote;
 pub use reading_session::{PlaybackState, ReaderState, ReadingPosition, ReadingSession};

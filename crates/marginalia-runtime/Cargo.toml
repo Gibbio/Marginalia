@@ -1,0 +1,11 @@
+[package]
+name = "marginalia-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Host-neutral runtime composition for the Marginalia Beta engine"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+marginalia-core = { path = "../marginalia-core" }
+marginalia-import-text = { path = "../marginalia-import-text" }
+marginalia-provider-fake = { path = "../marginalia-provider-fake" }
