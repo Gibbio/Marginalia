@@ -2,6 +2,7 @@
 #[path = "backend_alpha.rs"]
 mod backend_alpha;
 
+use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::SqliteRuntime;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -301,15 +302,25 @@ impl BetaBackendClient {
         let db_path = env::var("MARGINALIA_TUI_BETA_DB")
             .map(PathBuf::from)
             .unwrap_or_else(|_| repo_root.join(".marginalia-beta.sqlite3"));
-        let runtime = SqliteRuntime::open(&db_path)
+        let mut runtime = SqliteRuntime::open(&db_path)
             .map_err(|err| format!("Unable to open beta runtime database: {err}"))?;
+        if env::var("MARGINALIA_TUI_PLAYBACK")
+            .ok()
+            .is_some_and(|value| value.eq_ignore_ascii_case("host"))
+        {
+            runtime.set_playback_engine(HostPlaybackEngine::default());
+        }
 
         let mut client = Self {
             runtime,
             logs: VecDeque::with_capacity(256),
             sequence: 0,
         };
-        client.push_log(format!("beta-runtime ready db={}", db_path.display()));
+        client.push_log(format!(
+            "beta-runtime ready db={} playback={}",
+            db_path.display(),
+            env::var("MARGINALIA_TUI_PLAYBACK").unwrap_or_else(|_| "fake".to_string())
+        ));
         Ok(client)
     }
 

@@ -26,3 +26,7 @@ Current runtime entry points:
 
 This moves the frontend contract out of the legacy Python backend path and into
 the shared Rust runtime.
+
+The runtime can now also accept a replacement playback engine at construction
+time, which allows desktop hosts such as `apps/tui-rs` to swap the fake
+playback implementation for a host-side subprocess playback adapter.

@@ -10,6 +10,7 @@ alpha-compat = []
 
 [dependencies]
 crossterm = "0.28"
+marginalia-playback-host = { path = "../../crates/marginalia-playback-host" }
 marginalia-runtime = { path = "../../crates/marginalia-runtime" }
 ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
 serde = { version = "1", features = ["derive"] }

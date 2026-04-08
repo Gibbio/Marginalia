@@ -92,7 +92,7 @@ pub struct FakeRuntime {
     draft_repository: InMemoryRewriteDraftRepository,
     importer: TextDocumentImporter,
     event_publisher: RecordingEventPublisher,
-    playback_engine: FakePlaybackEngine,
+    playback_engine: Box<dyn PlaybackEngine + Send>,
     tts: FakeSpeechSynthesizer,
     command_recognizer: FakeCommandRecognizer,
     dictation_transcriber: FakeDictationTranscriber,
@@ -109,7 +109,7 @@ pub struct SqliteRuntime {
     draft_repository: SQLiteRewriteDraftRepository,
     importer: TextDocumentImporter,
     event_publisher: RecordingEventPublisher,
-    playback_engine: FakePlaybackEngine,
+    playback_engine: Box<dyn PlaybackEngine + Send>,
     tts: FakeSpeechSynthesizer,
     command_recognizer: FakeCommandRecognizer,
     dictation_transcriber: FakeDictationTranscriber,
@@ -127,7 +127,7 @@ impl Default for FakeRuntime {
             draft_repository: InMemoryRewriteDraftRepository::new(),
             importer: TextDocumentImporter,
             event_publisher: RecordingEventPublisher::new(),
-            playback_engine: FakePlaybackEngine::new(),
+            playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: FakeSpeechSynthesizer::new(),
             command_recognizer: FakeCommandRecognizer::default(),
             dictation_transcriber: FakeDictationTranscriber::default(),
@@ -151,6 +151,13 @@ impl FakeRuntime {
 
     pub fn config(&self) -> RuntimeConfig {
         self.config
+    }
+
+    pub fn set_playback_engine(
+        &mut self,
+        playback_engine: impl PlaybackEngine + Send + 'static,
+    ) {
+        self.playback_engine = Box::new(playback_engine);
     }
 
     pub fn ingest_path(
@@ -232,7 +239,7 @@ impl FakeRuntime {
             &mut self.document_repository,
             &mut self.note_repository,
             &mut self.draft_repository,
-            &mut self.playback_engine,
+            &mut *self.playback_engine,
         );
         service.app_snapshot()
     }
@@ -243,7 +250,7 @@ impl FakeRuntime {
             &mut self.document_repository,
             &mut self.note_repository,
             &mut self.draft_repository,
-            &mut self.playback_engine,
+            &mut *self.playback_engine,
         );
         service.session_snapshot().map_err(RuntimeError::from)
     }
@@ -384,18 +391,19 @@ impl FakeRuntime {
     }
 
     pub fn doctor_report(&self) -> serde_json::Value {
+        let playback_provider = self.playback_engine.describe_capabilities().provider_name;
         serde_json::json!({
             "providers": {
                 "tts": "fake-tts",
                 "command_stt": "fake-command-stt",
                 "dictation_stt": "fake-dictation",
-                "playback": "fake-playback",
+                "playback": playback_provider,
             },
             "resolved_providers": {
                 "tts": "fake-tts",
                 "command_stt": "fake-command-stt",
                 "dictation_stt": "fake-dictation",
-                "playback": "fake-playback",
+                "playback": playback_provider,
             },
             "provider_checks": {
                 "playback": { "ready": true, "command": "beta-runtime" },
@@ -646,7 +654,7 @@ impl SqliteRuntime {
             draft_repository: SQLiteRewriteDraftRepository::new(connection),
             importer: TextDocumentImporter,
             event_publisher: RecordingEventPublisher::new(),
-            playback_engine: FakePlaybackEngine::new(),
+            playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: FakeSpeechSynthesizer::new(),
             command_recognizer: FakeCommandRecognizer::default(),
             dictation_transcriber: FakeDictationTranscriber::default(),
@@ -675,7 +683,7 @@ impl SqliteRuntime {
             draft_repository: SQLiteRewriteDraftRepository::new(connection),
             importer: TextDocumentImporter,
             event_publisher: RecordingEventPublisher::new(),
-            playback_engine: FakePlaybackEngine::new(),
+            playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: FakeSpeechSynthesizer::new(),
             command_recognizer: FakeCommandRecognizer::default(),
             dictation_transcriber: FakeDictationTranscriber::default(),
@@ -686,6 +694,13 @@ impl SqliteRuntime {
 
     pub fn config(&self) -> RuntimeConfig {
         self.config
+    }
+
+    pub fn set_playback_engine(
+        &mut self,
+        playback_engine: impl PlaybackEngine + Send + 'static,
+    ) {
+        self.playback_engine = Box::new(playback_engine);
     }
 
     pub fn database(&self) -> &SQLiteDatabase {
@@ -768,7 +783,7 @@ impl SqliteRuntime {
             &mut self.document_repository,
             &mut self.note_repository,
             &mut self.draft_repository,
-            &mut self.playback_engine,
+            &mut *self.playback_engine,
         );
         service.app_snapshot()
     }
@@ -779,7 +794,7 @@ impl SqliteRuntime {
             &mut self.document_repository,
             &mut self.note_repository,
             &mut self.draft_repository,
-            &mut self.playback_engine,
+            &mut *self.playback_engine,
         );
         service.session_snapshot().map_err(RuntimeError::from)
     }
