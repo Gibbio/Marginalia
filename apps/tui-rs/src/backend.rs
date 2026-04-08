@@ -41,6 +41,12 @@ pub struct ResponseEnvelope {
     pub request_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct IngestDocumentResult {
+    pub message: String,
+    pub document_id: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppSnapshot {
     pub active_session_id: Option<String>,
@@ -201,8 +207,69 @@ impl BackendClient {
         }
     }
 
-    pub fn execute_command(&mut self, name: &str, payload: Value) -> Result<String, String> {
-        let response = self.execute_command_response(name, payload)?;
+    pub fn ingest_document(&mut self, path: &Path) -> Result<IngestDocumentResult, String> {
+        let response = self.command_response(
+            "ingest_document",
+            json!({"path": path.display().to_string()}),
+        )?;
+        let document_id = response
+            .payload
+            .get("document")
+            .and_then(|document| document.get("document_id"))
+            .and_then(|document_id| document_id.as_str())
+            .map(ToString::to_string);
+        Ok(IngestDocumentResult {
+            message: response.message,
+            document_id,
+        })
+    }
+
+    pub fn start_session(&mut self, target: &str) -> Result<String, String> {
+        self.command_message("start_session", json!({"target": target}))
+    }
+
+    pub fn pause_session(&mut self) -> Result<String, String> {
+        self.command_message("pause_session", json!({}))
+    }
+
+    pub fn resume_session(&mut self) -> Result<String, String> {
+        self.command_message("resume_session", json!({}))
+    }
+
+    pub fn stop_session(&mut self) -> Result<String, String> {
+        self.command_message("stop_session", json!({}))
+    }
+
+    pub fn repeat_chunk(&mut self) -> Result<String, String> {
+        self.command_message("repeat_chunk", json!({}))
+    }
+
+    pub fn restart_chapter(&mut self) -> Result<String, String> {
+        self.command_message("restart_chapter", json!({}))
+    }
+
+    pub fn previous_chunk(&mut self) -> Result<String, String> {
+        self.command_message("previous_chunk", json!({}))
+    }
+
+    pub fn next_chunk(&mut self) -> Result<String, String> {
+        self.command_message("next_chunk", json!({}))
+    }
+
+    pub fn previous_chapter(&mut self) -> Result<String, String> {
+        self.command_message("previous_chapter", json!({}))
+    }
+
+    pub fn next_chapter(&mut self) -> Result<String, String> {
+        self.command_message("next_chapter", json!({}))
+    }
+
+    pub fn create_note(&mut self, text: &str) -> Result<String, String> {
+        self.command_message("create_note", json!({"text": text}))
+    }
+
+    fn command_message(&mut self, name: &str, payload: Value) -> Result<String, String> {
+        let response = self.command_response(name, payload)?;
         if response.status == "ok" {
             Ok(response.message)
         } else {
@@ -210,7 +277,7 @@ impl BackendClient {
         }
     }
 
-    pub fn execute_command_response(
+    fn command_response(
         &mut self,
         name: &str,
         payload: Value,

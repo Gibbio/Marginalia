@@ -1,6 +1,6 @@
 use crate::backend::{AppSnapshot, BackendClient, DocumentListItem, DocumentView, SessionSnapshot};
 use crate::logger::AppLogger;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::VecDeque;
 use std::env;
 use std::fs;
@@ -178,10 +178,7 @@ impl App {
             return;
         };
         self.push_message("Starting playback...".to_string());
-        match self
-            .backend
-            .execute_command("start_session", json!({"target": document_id}))
-        {
+        match self.backend.start_session(&document_id) {
             Ok(message) => {
                 self.push_message(message);
                 let _ = self.refresh();
@@ -470,42 +467,30 @@ impl App {
             }
             "play" => self
                 .backend
-                .execute_command("start_session", json!({"target": argument}))?,
+                .start_session(argument)?,
             "ingest" => {
                 if argument.is_empty() {
                     return Err("Usage: /ingest <path>".to_string());
                 }
                 let resolved_path = expand_shell_like_path(argument);
-                let response = self.backend.execute_command_response(
-                    "ingest_document",
-                    json!({"path": resolved_path.display().to_string()}),
-                )?;
-                if response.status != "ok" {
-                    return Err(response.message);
-                }
-                let document_id = response
-                    .payload
-                    .get("document")
-                    .and_then(|document| document.get("document_id"))
-                    .and_then(|document_id| document_id.as_str())
-                    .map(ToString::to_string);
+                let response = self.backend.ingest_document(&resolved_path)?;
+                let document_id = response.document_id;
                 self.selected_document_id = document_id.clone();
                 self.pending_play = document_id;
                 response.message
             }
-            "pause" => self.backend.execute_command("pause_session", json!({}))?,
-            "resume" => self.backend.execute_command("resume_session", json!({}))?,
-            "stop" => self.backend.execute_command("stop_session", json!({}))?,
-            "repeat" => self.backend.execute_command("repeat_chunk", json!({}))?,
-            "restart" => self.backend.execute_command("restart_chapter", json!({}))?,
-            "back" => self.backend.execute_command("previous_chunk", json!({}))?,
-            "next" => self.backend.execute_command("next_chapter", json!({}))?,
+            "pause" => self.backend.pause_session()?,
+            "resume" => self.backend.resume_session()?,
+            "stop" => self.backend.stop_session()?,
+            "repeat" => self.backend.repeat_chunk()?,
+            "restart" => self.backend.restart_chapter()?,
+            "back" => self.backend.previous_chunk()?,
+            "next" => self.backend.next_chapter()?,
             "note" => {
                 if argument.is_empty() {
                     return Err("Usage: /note <text>".to_string());
                 }
-                self.backend
-                    .execute_command("create_note", json!({"text": argument}))?
+                self.backend.create_note(argument)?
             }
             "quit" | "exit" => {
                 self.graceful_shutdown();
@@ -545,8 +530,11 @@ impl App {
         }
     }
 
-    fn run_shortcut_command(&mut self, command_name: &str) {
-        match self.backend.execute_command(command_name, json!({})) {
+    fn run_shortcut_command(
+        &mut self,
+        command: impl FnOnce(&mut BackendClient) -> Result<String, String>,
+    ) {
+        match command(&mut self.backend) {
             Ok(message) => {
                 self.push_message(message);
                 let _ = self.refresh();
@@ -564,24 +552,24 @@ impl App {
     }
 
     fn graceful_shutdown(&mut self) {
-        let _ = self.backend.execute_command("stop_session", json!({}));
+        let _ = self.backend.stop_session();
         self.should_quit = true;
     }
 
     pub fn navigate_previous_chunk(&mut self) {
-        self.run_shortcut_command("previous_chunk");
+        self.run_shortcut_command(BackendClient::previous_chunk);
     }
 
     pub fn navigate_next_chunk(&mut self) {
-        self.run_shortcut_command("next_chunk");
+        self.run_shortcut_command(BackendClient::next_chunk);
     }
 
     pub fn navigate_previous_chapter(&mut self) {
-        self.run_shortcut_command("previous_chapter");
+        self.run_shortcut_command(BackendClient::previous_chapter);
     }
 
     pub fn navigate_next_chapter(&mut self) {
-        self.run_shortcut_command("next_chapter");
+        self.run_shortcut_command(BackendClient::next_chapter);
     }
 
     pub fn scroll_document_up(&mut self, amount: u16) {
