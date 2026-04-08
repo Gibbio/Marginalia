@@ -12,6 +12,9 @@ Current commands:
   - checks Kokoro assets
   - resolves the ONNX Runtime dynamic library
   - attempts to open the ONNX model
+- `kokoro-run-tokens [assets_root] <voice> <output_wav> <token_ids_csv> [speed]`
+  - runs low-level Kokoro ONNX inference from token IDs
+  - writes the generated waveform to a local WAV file
 - `sqlite-ingest <db> <document>`
 - `sqlite-list-documents <db>`
 - `sqlite-play <db> <document>`

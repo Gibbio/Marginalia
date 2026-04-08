@@ -1,15 +1,24 @@
 use marginalia_core::frontend::{AppSnapshot, SessionSnapshot};
 use marginalia_runtime::{FakeRuntime, SqliteRuntime};
-use marginalia_tts_kokoro::KokoroConfig;
+use marginalia_tts_kokoro::{
+    write_wav_f32, KokoroConfig, KokoroInferenceRequest, KokoroOnnxModel,
+};
 use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Command {
     FakePlay { document_path: PathBuf },
     KokoroDoctor { assets_root: PathBuf },
+    KokoroRunTokens {
+        assets_root: PathBuf,
+        voice: String,
+        output_path: PathBuf,
+        token_ids: Vec<i64>,
+        speed: f32,
+    },
     SqliteIngest { db_path: PathBuf, document_path: PathBuf },
     SqliteListDocuments { db_path: PathBuf },
     SqlitePlay { db_path: PathBuf, document_path: PathBuf },
@@ -61,6 +70,39 @@ where
         [command, assets_root] if command == "kokoro-doctor" => Ok(Command::KokoroDoctor {
             assets_root: PathBuf::from(assets_root),
         }),
+        [command, voice, output_path, token_ids] if command == "kokoro-run-tokens" => {
+            Ok(Command::KokoroRunTokens {
+                assets_root: PathBuf::from("models/tts/kokoro"),
+                voice: voice.to_string(),
+                output_path: PathBuf::from(output_path),
+                token_ids: parse_token_ids(token_ids)?,
+                speed: 1.0,
+            })
+        }
+        [command, assets_root, voice, output_path, token_ids]
+            if command == "kokoro-run-tokens" =>
+        {
+            Ok(Command::KokoroRunTokens {
+                assets_root: PathBuf::from(assets_root),
+                voice: voice.to_string(),
+                output_path: PathBuf::from(output_path),
+                token_ids: parse_token_ids(token_ids)?,
+                speed: 1.0,
+            })
+        }
+        [command, assets_root, voice, output_path, token_ids, speed]
+            if command == "kokoro-run-tokens" =>
+        {
+            Ok(Command::KokoroRunTokens {
+                assets_root: PathBuf::from(assets_root),
+                voice: voice.to_string(),
+                output_path: PathBuf::from(output_path),
+                token_ids: parse_token_ids(token_ids)?,
+                speed: speed
+                    .parse::<f32>()
+                    .map_err(|_| "invalid speed".to_string())?,
+            })
+        }
         [command, db_path, document_path] if command == "sqlite-ingest" => {
             Ok(Command::SqliteIngest {
                 db_path: PathBuf::from(db_path),
@@ -225,6 +267,39 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
                     println!("provider.missing[{index}]={item}");
                 }
             }
+            Ok(())
+        }
+        Command::KokoroRunTokens {
+            assets_root,
+            voice,
+            output_path,
+            token_ids,
+            speed,
+        } => {
+            let config = KokoroConfig::from_assets_root(&assets_root);
+            let mut model = KokoroOnnxModel::load(config)?;
+            let result = model.infer(KokoroInferenceRequest {
+                token_ids,
+                voice: Some(voice),
+                speed,
+            })?;
+            write_wav_f32(&output_path, result.sample_rate_hz, &result.audio)?;
+
+            println!("provider=kokoro-beta");
+            println!("output_path={}", output_path.display());
+            println!("voice={}", result.voice);
+            println!("sample_rate_hz={}", result.sample_rate_hz);
+            println!("input_token_count={}", result.input_token_count);
+            println!("audio_sample_count={}", result.audio.len());
+            println!(
+                "output_shape={}",
+                result
+                    .output_shape
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
             Ok(())
         }
         Command::SqliteIngest {
@@ -421,10 +496,27 @@ fn print_events(count: usize) {
     println!("events.published_count={count}");
 }
 
+fn parse_token_ids(input: &str) -> Result<Vec<i64>, String> {
+    let token_ids = input
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            part.parse::<i64>()
+                .map_err(|_| format!("invalid token id: {part}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if token_ids.is_empty() {
+        return Err("token_ids must not be empty".to_string());
+    }
+    Ok(token_ids)
+}
+
 fn usage() -> &'static str {
     "Usage:
   cargo run -p marginalia-devtools -- fake-play <document>
   cargo run -p marginalia-devtools -- kokoro-doctor [assets_root]
+  cargo run -p marginalia-devtools -- kokoro-run-tokens [assets_root] <voice> <output_wav> <token_ids_csv> [speed]
   cargo run -p marginalia-devtools -- sqlite-ingest <db> <document>
   cargo run -p marginalia-devtools -- sqlite-list-documents <db>
   cargo run -p marginalia-devtools -- sqlite-play <db> <document>
@@ -465,6 +557,27 @@ mod tests {
             command,
             Command::KokoroDoctor {
                 assets_root: PathBuf::from("models/tts/kokoro"),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_args_accepts_kokoro_run_tokens() {
+        let command = parse_args([
+            "kokoro-run-tokens",
+            "af",
+            "/tmp/out.wav",
+            "10,20,30",
+        ])
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::KokoroRunTokens {
+                assets_root: PathBuf::from("models/tts/kokoro"),
+                voice: "af".to_string(),
+                output_path: PathBuf::from("/tmp/out.wav"),
+                token_ids: vec![10, 20, 30],
+                speed: 1.0,
             }
         );
     }
