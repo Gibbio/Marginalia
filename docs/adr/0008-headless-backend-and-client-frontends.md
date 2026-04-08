@@ -1,6 +1,12 @@
 # ADR 0008: Headless Backend and Client Frontends
 
-- Status: Accepted
+- Status: Superseded by ADR 0011, ADR 0012, and ADR 0013
+
+## Note
+
+This ADR captures the Alpha transition away from a CLI-only surface and toward
+explicit contracts. The contract idea still matters, but the Beta architecture
+no longer treats a headless backend process as the durable product shape.
 
 ## Context
 
@@ -20,7 +26,7 @@ back into the core.
 Marginalia still does not want a distributed system or an HTTP service
 architecture. It remains a local-first product with a single-user runtime.
 
-## Decision
+## Historical Decision
 
 Treat Marginalia as a headless local backend with explicit frontend contracts.
 
