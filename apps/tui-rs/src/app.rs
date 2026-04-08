@@ -527,8 +527,12 @@ impl App {
         }
     }
 
+    pub fn animation_tick(&self) -> usize {
+        (self.launched_at.elapsed().as_millis() / 90) as usize
+    }
+
     pub fn animation_frame(&self) -> usize {
-        ((self.launched_at.elapsed().as_millis() / 140) % 3) as usize
+        self.animation_tick() % 3
     }
 
     fn graceful_shutdown(&mut self) {
