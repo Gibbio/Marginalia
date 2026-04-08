@@ -1180,4 +1180,81 @@ mod tests {
 
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn sqlite_runtime_lists_documents_and_builds_document_view() {
+        let path = temp_path("md");
+        fs::write(
+            &path,
+            "# Intro\n\nAlpha beta gamma.\n\n# Second\n\nDelta epsilon zeta.",
+        )
+        .unwrap();
+
+        let mut runtime = SqliteRuntime::open_in_memory().unwrap();
+        let outcome = runtime.ingest_path(&path).unwrap();
+        let documents = runtime.list_documents();
+        let view = runtime
+            .document_view(Some(&outcome.document.document_id))
+            .unwrap();
+
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].document_id, outcome.document.document_id);
+        assert_eq!(view.document_id, outcome.document.document_id);
+        assert_eq!(view.chapter_count, 2);
+        assert!(!view.sections.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_runtime_supports_navigation_commands() {
+        let path = temp_path("txt");
+        fs::write(
+            &path,
+            "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu.\n\nNu xi omicron pi rho sigma tau upsilon phi chi psi omega.",
+        )
+        .unwrap();
+
+        let mut runtime = SqliteRuntime::open_in_memory_with_config(super::RuntimeConfig {
+            chunk_target_chars: 20,
+        })
+        .unwrap();
+        let outcome = runtime.ingest_path(&path).unwrap();
+        runtime.start_session(&outcome.document.document_id).unwrap();
+
+        let before = runtime.session_snapshot().unwrap().unwrap();
+        runtime.next_chunk().unwrap();
+        let after_next = runtime.session_snapshot().unwrap().unwrap();
+        runtime.previous_chunk().unwrap();
+        let after_previous = runtime.session_snapshot().unwrap().unwrap();
+        runtime.restart_chapter().unwrap();
+        let after_restart = runtime.session_snapshot().unwrap().unwrap();
+
+        assert_ne!(
+            before.anchor, after_next.anchor,
+            "next_chunk should advance the reading position"
+        );
+        assert_eq!(before.anchor, after_previous.anchor);
+        assert_eq!(after_restart.anchor, "section:0/chunk:0");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_runtime_can_create_note_for_active_session() {
+        let path = temp_path("md");
+        fs::write(&path, "# Intro\n\nAlpha beta gamma.").unwrap();
+
+        let mut runtime = SqliteRuntime::open_in_memory().unwrap();
+        let outcome = runtime.ingest_path(&path).unwrap();
+        runtime.start_session(&outcome.document.document_id).unwrap();
+        let note = runtime.create_note("remember this").unwrap();
+        let snapshot = runtime.session_snapshot().unwrap().unwrap();
+
+        assert_eq!(note.document_id, outcome.document.document_id);
+        assert_eq!(note.transcript, "remember this");
+        assert_eq!(snapshot.notes_count, 1);
+
+        let _ = fs::remove_file(path);
+    }
 }
