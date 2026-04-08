@@ -52,6 +52,23 @@ def _load_deps() -> tuple[Any, Any, Any]:
     return np, sf, KPipeline
 
 
+def _torch_runtime_info() -> dict[str, str]:
+    try:
+        import torch  # type: ignore[import-not-found]
+    except ImportError:
+        return {"backend": "unknown", "acceleration": "unavailable"}
+
+    mps_backend = getattr(torch.backends, "mps", None)
+    mps_available = bool(mps_backend and mps_backend.is_available())
+    cuda_available = bool(torch.cuda.is_available())
+
+    if mps_available:
+        return {"backend": "mps", "acceleration": "enabled"}
+    if cuda_available:
+        return {"backend": "cuda", "acceleration": "enabled"}
+    return {"backend": "cpu", "acceleration": "disabled"}
+
+
 def _synthesize(
     pipeline: Any,
     np: Any,
@@ -76,7 +93,8 @@ def _serve(args: argparse.Namespace) -> int:
 
     np, sf, KPipeline = _load_deps()
     pipeline = KPipeline(lang_code=args.lang_code)
-    sys.stdout.write(json.dumps({"status": "ready"}) + "\n")
+    ready_payload = {"status": "ready", **_torch_runtime_info()}
+    sys.stdout.write(json.dumps(ready_payload) + "\n")
     sys.stdout.flush()
 
     for line in sys.stdin:

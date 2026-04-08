@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import platform
 import shutil
 import subprocess
 from hashlib import sha1
@@ -110,6 +112,7 @@ class KokoroSpeechSynthesizer:
             raise RuntimeError(f"Kokoro worker script '{self._worker_script}' is missing.")
 
         logger.info("Spawning persistent Kokoro worker (lang=%s)", self._lang_code)
+        worker_env = _build_worker_env()
         self._process = subprocess.Popen(
             [
                 python_path,
@@ -122,6 +125,7 @@ class KokoroSpeechSynthesizer:
                 "--speed",
                 str(self._speed),
             ],
+            env=worker_env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -130,7 +134,14 @@ class KokoroSpeechSynthesizer:
         ready = self._read_json_message("start")
         if ready.get("status") != "ready":
             raise RuntimeError(f"Kokoro worker unexpected ready response: {ready}")
-        logger.info("Kokoro worker ready (pid=%d)", self._process.pid)
+        backend = ready.get("backend", "unknown")
+        acceleration = ready.get("acceleration", "unknown")
+        logger.info(
+            "Kokoro worker ready (pid=%d, backend=%s, acceleration=%s)",
+            self._process.pid,
+            backend,
+            acceleration,
+        )
 
     def _send_request(self, text: str, voice: str, output_path: Path) -> None:
         assert self._process is not None
@@ -187,3 +198,17 @@ def _default_voice_for_lang_code(lang_code: str) -> str:
     if lang_code == "i":
         return "if_sara"
     return "af_heart"
+
+
+def _build_worker_env() -> dict[str, str]:
+    env = os.environ.copy()
+    if _is_macos_apple_silicon():
+        env.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    return env
+
+
+def _is_macos_apple_silicon() -> bool:
+    if platform.system().lower() != "darwin":
+        return False
+    machine = platform.machine().lower()
+    return machine in {"arm64", "aarch64"}
