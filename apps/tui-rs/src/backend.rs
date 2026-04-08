@@ -1,18 +1,28 @@
 use marginalia_core::frontend as core_frontend;
 use marginalia_runtime::SqliteRuntime;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+#[cfg(feature = "alpha-compat")]
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::env;
+#[cfg(feature = "alpha-compat")]
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "alpha-compat")]
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+#[cfg(feature = "alpha-compat")]
 use std::sync::mpsc;
+#[cfg(feature = "alpha-compat")]
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "alpha-compat")]
 use std::thread::{self, JoinHandle};
+#[cfg(feature = "alpha-compat")]
 use std::time::Duration;
 
+#[cfg(feature = "alpha-compat")]
 const PROTOCOL_VERSION: u32 = 1;
+#[cfg(feature = "alpha-compat")]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
@@ -28,6 +38,7 @@ pub struct ResponseEnvelope {
     #[serde(default)]
     pub payload: Value,
     #[serde(default)]
+    #[allow(dead_code)]
     pub request_id: Option<String>,
 }
 
@@ -97,6 +108,7 @@ pub struct DocumentView {
     pub title: String,
 }
 
+#[cfg(feature = "alpha-compat")]
 #[derive(Debug, Serialize)]
 struct RequestEnvelope<'a> {
     #[serde(rename = "type")]
@@ -108,21 +120,31 @@ struct RequestEnvelope<'a> {
 }
 
 pub(crate) enum BackendClient {
+    #[cfg(feature = "alpha-compat")]
     Process(ProcessBackendClient),
     Beta(BetaBackendClient),
 }
 
 impl BackendClient {
     pub fn spawn(config_path: Option<&Path>) -> Result<Self, String> {
+        #[cfg(not(feature = "alpha-compat"))]
+        let _ = config_path;
+
         let mode = env::var("MARGINALIA_TUI_BACKEND")
             .ok()
             .map(|value| value.to_ascii_lowercase());
 
         match mode.as_deref() {
             None | Some("beta") | Some("rust") => BetaBackendClient::spawn().map(Self::Beta),
+            #[cfg(feature = "alpha-compat")]
             Some("python") | Some("alpha") => {
                 ProcessBackendClient::spawn(config_path).map(Self::Process)
             }
+            #[cfg(not(feature = "alpha-compat"))]
+            Some("python") | Some("alpha") => Err(
+                "This TUI build does not include Alpha Python compatibility. Rebuild with --features alpha-compat."
+                    .to_string(),
+            ),
             Some(other) => Err(format!(
                 "Unsupported MARGINALIA_TUI_BACKEND value: {other}. Expected beta, rust, python, or alpha."
             )),
@@ -131,6 +153,7 @@ impl BackendClient {
 
     pub fn mode_label(&self) -> &'static str {
         match self {
+            #[cfg(feature = "alpha-compat")]
             Self::Process(_) => "Alpha Python backend",
             Self::Beta(_) => "Beta Rust runtime",
         }
@@ -138,6 +161,7 @@ impl BackendClient {
 
     pub fn get_app_snapshot(&mut self) -> Result<AppSnapshot, String> {
         match self {
+            #[cfg(feature = "alpha-compat")]
             Self::Process(client) => client.get_app_snapshot(),
             Self::Beta(client) => client.get_app_snapshot(),
         }
@@ -145,6 +169,7 @@ impl BackendClient {
 
     pub fn get_session_snapshot(&mut self) -> Result<Option<SessionSnapshot>, String> {
         match self {
+            #[cfg(feature = "alpha-compat")]
             Self::Process(client) => client.get_session_snapshot(),
             Self::Beta(client) => client.get_session_snapshot(),
         }
@@ -152,6 +177,7 @@ impl BackendClient {
 
     pub fn get_doctor_report(&mut self) -> Result<Value, String> {
         match self {
+            #[cfg(feature = "alpha-compat")]
             Self::Process(client) => client.get_doctor_report(),
             Self::Beta(client) => client.get_doctor_report(),
         }
@@ -159,6 +185,7 @@ impl BackendClient {
 
     pub fn list_documents(&mut self) -> Result<Vec<DocumentListItem>, String> {
         match self {
+            #[cfg(feature = "alpha-compat")]
             Self::Process(client) => client.list_documents(),
             Self::Beta(client) => client.list_documents(),
         }
@@ -169,6 +196,7 @@ impl BackendClient {
         document_id: Option<&str>,
     ) -> Result<Option<DocumentView>, String> {
         match self {
+            #[cfg(feature = "alpha-compat")]
             Self::Process(client) => client.get_document_view(document_id),
             Self::Beta(client) => client.get_document_view(document_id),
         }
@@ -189,6 +217,7 @@ impl BackendClient {
         payload: Value,
     ) -> Result<ResponseEnvelope, String> {
         match self {
+            #[cfg(feature = "alpha-compat")]
             Self::Process(client) => client.execute_command_response(name, payload),
             Self::Beta(client) => client.execute_command_response(name, payload),
         }
@@ -196,12 +225,14 @@ impl BackendClient {
 
     pub fn recent_stderr_entries(&self, after_sequence: u64) -> Vec<BackendLogEntry> {
         match self {
+            #[cfg(feature = "alpha-compat")]
             Self::Process(client) => client.recent_stderr_entries(after_sequence),
             Self::Beta(client) => client.recent_stderr_entries(after_sequence),
         }
     }
 }
 
+#[cfg(feature = "alpha-compat")]
 pub(crate) struct ProcessBackendClient {
     child: Child,
     stdin: Option<BufWriter<ChildStdin>>,
@@ -212,6 +243,7 @@ pub(crate) struct ProcessBackendClient {
     stderr_thread: Option<JoinHandle<()>>,
 }
 
+#[cfg(feature = "alpha-compat")]
 impl ProcessBackendClient {
     fn spawn(config_path: Option<&Path>) -> Result<Self, String> {
         let repo_root = env::var("MARGINALIA_REPO_ROOT")
@@ -425,6 +457,7 @@ impl ProcessBackendClient {
     }
 }
 
+#[cfg(feature = "alpha-compat")]
 impl Drop for ProcessBackendClient {
     fn drop(&mut self) {
         self.stdin.take();
@@ -733,6 +766,7 @@ impl From<core_frontend::DocumentChunkView> for DocumentChunkView {
     }
 }
 
+#[cfg(feature = "alpha-compat")]
 fn spawn_stdout_reader(stdout: ChildStdout, tx: mpsc::Sender<String>) -> JoinHandle<()> {
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
@@ -748,6 +782,7 @@ fn spawn_stdout_reader(stdout: ChildStdout, tx: mpsc::Sender<String>) -> JoinHan
     })
 }
 
+#[cfg(feature = "alpha-compat")]
 fn spawn_stderr_collector(
     stderr: ChildStderr,
     stderr_lines: Arc<Mutex<VecDeque<BackendLogEntry>>>,
@@ -774,6 +809,7 @@ fn spawn_stderr_collector(
     })
 }
 
+#[cfg(feature = "alpha-compat")]
 fn build_python_path(repo_root: &Path) -> String {
     let entries = [
         repo_root.join("apps/backend/src"),
@@ -795,6 +831,7 @@ fn build_python_path(repo_root: &Path) -> String {
     rendered.join(":")
 }
 
+#[cfg(feature = "alpha-compat")]
 fn decode_payload<T>(payload: Value, field: &str) -> Result<T, String>
 where
     T: for<'de> Deserialize<'de>,

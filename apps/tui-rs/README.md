@@ -14,6 +14,9 @@ It can currently run in two modes:
 - Alpha compatibility mode: talks to the Python backend over `stdio` using the
   frontend contract exposed by `marginalia_backend serve-stdio`
 
+In the normal Beta build, only the Rust mode is compiled. The Python bridge is
+available only if you build the TUI with `--features alpha-compat`.
+
 During Beta migration, the Rust mode is the preferred path for local engine
 work, while the Python transport remains available as a compatibility bridge.
 
@@ -41,13 +44,19 @@ MARGINALIA_TUI_BETA_DB=/tmp/marginalia-beta.sqlite3 \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
-If needed, point it at a specific Python interpreter or repo root:
+If you still need the Alpha Python bridge, enable the feature first:
+
+```bash
+cargo run --manifest-path apps/tui-rs/Cargo.toml --features alpha-compat
+```
+
+Then, if needed, point it at a specific Python interpreter or repo root:
 
 ```bash
 MARGINALIA_TUI_BACKEND=python \
 MARGINALIA_BACKEND_PYTHON=/path/to/.venv/bin/python \
 MARGINALIA_REPO_ROOT=/path/to/Marginalia \
-cargo run --manifest-path apps/tui-rs/Cargo.toml
+cargo run --manifest-path apps/tui-rs/Cargo.toml --features alpha-compat
 ```
 
 If `marginalia.toml` exists, export it before launch:
@@ -55,7 +64,7 @@ If `marginalia.toml` exists, export it before launch:
 ```bash
 MARGINALIA_TUI_BACKEND=python \
 MARGINALIA_CONFIG=marginalia.toml \
-cargo run --manifest-path apps/tui-rs/Cargo.toml
+cargo run --manifest-path apps/tui-rs/Cargo.toml --features alpha-compat
 ```
 
 The TUI also appends its own client-side logs to `marginalia-tui.log` in the
