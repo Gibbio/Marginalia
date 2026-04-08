@@ -21,6 +21,8 @@ Shared engine crates:
 - `marginalia-runtime`: engine composition and host-neutral lifecycle
 - `marginalia-storage-sqlite`: SQLite persistence and migrations
 - `marginalia-provider-fake`: fake adapters for testing and development
+- `marginalia-import-*`: document format importers such as markdown, text,
+  EPUB, and later PDF
 - `marginalia-tts-*`: text-to-speech providers
 - `marginalia-stt-*`: speech-to-text providers
 - `marginalia-playback-host`: playback bridge contracts and host adapters
