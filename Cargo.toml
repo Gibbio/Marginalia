@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "crates/marginalia-core",
+]
+resolver = "2"
