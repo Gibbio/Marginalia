@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "apps/tui-rs",
     "crates/marginalia-core",
     "crates/marginalia-devtools",
     "crates/marginalia-import-text",
