@@ -6,7 +6,10 @@ import sys
 import textwrap
 from pathlib import Path
 
-from marginalia_adapters.real.kokoro import KokoroSpeechSynthesizer
+from marginalia_adapters.real.kokoro import (
+    KokoroSpeechSynthesizer,
+    _build_worker_env,
+)
 from marginalia_core.ports.tts import SynthesisRequest
 
 
@@ -110,3 +113,35 @@ def test_kokoro_synthesizer_ignores_non_json_worker_stdout(tmp_path: Path) -> No
     assert Path(result.audio_reference).exists()
 
     synthesizer.shutdown()
+
+
+def test_build_worker_env_enables_mps_fallback_on_macos_apple_silicon(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("PYTORCH_ENABLE_MPS_FALLBACK", raising=False)
+    monkeypatch.setattr("marginalia_adapters.real.kokoro.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("marginalia_adapters.real.kokoro.platform.machine", lambda: "arm64")
+
+    env = _build_worker_env()
+
+    assert env["PYTORCH_ENABLE_MPS_FALLBACK"] == "1"
+
+
+def test_build_worker_env_preserves_existing_mps_fallback_value(monkeypatch) -> None:
+    monkeypatch.setenv("PYTORCH_ENABLE_MPS_FALLBACK", "0")
+    monkeypatch.setattr("marginalia_adapters.real.kokoro.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("marginalia_adapters.real.kokoro.platform.machine", lambda: "arm64")
+
+    env = _build_worker_env()
+
+    assert env["PYTORCH_ENABLE_MPS_FALLBACK"] == "0"
+
+
+def test_build_worker_env_leaves_non_macos_env_unchanged(monkeypatch) -> None:
+    monkeypatch.delenv("PYTORCH_ENABLE_MPS_FALLBACK", raising=False)
+    monkeypatch.setattr("marginalia_adapters.real.kokoro.platform.system", lambda: "Linux")
+    monkeypatch.setattr("marginalia_adapters.real.kokoro.platform.machine", lambda: "x86_64")
+
+    env = _build_worker_env()
+
+    assert "PYTORCH_ENABLE_MPS_FALLBACK" not in env

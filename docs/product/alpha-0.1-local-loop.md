@@ -64,6 +64,8 @@ Important notes:
 - `kokoro.default_voice` is the active Kokoro voice id.
 - `kokoro.python_executable` should point to a dedicated Python 3.12 or 3.11 runtime.
 - `kokoro.lang_code = "i"` selects the Italian pipeline.
+- on macOS Apple Silicon, Marginalia enables `PYTORCH_ENABLE_MPS_FALLBACK=1`
+  for the Kokoro worker to allow MPS acceleration when available.
 - `piper.model_path` remains available if you want to switch back to Piper.
 - `providers.allow_fallback = false` is recommended for real alpha runs so missing prerequisites fail clearly.
 

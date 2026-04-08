@@ -90,6 +90,25 @@ def test_runtime_service_marks_listening_active_before_capture(tmp_path: Path) -
     assert recognizer.observed_command_listening == [True]
 
 
+def test_runtime_service_continues_without_voice_monitor_when_stt_startup_fails(
+    tmp_path: Path,
+) -> None:
+    runtime_service, session_repository, _, _ = _build_runtime_services(
+        tmp_path,
+        command_recognizer=_BrokenCommandRecognizer(),
+        playback_auto_complete_after_snapshots=0,
+    )
+
+    result = runtime_service.play(str(Path("tests/fixtures/sample_document.txt").resolve()))
+
+    assert result.status.value == "ok"
+    assert result.data["runtime"]["outcome"] == "completed"
+    session = session_repository.get_active_session()
+    assert session is not None
+    assert session.command_listening_active is False
+    assert session.runtime_status == "completed"
+
+
 def test_runtime_service_cleans_stale_runtime_record_before_start(tmp_path: Path) -> None:
     runtime_service, _, runtime_supervisor, _ = _build_runtime_services(
         tmp_path,
@@ -437,6 +456,25 @@ class _ObservingInterruptMonitor:
             recognized_command="stop",
             raw_text="stop",
         )
+
+    def close(self) -> None:
+        return None
+
+
+class _BrokenCommandRecognizer(FakeCommandRecognizer):
+    def __init__(self) -> None:
+        super().__init__(commands=())
+
+    def open_interrupt_monitor(self) -> _BrokenInterruptMonitor:
+        return _BrokenInterruptMonitor()
+
+
+class _BrokenInterruptMonitor:
+    def __enter__(self) -> _BrokenInterruptMonitor:
+        raise RuntimeError("missing audio stack")
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> Literal[False]:
+        return False
 
     def close(self) -> None:
         return None

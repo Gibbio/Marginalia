@@ -250,8 +250,22 @@ class RuntimeLoop:
         return self._finalize_runtime(outcome="stopped")
 
     def __enter__(self) -> RuntimeLoop:
-        self._monitor = self._command_recognizer.open_interrupt_monitor()
-        self._monitor.__enter__()
+        try:
+            self._monitor = self._command_recognizer.open_interrupt_monitor()
+            self._monitor.__enter__()
+        except Exception as exc:
+            logger.warning("Command interrupt monitor unavailable; continuing without voice commands: %s", exc)
+            self._monitor = None
+            session = self._session_repository.get_active_session()
+            if session is not None:
+                self._mark_runtime_session(
+                    session,
+                    runtime_status=session.runtime_status or "active",
+                    command_listening_active=False,
+                    startup_cleanup_summary=session.startup_cleanup_summary,
+                    runtime_error=str(exc),
+                    runtime_process_id=session.runtime_process_id,
+                )
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> bool | None:
