@@ -201,6 +201,12 @@ Beta destination:
 - future real providers in separate `marginalia-llm-*` crates
 - model assets under `models/llm/`
 
+Longer-term reserved destination:
+
+- `crates/marginalia-secrets/src/` for secure storage of API keys, OAuth
+  tokens, refresh tokens, and other provider credentials through host-native
+  secret stores
+
 ### Backend process host
 
 Current:
@@ -231,11 +237,15 @@ Current:
 Beta destination:
 
 - desktop shell responsibilities gradually converge into `apps/desktop/`
-- development/admin tools move into `crates/marginalia-devtools/`
+- `apps/tui-rs/` is retained as a Rust desktop development and administration
+  tool during Beta
+- development/admin utilities that are not interactive UIs move into
+  `crates/marginalia-devtools/`
 
 Notes:
 
 - not every Alpha UI surface needs a direct Beta equivalent
+- `tui-rs` is explicitly one of the tools we keep
 - useful inspection tooling should survive, but not dictate the product shape
 
 ### Infra utilities

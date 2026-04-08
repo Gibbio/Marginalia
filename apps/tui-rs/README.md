@@ -1,9 +1,17 @@
 # Marginalia Rust TUI
 
-This is the Rust frontend for Marginalia.
+This is the Rust TUI frontend for Marginalia.
+
+In the Beta plan it is retained as a desktop development and administration
+tool. It is not assumed to be the final consumer desktop shell, but it remains
+an important Rust host during the migration away from the Alpha Python-centered
+runtime model.
 
 It talks to the Python backend over `stdio` using the frontend contract exposed
 by `marginalia_backend serve-stdio`.
+
+During Beta migration, that transport may change as the shared engine boundary
+stabilizes. The TUI itself is still expected to survive and evolve.
 
 ## Run
 

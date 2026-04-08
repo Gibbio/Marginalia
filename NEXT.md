@@ -141,6 +141,9 @@ Deliverables:
   that does not block mobile
 - keep Linux viable where practical, while Apple Silicon remains the main
   validation target
+- keep `apps/tui-rs` as a Rust desktop development and administration tool
+  during Beta, evolving it alongside the new engine boundary instead of
+  discarding it
 
 Exit condition:
 
@@ -182,6 +185,12 @@ Deferred unless required by the platform plan:
 - broad provider experimentation outside Kokoro
 - Windows support
 
+Longer-term architecture to reserve explicitly:
+
+- secure user credential storage for future LLM and account-backed providers,
+  using host-native secret storage instead of plain-text config or SQLite
+  storage for tokens, OAuth credentials, API keys, or passwords
+
 ## Immediate Beta Sequence
 
 1. Finalize Beta ADR set for target platforms, Rust engine ownership, runtime
@@ -210,6 +219,7 @@ Deferred unless required by the platform plan:
 - making Windows a first-class target
 - adding cloud-first assumptions
 - chasing new TTS providers outside the Kokoro path
+- implementing secure account or secret storage in the immediate Beta reset
 
 ## Working Rule
 
