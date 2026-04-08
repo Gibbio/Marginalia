@@ -8,9 +8,11 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 
+from markdown_it import MarkdownIt
+from mdit_py_plugins.front_matter import front_matter_plugin
+
 _DEFAULT_CHUNK_TARGET_CHARS = 300
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?…])\s+")
-_MARKDOWN_THEMATIC_BREAK = re.compile(r"^\s{0,3}([-*_])(?:\s*\1){2,}\s*$")
 
 
 def _utc_now() -> datetime:
@@ -85,19 +87,120 @@ def build_document_outline(
 ) -> Document:
     """Parse a text document into sections and chunks.
 
-    - markdown headings (``#``, ``##``, ``###``) define section boundaries
-    - if no headings are present, a single section is created
-    - paragraphs longer than 1.5x *chunk_target_chars* are split at sentence
-      boundaries
-    - short consecutive fragments are merged until they approach the target
+    Markdown files (``.md``, ``.markdown``) are parsed with *markdown-it-py*
+    so that frontmatter, thematic breaks, code fences and other non-prose
+    tokens are structurally excluded — no regex heuristics needed.
+
+    Plain-text files fall back to paragraph-based splitting.
     """
 
     cleaned_text = raw_text.strip()
-    markdown_source = source_path.suffix.lower() in {".md", ".markdown"}
-    normalized_text = (
-        _strip_markdown_thematic_breaks(cleaned_text) if markdown_source else cleaned_text
-    )
     title = source_path.stem.replace("-", " ").replace("_", " ").title() or "Untitled Document"
+    markdown_source = source_path.suffix.lower() in {".md", ".markdown"}
+
+    if markdown_source:
+        sections = _parse_markdown_sections(cleaned_text, chunk_target_chars=chunk_target_chars)
+    else:
+        sections = _parse_plaintext_sections(cleaned_text, chunk_target_chars=chunk_target_chars)
+
+    if not sections:
+        sections = [
+            DocumentSection(
+                index=0,
+                title=title,
+                chunks=_chunk_section_text(
+                    cleaned_text, chunk_target_chars=chunk_target_chars
+                ),
+                source_anchor="section:0",
+            )
+        ]
+
+    document_hash_input = f"{source_path.resolve()}::{cleaned_text}".encode()
+    document_id = sha256(document_hash_input).hexdigest()[:12]
+    return Document(
+        document_id=document_id,
+        title=title,
+        source_path=source_path.resolve(),
+        sections=tuple(sections),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Markdown parsing (markdown-it-py)
+# ---------------------------------------------------------------------------
+
+_MD_PARSER = MarkdownIt()
+front_matter_plugin(_MD_PARSER)
+
+# Token types whose inline content is readable prose.
+_PROSE_CONTAINERS = {"paragraph_open", "blockquote_open"}
+
+
+def _parse_markdown_sections(
+    text: str,
+    *,
+    chunk_target_chars: int = _DEFAULT_CHUNK_TARGET_CHARS,
+) -> list[DocumentSection]:
+    """Walk the markdown-it token stream to extract sections and prose."""
+
+    tokens = _MD_PARSER.parse(text)
+    sections: list[DocumentSection] = []
+    current_title: str | None = None
+    current_paragraphs: list[str] = []
+    in_heading = False
+
+    def flush_section() -> None:
+        nonlocal current_title, current_paragraphs
+        if current_title is None and not current_paragraphs:
+            return
+        section_title = current_title or f"Section {len(sections) + 1}"
+        section_text = "\n\n".join(current_paragraphs)
+        sections.append(
+            DocumentSection(
+                index=len(sections),
+                title=section_title,
+                chunks=_chunk_section_text(
+                    section_text, chunk_target_chars=chunk_target_chars
+                ),
+                source_anchor=f"section:{len(sections)}",
+            )
+        )
+        current_title = None
+        current_paragraphs = []
+
+    for token in tokens:
+        if token.type == "heading_open":
+            flush_section()
+            in_heading = True
+            continue
+
+        if token.type == "heading_close":
+            in_heading = False
+            continue
+
+        if in_heading and token.type == "inline":
+            current_title = token.content.strip() or f"Section {len(sections) + 1}"
+            continue
+
+        if token.type == "inline" and token.content.strip():
+            current_paragraphs.append(token.content.strip())
+
+    flush_section()
+    return sections
+
+
+# ---------------------------------------------------------------------------
+# Plain-text parsing (fallback for .txt)
+# ---------------------------------------------------------------------------
+
+
+def _parse_plaintext_sections(
+    text: str,
+    *,
+    chunk_target_chars: int = _DEFAULT_CHUNK_TARGET_CHARS,
+) -> list[DocumentSection]:
+    """Split plain text into sections using blank-line paragraphs."""
+
     sections: list[DocumentSection] = []
     current_title: str | None = None
     current_lines: list[str] = []
@@ -121,7 +224,7 @@ def build_document_outline(
         current_title = None
         current_lines = []
 
-    for line in normalized_text.splitlines():
+    for line in text.splitlines():
         if line.lstrip().startswith("#"):
             flush_section()
             current_title = line.lstrip("#").strip() or f"Section {len(sections) + 1}"
@@ -129,27 +232,7 @@ def build_document_outline(
         current_lines.append(line)
 
     flush_section()
-
-    if not sections:
-        sections = [
-            DocumentSection(
-                index=0,
-                title=title,
-                chunks=_chunk_section_text(
-                    normalized_text, chunk_target_chars=chunk_target_chars
-                ),
-                source_anchor="section:0",
-            )
-        ]
-
-    document_hash_input = f"{source_path.resolve()}::{normalized_text}".encode()
-    document_id = sha256(document_hash_input).hexdigest()[:12]
-    return Document(
-        document_id=document_id,
-        title=title,
-        source_path=source_path.resolve(),
-        sections=tuple(sections),
-    )
+    return sections
 
 
 # ---------------------------------------------------------------------------
@@ -186,14 +269,6 @@ def _chunk_section_text(
         DocumentChunk(index=i, text=text, char_start=start, char_end=end)
         for i, (text, start, end) in enumerate(merged)
     )
-
-
-def _strip_markdown_thematic_breaks(text: str) -> str:
-    """Remove standalone markdown thematic breaks from ingested content."""
-
-    return "\n".join(
-        line for line in text.splitlines() if not _MARKDOWN_THEMATIC_BREAK.match(line)
-    ).strip()
 
 
 def _locate_paragraphs(section_text: str) -> list[tuple[str, int, int]]:

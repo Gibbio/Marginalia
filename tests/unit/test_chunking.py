@@ -166,6 +166,58 @@ def test_markdown_thematic_breaks_are_not_emitted_as_chunks() -> None:
     assert "***" not in section_text
 
 
+def test_frontmatter_is_excluded_from_chunks() -> None:
+    """YAML frontmatter should not appear in any chunk."""
+
+    text = "---\ntitle: My Book\nauthor: Someone\n---\n\n# Chapter\n\nActual prose."
+    doc = build_document_outline(Path("test.md"), text, chunk_target_chars=300)
+
+    all_text = " ".join(
+        chunk.text for section in doc.sections for chunk in section.chunks
+    )
+    assert "Actual prose." in all_text
+    assert "title:" not in all_text
+    assert "author:" not in all_text
+
+
+def test_code_fences_are_excluded_from_chunks() -> None:
+    """Fenced code blocks should not leak into readable chunks."""
+
+    text = (
+        "# Chapter\n\n"
+        "Some prose.\n\n"
+        "```python\n# this is code not a heading\nprint('hello')\n```\n\n"
+        "More prose."
+    )
+    doc = build_document_outline(Path("test.md"), text, chunk_target_chars=300)
+
+    all_text = " ".join(
+        chunk.text for section in doc.sections for chunk in section.chunks
+    )
+    assert "Some prose." in all_text
+    assert "More prose." in all_text
+    assert "print(" not in all_text
+    assert "# this is code" not in all_text
+
+
+def test_heading_inside_code_fence_is_not_a_section() -> None:
+    """A '#' inside a code fence must not create a section boundary."""
+
+    text = (
+        "# Real Chapter\n\n"
+        "Intro.\n\n"
+        "```\n# Fake heading\n```\n\n"
+        "Conclusion."
+    )
+    doc = build_document_outline(Path("test.md"), text, chunk_target_chars=300)
+
+    assert doc.chapter_count == 1
+    all_text = " ".join(chunk.text for chunk in doc.get_section(0).chunks)
+    assert "Intro." in all_text
+    assert "Conclusion." in all_text
+    assert "Fake heading" not in all_text
+
+
 def test_voice_test_document_chunks_reasonably(tmp_path: Path) -> None:
     """The real voice-test-it.txt document produces reasonable chunk sizes."""
 
