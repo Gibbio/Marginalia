@@ -9,6 +9,10 @@ The repository is structured as a production-minded monorepo. The backend is
 Python, storage starts with SQLite, and speech plus LLM capabilities stay
 behind replaceable ports while frontend clients are free to evolve separately.
 
+The current Alpha implementation is desktop-first and macOS-oriented. The Beta
+direction is broader: one product architecture that can be hosted on desktop,
+iOS, and Android.
+
 ## Why It Exists
 
 Reading, listening, annotating, and revising are still split across too many
@@ -35,6 +39,9 @@ This single command installs system dependencies (portaudio, espeak-ng, uv),
 creates the Python environment, sets up all real providers (Kokoro TTS, Vosk
 command STT, whisper.cpp dictation), downloads models, generates a starter
 config, and runs `doctor` to verify everything works.
+
+This setup reflects the current Alpha reference host. It is not the final Beta
+packaging story for desktop, iOS, or Android.
 
 Your terminal app must have microphone permission on macOS.
 
