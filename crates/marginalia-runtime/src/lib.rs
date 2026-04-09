@@ -40,15 +40,19 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub chunk_target_chars: usize,
+    pub default_language: String,
+    pub default_voice: String,
 }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             chunk_target_chars: DEFAULT_CHUNK_TARGET_CHARS,
+            default_language: "it".to_string(),
+            default_voice: "narrator".to_string(),
         }
     }
 }
@@ -247,8 +251,8 @@ impl SqliteRuntime {
         })
     }
 
-    pub fn config(&self) -> RuntimeConfig {
-        self.config
+    pub fn config(&self) -> &RuntimeConfig {
+        &self.config
     }
 
     pub fn set_playback_engine(
@@ -303,8 +307,8 @@ impl SqliteRuntime {
         let tts_provider = self.tts.describe_capabilities().provider_name;
         let synthesis = self.tts.synthesize(SynthesisRequest {
             text: chunk.text.clone(),
-            voice: Some("narrator".to_string()),
-            language: "it".to_string(),
+            voice: Some(self.config.default_voice.clone()),
+            language: self.config.default_language.clone(),
         })?;
         let playback = self
             .playback_engine
@@ -320,12 +324,12 @@ impl SqliteRuntime {
         session.position = position;
         session.last_command = Some("start_session".to_string());
         session.last_command_source = Some("runtime".to_string());
-        session.voice = Some("narrator".to_string());
+        session.voice = Some(self.config.default_voice.clone());
         session.tts_provider = Some(tts_provider);
         session.command_stt_provider = Some(self.command_recognizer.describe_capabilities().provider_name);
         session.playback_provider = playback.provider_name.clone();
         session.command_listening_active = true;
-        session.command_language = Some("it".to_string());
+        session.command_language = Some(self.config.default_language.clone());
         session.audio_reference = playback.audio_reference.clone();
         session.playback_process_id = playback.process_id;
         session.runtime_status = Some("active".to_string());
@@ -680,11 +684,11 @@ impl SqliteRuntime {
 
         let synthesis = self.tts.synthesize(SynthesisRequest {
             text: chunk.text.clone(),
-            voice: session.voice.clone().or(Some("narrator".to_string())),
+            voice: session.voice.clone().or(Some(self.config.default_voice.clone())),
             language: session
                 .command_language
                 .clone()
-                .unwrap_or_else(|| "it".to_string()),
+                .unwrap_or_else(|| self.config.default_language.clone()),
         })?;
         let playback = self
             .playback_engine
@@ -789,6 +793,7 @@ mod tests {
 
         let mut runtime = SqliteRuntime::open_in_memory_with_config(super::RuntimeConfig {
             chunk_target_chars: 20,
+            ..super::RuntimeConfig::default()
         })
         .unwrap();
         let outcome = runtime.ingest_path(&path).unwrap();
