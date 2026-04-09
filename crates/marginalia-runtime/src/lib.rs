@@ -22,9 +22,7 @@ use marginalia_core::ports::storage::{
 use marginalia_import_text::TextDocumentImporter;
 use marginalia_provider_fake::{
     FakeCommandRecognizer, FakeDictationTranscriber, FakePlaybackEngine, FakeRewriteGenerator,
-    FakeSpeechSynthesizer, FakeTopicSummarizer, InMemoryDocumentRepository,
-    InMemoryNoteRepository, InMemoryRewriteDraftRepository, InMemorySessionRepository,
-    RecordingEventPublisher,
+    FakeSpeechSynthesizer, FakeTopicSummarizer, RecordingEventPublisher,
 };
 use marginalia_storage_sqlite::{
     SQLiteDatabase, SQLiteDocumentRepository, SQLiteNoteRepository,
@@ -36,7 +34,7 @@ use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub use frontend::RuntimeFrontendResponse;
+pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -94,7 +92,14 @@ impl From<SynthesisError> for RuntimeError {
     }
 }
 
-pub struct FakeRuntime {
+#[cfg(test)]
+use marginalia_provider_fake::{
+    InMemoryDocumentRepository, InMemoryNoteRepository, InMemoryRewriteDraftRepository,
+    InMemorySessionRepository,
+};
+
+#[cfg(test)]
+pub(crate) struct FakeRuntime {
     config: RuntimeConfig,
     document_repository: InMemoryDocumentRepository,
     session_repository: InMemorySessionRepository,
@@ -129,6 +134,7 @@ pub struct SqliteRuntime {
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
 }
 
+#[cfg(test)]
 impl Default for FakeRuntime {
     fn default() -> Self {
         Self {
@@ -150,6 +156,7 @@ impl Default for FakeRuntime {
     }
 }
 
+#[cfg(test)]
 impl FakeRuntime {
     pub fn new() -> Self {
         Self::default()

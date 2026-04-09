@@ -1,6 +1,6 @@
 use crate::config::TuiConfig;
 use marginalia_playback_host::HostPlaybackEngine;
-use marginalia_runtime::SqliteRuntime;
+use marginalia_runtime::{RuntimeFrontend, SqliteRuntime};
 use marginalia_tts_kokoro::{KokoroConfig, KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig};
 #[cfg(feature = "vosk-stt")]
 use marginalia_stt_vosk::{VoskCommandRecognizer, VoskConfig};
@@ -232,7 +232,7 @@ impl BackendClient {
 }
 
 pub(crate) struct BetaBackendClient {
-    runtime: SqliteRuntime,
+    runtime: Box<dyn RuntimeFrontend + Send>,
     logs: VecDeque<BackendLogEntry>,
     sequence: u64,
     voice_cmd_rx: Option<std::sync::mpsc::Receiver<String>>,
@@ -354,7 +354,7 @@ impl BetaBackendClient {
         };
 
         let mut client = Self {
-            runtime,
+            runtime: Box::new(runtime) as Box<dyn RuntimeFrontend + Send>,
             logs: VecDeque::with_capacity(256),
             sequence: 0,
             voice_cmd_rx,

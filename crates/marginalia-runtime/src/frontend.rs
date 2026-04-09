@@ -12,6 +12,23 @@ pub struct RuntimeFrontendResponse {
     pub payload: Value,
 }
 
+/// Stable interface that apps use to talk to the runtime.
+/// Apps must never depend on a concrete runtime type — only on this trait.
+pub trait RuntimeFrontend {
+    fn execute_frontend_query(&mut self, name: &str, payload: Value) -> RuntimeFrontendResponse;
+    fn execute_frontend_command(&mut self, name: &str, payload: Value) -> RuntimeFrontendResponse;
+}
+
+impl RuntimeFrontend for SqliteRuntime {
+    fn execute_frontend_query(&mut self, name: &str, payload: Value) -> RuntimeFrontendResponse {
+        self.frontend_query(name, payload)
+    }
+
+    fn execute_frontend_command(&mut self, name: &str, payload: Value) -> RuntimeFrontendResponse {
+        self.frontend_command(name, payload)
+    }
+}
+
 impl SqliteRuntime {
     pub fn backend_capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
@@ -55,7 +72,7 @@ impl SqliteRuntime {
         }
     }
 
-    pub fn execute_frontend_query(
+    fn frontend_query(
         &mut self,
         name: &str,
         payload: Value,
@@ -166,7 +183,7 @@ impl SqliteRuntime {
         }
     }
 
-    pub fn execute_frontend_command(
+    fn frontend_command(
         &mut self,
         name: &str,
         payload: Value,
@@ -444,7 +461,7 @@ fn search_result_to_json(result: marginalia_core::domain::SearchResult) -> Value
 
 #[cfg(test)]
 mod tests {
-    use crate::SqliteRuntime;
+    use crate::{RuntimeFrontend, SqliteRuntime};
     use serde_json::json;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
