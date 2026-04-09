@@ -1,3 +1,5 @@
+KOKORO_ASSETS_DIR ?= .kokoro-assets
+
 PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
@@ -9,6 +11,7 @@ MODELS_DIR ?= .models
 
 .PHONY: bootstrap bootstrap-kokoro bootstrap-vosk bootstrap-whisper bootstrap-providers \
         bootstrap-system-deps setup format lint test smoke run-cli-help doctor tui-rs \
+        beta-test beta-doctor \
         clean clean-session
 
 # ---------------------------------------------------------------------------
@@ -153,7 +156,13 @@ doctor:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_CONFIG=marginalia.toml $(VENV_PYTHON) -m marginalia_cli doctor
 
 tui-rs:
-	MARGINALIA_CONFIG=marginalia.toml cargo run --manifest-path apps/tui-rs/Cargo.toml
+	MARGINALIA_KOKORO_ASSETS=$(KOKORO_ASSETS_DIR) cargo run --manifest-path apps/tui-rs/Cargo.toml
+
+beta-test:
+	cargo test
+
+beta-doctor:
+	cargo run -p marginalia-devtools -- kokoro-doctor --assets-root $(KOKORO_ASSETS_DIR)
 
 run-cli-help:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_cli --help
