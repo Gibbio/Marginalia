@@ -12,7 +12,7 @@ use marginalia_core::frontend::{
     SessionSnapshot,
 };
 use marginalia_core::ports::{
-    PlaybackEngine, SpeechSynthesizer, SynthesisError, SynthesisRequest,
+    CommandRecognizer, PlaybackEngine, SpeechSynthesizer, SynthesisError, SynthesisRequest,
 };
 use marginalia_core::ports::storage::{
     DocumentRepository, NoteRepository, SessionRepository,
@@ -102,7 +102,7 @@ pub struct FakeRuntime {
     event_publisher: RecordingEventPublisher,
     playback_engine: Box<dyn PlaybackEngine + Send>,
     tts: Box<dyn SpeechSynthesizer + Send>,
-    command_recognizer: FakeCommandRecognizer,
+    command_recognizer: Box<dyn CommandRecognizer + Send>,
     dictation_transcriber: FakeDictationTranscriber,
     rewrite_generator: FakeRewriteGenerator,
     topic_summarizer: FakeTopicSummarizer,
@@ -120,7 +120,7 @@ pub struct SqliteRuntime {
     event_publisher: RecordingEventPublisher,
     playback_engine: Box<dyn PlaybackEngine + Send>,
     tts: Box<dyn SpeechSynthesizer + Send>,
-    command_recognizer: FakeCommandRecognizer,
+    command_recognizer: Box<dyn CommandRecognizer + Send>,
     dictation_transcriber: FakeDictationTranscriber,
     rewrite_generator: FakeRewriteGenerator,
     topic_summarizer: FakeTopicSummarizer,
@@ -139,7 +139,7 @@ impl Default for FakeRuntime {
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
-            command_recognizer: FakeCommandRecognizer::default(),
+            command_recognizer: Box::new(FakeCommandRecognizer::default()),
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
@@ -443,8 +443,8 @@ impl FakeRuntime {
         })
     }
 
-    pub fn command_recognizer(&self) -> &FakeCommandRecognizer {
-        &self.command_recognizer
+    pub fn set_command_recognizer(&mut self, recognizer: impl CommandRecognizer + Send + 'static) {
+        self.command_recognizer = Box::new(recognizer);
     }
 
     pub fn dictation_transcriber(&self) -> &FakeDictationTranscriber {
@@ -684,7 +684,7 @@ impl SqliteRuntime {
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
-            command_recognizer: FakeCommandRecognizer::default(),
+            command_recognizer: Box::new(FakeCommandRecognizer::default()),
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
@@ -714,7 +714,7 @@ impl SqliteRuntime {
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
-            command_recognizer: FakeCommandRecognizer::default(),
+            command_recognizer: Box::new(FakeCommandRecognizer::default()),
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
@@ -1010,8 +1010,8 @@ impl SqliteRuntime {
         })
     }
 
-    pub fn command_recognizer(&self) -> &FakeCommandRecognizer {
-        &self.command_recognizer
+    pub fn set_command_recognizer(&mut self, recognizer: impl CommandRecognizer + Send + 'static) {
+        self.command_recognizer = Box::new(recognizer);
     }
 
     pub fn dictation_transcriber(&self) -> &FakeDictationTranscriber {
