@@ -17,10 +17,18 @@ htmlcov/
 
 # Local state
 .marginalia/
-.models/
 .venv-kokoro/
 .whisper-cpp/
-marginalia.toml
+
+# Downloaded model assets (large binary files — use make bootstrap-beta to install)
+models/stt/vosk/vosk-model-*/
+models/stt/vosk/libvosk.*
+models/stt/whisper/*.bin
+models/tts/kokoro/*.onnx
+models/tts/kokoro/config.json
+models/tts/kokoro/voices/
+models/tts/kokoro/lib/
+/marginalia.toml
 tmp/
 *.sqlite
 *.sqlite3

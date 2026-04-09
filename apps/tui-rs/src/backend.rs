@@ -1,3 +1,4 @@
+use crate::config::TuiConfig;
 use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::SqliteRuntime;
 use marginalia_tts_kokoro::{KokoroConfig, KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig};
@@ -8,7 +9,6 @@ use marginalia_stt_whisper::{WhisperConfig, WhisperDictationTranscriber};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
-use std::env;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -240,40 +240,37 @@ pub(crate) struct BetaBackendClient {
 
 impl BetaBackendClient {
     fn spawn() -> Result<Self, String> {
-        let repo_root = env::var("MARGINALIA_REPO_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let db_path = env::var("MARGINALIA_TUI_BETA_DB")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| repo_root.join(".marginalia-beta.sqlite3"));
+        let config = TuiConfig::load();
+
+        let db_path = config
+            .database_path
+            .unwrap_or_else(|| PathBuf::from(".marginalia/beta.sqlite3"));
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
         let mut runtime = SqliteRuntime::open(&db_path)
             .map_err(|err| format!("Unable to open beta runtime database: {err}"))?;
 
-        // Playback: HostPlaybackEngine di default, fake solo se esplicitamente richiesto
-        let use_fake_playback = env::var("MARGINALIA_TUI_PLAYBACK")
-            .ok()
-            .is_some_and(|v| v.eq_ignore_ascii_case("fake"));
-        let playback_label = if use_fake_playback {
+        // Playback: HostPlaybackEngine di default, fake se config.playback.fake = true
+        let playback_label = if config.playback.fake {
             "fake"
         } else {
             runtime.set_playback_engine(HostPlaybackEngine::default());
             "host"
         };
 
-        // TTS: Kokoro se MARGINALIA_KOKORO_ASSETS è impostato, altrimenti fake
+        // TTS: Kokoro se [kokoro] assets_root è configurato
         let mut tts_label = "fake";
-        if let Ok(assets_root) = env::var("MARGINALIA_KOKORO_ASSETS") {
+        if let Some(assets_root) = config.kokoro.assets_root {
             let kokoro_config = KokoroConfig::from_assets_root(&assets_root);
             let readiness = kokoro_config.readiness_report();
             if readiness.is_ready() {
-                let tts_dir = env::var("MARGINALIA_TUI_TTS_DIR")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| {
-                        db_path
-                            .parent()
-                            .unwrap_or_else(|| Path::new("."))
-                            .join(".marginalia-tts-cache")
-                    });
+                let tts_dir = config.kokoro.tts_cache_dir.unwrap_or_else(|| {
+                    db_path
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(".marginalia-tts-cache")
+                });
                 let synth_config = KokoroSpeechSynthesizerConfig::new(&tts_dir);
                 runtime.set_speech_synthesizer(KokoroSpeechSynthesizer::new(
                     kokoro_config,
@@ -281,7 +278,7 @@ impl BetaBackendClient {
                 ));
                 runtime.set_provider_doctor_blob(
                     "kokoro",
-                    json!({ "ready": true, "assets_root": assets_root }),
+                    json!({ "ready": true, "assets_root": assets_root.display().to_string() }),
                 );
                 tts_label = "kokoro";
             } else {
@@ -289,45 +286,50 @@ impl BetaBackendClient {
                     "kokoro",
                     json!({
                         "ready": false,
-                        "assets_root": assets_root,
+                        "assets_root": assets_root.display().to_string(),
                         "missing": readiness.missing,
                     }),
                 );
             }
         }
 
-        // STT: VoskCommandRecognizer se MARGINALIA_VOSK_MODEL è impostato
+        // STT: Vosk se [vosk] model_path è configurato
         #[allow(unused_mut, unused_variables)]
         let mut stt_label = "fake";
         #[cfg(feature = "vosk-stt")]
-        if let Ok(model_path) = env::var("MARGINALIA_VOSK_MODEL") {
-            let commands = env::var("MARGINALIA_VOSK_COMMANDS")
-                .map(|s| s.split(',').map(|c| c.trim().to_string()).collect::<Vec<_>>())
-                .unwrap_or_else(|_| vec![
+        if let Some(model_path) = config.vosk.model_path {
+            let commands = if config.vosk.commands.is_empty() {
+                vec![
                     "pausa".to_string(),
                     "avanti".to_string(),
                     "indietro".to_string(),
                     "stop".to_string(),
-                ]);
+                ]
+            } else {
+                config.vosk.commands
+            };
             let vosk_config = VoskConfig::new(&model_path, commands);
             runtime.set_command_recognizer(VoskCommandRecognizer::new(vosk_config));
             runtime.set_provider_doctor_blob(
                 "vosk",
-                json!({ "ready": true, "model_path": model_path }),
+                json!({ "ready": true, "model_path": model_path.display().to_string() }),
             );
             stt_label = "vosk";
         }
 
-        // Dictation STT: Whisper se MARGINALIA_WHISPER_MODEL è impostato
+        // Dictation STT: Whisper se [whisper] model_path è configurato
         #[allow(unused_mut, unused_variables)]
         let mut dictation_label = "fake";
         #[cfg(feature = "whisper-stt")]
-        if let Ok(model_path) = env::var("MARGINALIA_WHISPER_MODEL") {
-            let whisper_config = WhisperConfig::new(&model_path);
+        if let Some(model_path) = config.whisper.model_path {
+            let mut whisper_config = WhisperConfig::new(&model_path);
+            if let Some(language) = config.whisper.language {
+                whisper_config.language = language;
+            }
             runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(whisper_config));
             runtime.set_provider_doctor_blob(
                 "whisper_dictation_stt",
-                json!({ "ready": true, "model_path": model_path }),
+                json!({ "ready": true, "model_path": model_path.display().to_string() }),
             );
             dictation_label = "whisper";
         }

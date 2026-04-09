@@ -1,0 +1,35 @@
+# Marginalia Beta — configurazione locale
+# I percorsi sono relativi alla root del repository (da dove si esegue `make tui-rs`).
+# Eseguire `make bootstrap-beta` per scaricare i provider mancanti.
+
+database_path = ".marginalia/beta.sqlite3"
+
+# ---------------------------------------------------------------------------
+# TTS — Kokoro ONNX
+# ---------------------------------------------------------------------------
+# Disabilitato se commentato. Abilitare dopo `make bootstrap-kokoro`.
+[kokoro]
+assets_root = "models/tts/kokoro"
+# tts_cache_dir = ".marginalia/tts-cache"   # default: <database_dir>/.marginalia-tts-cache
+
+# ---------------------------------------------------------------------------
+# Command STT — Vosk (riconoscimento comandi vocali)
+# ---------------------------------------------------------------------------
+# Disabilitato se commentato. Abilitare dopo `make bootstrap-vosk bootstrap-vosk-lib`.
+[vosk]
+model_path = "models/stt/vosk/vosk-model-small-it-0.22"
+commands = ["pausa", "avanti", "indietro", "stop"]
+
+# ---------------------------------------------------------------------------
+# Dictation STT — Whisper (dettatura note)
+# ---------------------------------------------------------------------------
+# Disabilitato se commentato. Abilitare dopo `make bootstrap-whisper`.
+[whisper]
+model_path = "models/stt/whisper/ggml-base.bin"
+language = "it"
+
+# ---------------------------------------------------------------------------
+# Playback
+# ---------------------------------------------------------------------------
+[playback]
+# fake = true   # decommenta per ambienti headless/CI
