@@ -1,1 +1,0 @@
-"""Event models for Marginalia."""

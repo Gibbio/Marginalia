@@ -1,1 +1,0 @@
-"""Real local provider adapters."""
