@@ -8,6 +8,21 @@ members = [
     "crates/marginalia-provider-fake",
     "crates/marginalia-runtime",
     "crates/marginalia-storage-sqlite",
+    "crates/marginalia-stt-vosk",
+    "crates/marginalia-tts-kokoro",
+]
+# marginalia-stt-vosk requires libvosk native library at link time.
+# Excluded from default members so `cargo build/test` works without it.
+# Build explicitly with: cargo test -p marginalia-stt-vosk (needs libvosk installed)
+default-members = [
+    "apps/tui-rs",
+    "crates/marginalia-core",
+    "crates/marginalia-devtools",
+    "crates/marginalia-import-text",
+    "crates/marginalia-playback-host",
+    "crates/marginalia-provider-fake",
+    "crates/marginalia-runtime",
+    "crates/marginalia-storage-sqlite",
     "crates/marginalia-tts-kokoro",
 ]
 resolver = "2"

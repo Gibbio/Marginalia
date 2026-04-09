@@ -6,8 +6,10 @@ description = "Rust TUI frontend for Marginalia"
 
 [features]
 default = []
+vosk-stt = ["dep:marginalia-stt-vosk"]
 
 [dependencies]
+marginalia-stt-vosk = { path = "../../crates/marginalia-stt-vosk", optional = true }
 crossterm = "0.28"
 marginalia-playback-host = { path = "../../crates/marginalia-playback-host" }
 marginalia-runtime = { path = "../../crates/marginalia-runtime" }

@@ -1,6 +1,8 @@
 use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::SqliteRuntime;
 use marginalia_tts_kokoro::{KokoroConfig, KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig};
+#[cfg(feature = "vosk-stt")]
+use marginalia_stt_vosk::{VoskCommandRecognizer, VoskConfig};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -286,16 +288,39 @@ impl BetaBackendClient {
             }
         }
 
+        // STT: VoskCommandRecognizer se MARGINALIA_VOSK_MODEL è impostato
+        #[allow(unused_mut, unused_variables)]
+        let mut stt_label = "fake";
+        #[cfg(feature = "vosk-stt")]
+        if let Ok(model_path) = env::var("MARGINALIA_VOSK_MODEL") {
+            let commands = env::var("MARGINALIA_VOSK_COMMANDS")
+                .map(|s| s.split(',').map(|c| c.trim().to_string()).collect::<Vec<_>>())
+                .unwrap_or_else(|_| vec![
+                    "pausa".to_string(),
+                    "avanti".to_string(),
+                    "indietro".to_string(),
+                    "stop".to_string(),
+                ]);
+            let vosk_config = VoskConfig::new(&model_path, commands);
+            runtime.set_command_recognizer(VoskCommandRecognizer::new(vosk_config));
+            runtime.set_provider_doctor_blob(
+                "vosk",
+                json!({ "ready": true, "model_path": model_path }),
+            );
+            stt_label = "vosk";
+        }
+
         let mut client = Self {
             runtime,
             logs: VecDeque::with_capacity(256),
             sequence: 0,
         };
         client.push_log(format!(
-            "beta-runtime ready db={} playback={} tts={}",
+            "beta-runtime ready db={} playback={} tts={} stt={}",
             db_path.display(),
             playback_label,
             tts_label,
+            stt_label,
         ));
         Ok(client)
     }
