@@ -8,6 +8,7 @@ ORT_VERSION       ?= 1.20.1
 
 .PHONY: \
 	bootstrap-beta bootstrap-kokoro bootstrap-ort bootstrap-vosk bootstrap-vosk-lib \
+	_kokoro-hf-cli _kokoro-curl \
 	tui-rs beta-test beta-doctor \
 	setup bootstrap bootstrap-runtime-deps bootstrap-providers \
 	bootstrap-kokoro-python bootstrap-whisper bootstrap-system-deps setup-config \
@@ -23,21 +24,51 @@ bootstrap-beta: bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib
 	@echo ""
 	@echo "Beta providers ready. Run 'make beta-doctor' to verify."
 
+KOKORO_HF_REPO ?= hexgrad/Kokoro-82M
+# Voices to download when using curl fallback (space-separated, without extension).
+KOKORO_VOICES  ?= af af_bella af_sarah am_adam am_michael bf_emma bm_george
+
 # Download Kokoro ONNX model assets and ONNX Runtime library.
-# Requires huggingface-cli (pip install huggingface-hub).
+# Uses huggingface-cli if available, otherwise falls back to plain curl.
 bootstrap-kokoro: bootstrap-ort
-	@echo "Downloading Kokoro ONNX model assets (hexgrad/Kokoro-82M)..."
-	@mkdir -p $(KOKORO_ASSETS_DIR)
-	@command -v huggingface-cli >/dev/null 2>&1 || { \
-		echo "huggingface-cli not found. Install with: pip install huggingface-hub"; exit 1; \
-	}
-	huggingface-cli download hexgrad/Kokoro-82M kokoro.onnx config.json \
+	@echo "Downloading Kokoro ONNX model assets ($(KOKORO_HF_REPO))..."
+	@mkdir -p $(KOKORO_ASSETS_DIR)/voices
+	@if command -v huggingface-cli >/dev/null 2>&1; then \
+		$(MAKE) _kokoro-hf-cli; \
+	else \
+		echo "huggingface-cli not found, falling back to curl..."; \
+		$(MAKE) _kokoro-curl; \
+	fi
+	@echo ""
+	@echo "Kokoro assets ready at $(KOKORO_ASSETS_DIR)/. Run 'make beta-doctor' to verify."
+
+_kokoro-hf-cli:
+	huggingface-cli download $(KOKORO_HF_REPO) kokoro.onnx config.json \
 		--local-dir $(KOKORO_ASSETS_DIR)
-	@echo "Downloading Kokoro voice files..."
-	huggingface-cli download hexgrad/Kokoro-82M \
+	huggingface-cli download $(KOKORO_HF_REPO) \
 		--include "voices/*" --local-dir $(KOKORO_ASSETS_DIR)
-	@echo "Kokoro assets ready at $(KOKORO_ASSETS_DIR)/"
-	@echo "Run 'make beta-doctor' to verify."
+
+_kokoro-curl:
+	@HF="https://huggingface.co/$(KOKORO_HF_REPO)/resolve/main"; \
+	for FILE in kokoro.onnx config.json; do \
+		DEST="$(KOKORO_ASSETS_DIR)/$$FILE"; \
+		if [ -f "$$DEST" ]; then \
+			echo "  $$FILE already present, skipping."; \
+		else \
+			echo "  Downloading $$FILE..."; \
+			curl -fL --progress-bar -o "$$DEST" "$$HF/$$FILE" || { echo "Failed: $$FILE"; exit 1; }; \
+		fi; \
+	done; \
+	for VOICE in $(KOKORO_VOICES); do \
+		DEST="$(KOKORO_ASSETS_DIR)/voices/$$VOICE.bin"; \
+		if [ -f "$$DEST" ]; then \
+			echo "  voices/$$VOICE.bin already present, skipping."; \
+		else \
+			echo "  Downloading voices/$$VOICE.bin..."; \
+			curl -fL --progress-bar -o "$$DEST" "$$HF/voices/$$VOICE.bin" 2>/dev/null \
+				|| { echo "  (voices/$$VOICE.bin not available on HF, skipping)"; rm -f "$$DEST"; }; \
+		fi; \
+	done
 
 # Download ONNX Runtime dynamic library for the current platform.
 bootstrap-ort:
