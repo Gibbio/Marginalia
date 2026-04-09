@@ -1,6 +1,6 @@
 use marginalia_core::frontend::{AppSnapshot, SessionSnapshot};
 use marginalia_core::ports::SpeechSynthesizer;
-use marginalia_runtime::{FakeRuntime, SqliteRuntime};
+use marginalia_runtime::SqliteRuntime;
 use marginalia_tts_kokoro::{
     write_wav_f32, KokoroConfig, KokoroInferenceRequest, KokoroOnnxModel,
     KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig,
@@ -250,7 +250,8 @@ where
 fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         Command::FakePlay { document_path } => {
-            let mut runtime = FakeRuntime::new();
+            let mut runtime = SqliteRuntime::open_in_memory()
+                .map_err(|e| format!("failed to open in-memory runtime: {e}"))?;
             let outcome = runtime.ingest_path(&document_path)?;
             let session = runtime.start_session(&outcome.document.document_id)?;
             let app_snapshot = runtime.app_snapshot();
