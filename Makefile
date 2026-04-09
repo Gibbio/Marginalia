@@ -159,8 +159,9 @@ bootstrap-vosk-lib:
 # Download Whisper ggml model for dictation transcription.
 # Uses ggml-base (multilingual, ~145 MB) from the whisper.cpp HuggingFace repo.
 # Override WHISPER_MODEL_NAME to use a different model (e.g. ggml-small.bin).
-# NOTE: building marginalia-stt-whisper also requires cmake and libclang-dev.
-#       On Debian/Ubuntu: sudo apt-get install -y cmake libclang-dev
+# NOTE: building marginalia-stt-whisper compiles whisper.cpp from source and requires:
+#   macOS:          brew install cmake   (libclang comes with Xcode CLT)
+#   Debian/Ubuntu:  sudo apt-get install -y cmake libclang-dev
 bootstrap-whisper:
 	@echo "Downloading Whisper model ($(WHISPER_MODEL_NAME))..."
 	@mkdir -p $(WHISPER_MODEL_DIR)
@@ -221,8 +222,8 @@ tui-rs:
 	fi; \
 	VOSK_PATH=$(VOSK_LIB_DIR) \
 	MARGINALIA_VOSK_MODEL=$$VOSK_MODEL \
-	LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$LD_LIBRARY_PATH \
-	DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$DYLD_LIBRARY_PATH \
+	LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$LD_LIBRARY_PATH \
+	DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$DYLD_LIBRARY_PATH \
 	MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
 	MARGINALIA_WHISPER_MODEL=$$WHISPER_MODEL \
 	cargo run --manifest-path apps/tui-rs/Cargo.toml \
@@ -289,13 +290,6 @@ bootstrap-kokoro-python:
 	@echo "Setting up Alpha Python Kokoro TTS..."
 	uv venv .venv-kokoro --python 3.12 --seed --clear
 	uv pip install --python .venv-kokoro/bin/python "kokoro>=0.9.4,<1.0" soundfile
-
-bootstrap-whisper:
-	@echo "Cloning and building whisper.cpp..."
-	git clone --depth 1 https://github.com/ggerganov/whisper.cpp .whisper-cpp || true
-	cd .whisper-cpp && make -j
-	cd .whisper-cpp && ./models/download-ggml-model.sh base
-	@echo "whisper.cpp ready."
 
 setup-config:
 	@if [ -f marginalia.toml ]; then \
