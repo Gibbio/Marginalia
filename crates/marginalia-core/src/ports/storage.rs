@@ -26,7 +26,6 @@ impl std::error::Error for StorageError {}
 // ---------------------------------------------------------------------------
 
 pub trait DocumentRepository {
-    fn ensure_schema(&mut self);
     fn save_document(&mut self, document: Document) -> Result<(), StorageError>;
     fn get_document(&self, document_id: &str) -> Option<Document>;
     fn list_documents(&self) -> Vec<Document>;
@@ -37,10 +36,6 @@ impl<T> DocumentRepository for &mut T
 where
     T: DocumentRepository + ?Sized,
 {
-    fn ensure_schema(&mut self) {
-        (**self).ensure_schema();
-    }
-
     fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
         (**self).save_document(document)
     }
@@ -59,7 +54,6 @@ where
 }
 
 pub trait SessionRepository {
-    fn ensure_schema(&mut self);
     fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError>;
     fn get_active_session(&self) -> Option<ReadingSession>;
     fn deactivate_stale_sessions(&mut self, max_inactive_hours: u32) -> u32;
@@ -69,10 +63,6 @@ impl<T> SessionRepository for &mut T
 where
     T: SessionRepository + ?Sized,
 {
-    fn ensure_schema(&mut self) {
-        (**self).ensure_schema();
-    }
-
     fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
         (**self).save_session(session)
     }
@@ -87,7 +77,6 @@ where
 }
 
 pub trait NoteRepository {
-    fn ensure_schema(&mut self);
     fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError>;
     fn list_notes_for_document(&self, document_id: &str) -> Vec<VoiceNote>;
     fn search_notes(&self, query: &SearchQuery) -> Vec<SearchResult>;
@@ -97,10 +86,6 @@ impl<T> NoteRepository for &mut T
 where
     T: NoteRepository + ?Sized,
 {
-    fn ensure_schema(&mut self) {
-        (**self).ensure_schema();
-    }
-
     fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
         (**self).save_note(note)
     }
@@ -115,7 +100,6 @@ where
 }
 
 pub trait RewriteDraftRepository {
-    fn ensure_schema(&mut self);
     fn save_draft(&mut self, draft: RewriteDraft) -> Result<(), StorageError>;
     fn list_drafts_for_document(&self, document_id: &str) -> Vec<RewriteDraft>;
 }
@@ -124,10 +108,6 @@ impl<T> RewriteDraftRepository for &mut T
 where
     T: RewriteDraftRepository + ?Sized,
 {
-    fn ensure_schema(&mut self) {
-        (**self).ensure_schema();
-    }
-
     fn save_draft(&mut self, draft: RewriteDraft) -> Result<(), StorageError> {
         (**self).save_draft(draft)
     }

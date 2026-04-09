@@ -199,7 +199,6 @@ mod tests {
     }
 
     impl DocumentRepository for StubDocumentRepository {
-        fn ensure_schema(&mut self) {}
 
         fn save_document(&mut self, document: crate::domain::Document) -> Result<(), StorageError> {
             self.documents.retain(|existing| existing.document_id != document.document_id);

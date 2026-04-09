@@ -18,7 +18,6 @@ impl InMemoryDocumentRepository {
 }
 
 impl DocumentRepository for InMemoryDocumentRepository {
-    fn ensure_schema(&mut self) {}
 
     fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
         self.documents.insert(document.document_id.clone(), document);
@@ -84,7 +83,6 @@ impl InMemorySessionRepository {
 }
 
 impl SessionRepository for InMemorySessionRepository {
-    fn ensure_schema(&mut self) {}
 
     fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
         self.sessions.insert(session.session_id.clone(), session);
@@ -119,7 +117,6 @@ impl InMemoryNoteRepository {
 }
 
 impl NoteRepository for InMemoryNoteRepository {
-    fn ensure_schema(&mut self) {}
 
     fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
         self.notes.push(note);
@@ -183,7 +180,6 @@ impl InMemoryRewriteDraftRepository {
 }
 
 impl RewriteDraftRepository for InMemoryRewriteDraftRepository {
-    fn ensure_schema(&mut self) {}
 
     fn save_draft(&mut self, draft: RewriteDraft) -> Result<(), StorageError> {
         self.drafts.push(draft);
