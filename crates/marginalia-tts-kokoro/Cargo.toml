@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "Kokoro TTS asset discovery and Beta runtime integration scaffolding"
 
+[features]
+# Hardware-accelerated execution providers for ONNX Runtime.
+# coreml: Apple CoreML (macOS). Auto-enabled by `make tui-rs` on Darwin — included in the standard ORT macOS release.
+# cuda:   NVIDIA CUDA GPU (Linux/Windows). Enable with --features cuda when a CUDA-capable ORT build is available.
+coreml = ["ort/coreml"]
+cuda   = ["ort/cuda"]
+
 [dependencies]
 marginalia-core = { path = "../marginalia-core" }
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-24"] }

@@ -773,7 +773,23 @@ impl KokoroOnnxModel {
         ort::init_from(&runtime_library_path)
             .map_err(KokoroInferenceError::Ort)?
             .commit();
+
         let mut builder = Session::builder().map_err(KokoroInferenceError::Ort)?;
+        // Register hardware execution providers when compiled with the relevant feature.
+        // ORT silently falls back to CPU if the EP is not available in the loaded library.
+        #[cfg(feature = "coreml")]
+        let mut builder = builder
+            .with_execution_providers([
+                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+            ])
+            .map_err(|e| KokoroInferenceError::Ort(e.into()))?;
+        #[cfg(feature = "cuda")]
+        let mut builder = builder
+            .with_execution_providers([
+                ort::execution_providers::CUDAExecutionProvider::default().build(),
+            ])
+            .map_err(|e| KokoroInferenceError::Ort(e.into()))?;
+
         let session = builder
             .commit_from_file(&model_path)
             .map_err(KokoroInferenceError::Ort)?;
