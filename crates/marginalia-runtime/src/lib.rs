@@ -12,7 +12,8 @@ use marginalia_core::frontend::{
     SessionSnapshot,
 };
 use marginalia_core::ports::{
-    CommandRecognizer, PlaybackEngine, SpeechSynthesizer, SynthesisError, SynthesisRequest,
+    CommandRecognizer, PlaybackEngine, SpeechInterruptMonitor, SpeechSynthesizer, SynthesisError,
+    SynthesisRequest,
 };
 use marginalia_core::ports::storage::{
     DocumentRepository, NoteRepository, SessionRepository,
@@ -230,7 +231,7 @@ impl FakeRuntime {
         session.last_command_source = Some("runtime".to_string());
         session.voice = Some("narrator".to_string());
         session.tts_provider = Some(tts_provider);
-        session.command_stt_provider = Some("fake-command-stt".to_string());
+        session.command_stt_provider = Some(self.command_recognizer.describe_capabilities().provider_name);
         session.playback_provider = playback.provider_name.clone();
         session.command_listening_active = true;
         session.command_language = Some("it".to_string());
@@ -412,6 +413,7 @@ impl FakeRuntime {
     pub fn doctor_report(&self) -> serde_json::Value {
         let playback_name = self.playback_engine.describe_capabilities().provider_name;
         let tts_name = self.tts.describe_capabilities().provider_name;
+        let stt_name = self.command_recognizer.describe_capabilities().provider_name;
 
         let mut checks = serde_json::json!({
             "playback": { "ready": true, "command": "beta-runtime" },
@@ -429,13 +431,13 @@ impl FakeRuntime {
         serde_json::json!({
             "providers": {
                 "tts": tts_name,
-                "command_stt": "fake-command-stt",
+                "command_stt": stt_name,
                 "dictation_stt": "fake-dictation",
                 "playback": playback_name,
             },
             "resolved_providers": {
                 "tts": tts_name,
-                "command_stt": "fake-command-stt",
+                "command_stt": stt_name,
                 "dictation_stt": "fake-dictation",
                 "playback": playback_name,
             },
@@ -445,6 +447,10 @@ impl FakeRuntime {
 
     pub fn set_command_recognizer(&mut self, recognizer: impl CommandRecognizer + Send + 'static) {
         self.command_recognizer = Box::new(recognizer);
+    }
+
+    pub fn open_command_monitor(&mut self) -> Box<dyn SpeechInterruptMonitor> {
+        self.command_recognizer.open_interrupt_monitor()
     }
 
     pub fn dictation_transcriber(&self) -> &FakeDictationTranscriber {
@@ -797,7 +803,7 @@ impl SqliteRuntime {
         session.last_command_source = Some("runtime".to_string());
         session.voice = Some("narrator".to_string());
         session.tts_provider = Some(tts_provider);
-        session.command_stt_provider = Some("fake-command-stt".to_string());
+        session.command_stt_provider = Some(self.command_recognizer.describe_capabilities().provider_name);
         session.playback_provider = playback.provider_name.clone();
         session.command_listening_active = true;
         session.command_language = Some("it".to_string());
@@ -979,6 +985,7 @@ impl SqliteRuntime {
     pub fn doctor_report(&self) -> serde_json::Value {
         let playback_name = self.playback_engine.describe_capabilities().provider_name;
         let tts_name = self.tts.describe_capabilities().provider_name;
+        let stt_name = self.command_recognizer.describe_capabilities().provider_name;
 
         let mut checks = serde_json::json!({
             "playback": { "ready": true, "command": "beta-runtime" },
@@ -996,13 +1003,13 @@ impl SqliteRuntime {
         serde_json::json!({
             "providers": {
                 "tts": tts_name,
-                "command_stt": "fake-command-stt",
+                "command_stt": stt_name,
                 "dictation_stt": "fake-dictation",
                 "playback": playback_name,
             },
             "resolved_providers": {
                 "tts": tts_name,
-                "command_stt": "fake-command-stt",
+                "command_stt": stt_name,
                 "dictation_stt": "fake-dictation",
                 "playback": playback_name,
             },
@@ -1012,6 +1019,10 @@ impl SqliteRuntime {
 
     pub fn set_command_recognizer(&mut self, recognizer: impl CommandRecognizer + Send + 'static) {
         self.command_recognizer = Box::new(recognizer);
+    }
+
+    pub fn open_command_monitor(&mut self) -> Box<dyn SpeechInterruptMonitor> {
+        self.command_recognizer.open_interrupt_monitor()
     }
 
     pub fn dictation_transcriber(&self) -> &FakeDictationTranscriber {
