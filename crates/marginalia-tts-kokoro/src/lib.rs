@@ -11,6 +11,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const DEFAULT_MODEL_FILE_CANDIDATES: &[&str] = &[
@@ -450,32 +451,142 @@ pub struct KokoroTextPreparation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KokoroTextProcessor {
     config: KokoroConfig,
+    mode: KokoroTextProcessorMode,
 }
 
 impl KokoroTextProcessor {
     pub fn new(config: KokoroConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            mode: KokoroTextProcessorMode::ExplicitPrefix,
+        }
+    }
+
+    pub fn with_external_command(
+        config: KokoroConfig,
+        command: KokoroExternalPhonemizerConfig,
+    ) -> Self {
+        Self {
+            config,
+            mode: KokoroTextProcessorMode::ExternalCommand(command),
+        }
     }
 
     pub fn prepare_text(
         &self,
         text: &str,
     ) -> Result<KokoroTextPreparation, KokoroTextProcessingError> {
-        let raw = text.trim();
-        let Some((mode, phonemes)) = extract_explicit_phonemes(raw) else {
-            return Err(KokoroTextProcessingError::UnsupportedText(
-                "Kokoro Beta does not yet include grapheme-to-phoneme. Use `phon:` or `ipa:` prefixes."
-                    .to_string(),
-            ));
-        };
+        let phonemization = self.phonemize_text(text)?;
         let tokenization = self
             .config
-            .tokenize_phonemes(phonemes)
+            .tokenize_phonemes(&phonemization.phonemes)
             .map_err(KokoroTextProcessingError::Tokenization)?;
         Ok(KokoroTextPreparation {
             normalized_phonemes: tokenization.normalized_phonemes,
             token_ids: tokenization.token_ids,
-            mode: mode.to_string(),
+            mode: phonemization.mode,
+        })
+    }
+
+    pub fn phonemize_text(
+        &self,
+        text: &str,
+    ) -> Result<KokoroPhonemization, KokoroTextProcessingError> {
+        match &self.mode {
+            KokoroTextProcessorMode::ExplicitPrefix => {
+                let raw = text.trim();
+                let Some((mode, phonemes)) = extract_explicit_phonemes(raw) else {
+                    return Err(KokoroTextProcessingError::UnsupportedText(
+                        "Kokoro Beta does not yet include grapheme-to-phoneme. Use `phon:` or `ipa:` prefixes."
+                            .to_string(),
+                    ));
+                };
+                Ok(KokoroPhonemization {
+                    mode: mode.to_string(),
+                    phonemes: normalize_phoneme_text(phonemes),
+                })
+            }
+            KokoroTextProcessorMode::ExternalCommand(command) => {
+                command.phonemize(text).map_err(KokoroTextProcessingError::ExternalCommand)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KokoroTextProcessorMode {
+    ExplicitPrefix,
+    ExternalCommand(KokoroExternalPhonemizerConfig),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KokoroPhonemization {
+    pub mode: String,
+    pub phonemes: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KokoroExternalPhonemizerConfig {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+impl KokoroExternalPhonemizerConfig {
+    pub fn phonemize(
+        &self,
+        text: &str,
+    ) -> Result<KokoroPhonemization, KokoroExternalPhonemizerError> {
+        let mut child = Command::new(&self.program)
+            .args(&self.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| KokoroExternalPhonemizerError::Io {
+                context: format!("failed to spawn external phonemizer {}", self.program),
+                error,
+            })?;
+
+        if let Some(stdin) = child.stdin.as_mut() {
+            use std::io::Write;
+            if let Err(error) = stdin.write_all(text.as_bytes()).and_then(|_| stdin.flush()) {
+                if error.kind() != std::io::ErrorKind::BrokenPipe {
+                    return Err(KokoroExternalPhonemizerError::Io {
+                        context: format!(
+                            "failed to write to external phonemizer {}",
+                            self.program
+                        ),
+                        error,
+                    });
+                }
+            }
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|error| KokoroExternalPhonemizerError::Io {
+                context: format!("failed to wait for external phonemizer {}", self.program),
+                error,
+            })?;
+
+        if !output.status.success() {
+            return Err(KokoroExternalPhonemizerError::ProcessFailed {
+                status: output.status.code(),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            });
+        }
+
+        let phonemes = String::from_utf8(output.stdout)
+            .map_err(KokoroExternalPhonemizerError::Utf8)?
+            .trim()
+            .to_string();
+        if phonemes.is_empty() {
+            return Err(KokoroExternalPhonemizerError::EmptyOutput);
+        }
+
+        Ok(KokoroPhonemization {
+            mode: "external-command".to_string(),
+            phonemes: normalize_phoneme_text(&phonemes),
         })
     }
 }
@@ -484,6 +595,7 @@ impl KokoroTextProcessor {
 pub enum KokoroTextProcessingError {
     UnsupportedText(String),
     Tokenization(KokoroTokenizationError),
+    ExternalCommand(KokoroExternalPhonemizerError),
 }
 
 impl Display for KokoroTextProcessingError {
@@ -491,11 +603,46 @@ impl Display for KokoroTextProcessingError {
         match self {
             Self::UnsupportedText(message) => f.write_str(message),
             Self::Tokenization(error) => Display::fmt(error, f),
+            Self::ExternalCommand(error) => Display::fmt(error, f),
         }
     }
 }
 
 impl Error for KokoroTextProcessingError {}
+
+#[derive(Debug)]
+pub enum KokoroExternalPhonemizerError {
+    Io { context: String, error: std::io::Error },
+    Utf8(std::string::FromUtf8Error),
+    ProcessFailed { status: Option<i32>, stderr: String },
+    EmptyOutput,
+}
+
+impl Display for KokoroExternalPhonemizerError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io { context, error } => write!(f, "{context}: {error}"),
+            Self::Utf8(error) => Display::fmt(error, f),
+            Self::ProcessFailed { status, stderr } => {
+                write!(
+                    f,
+                    "external phonemizer failed with status {}{}",
+                    status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    if stderr.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(": {stderr}")
+                    }
+                )
+            }
+            Self::EmptyOutput => f.write_str("external phonemizer returned empty output"),
+        }
+    }
+}
+
+impl Error for KokoroExternalPhonemizerError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct KokoroVoiceStyle {
@@ -555,6 +702,14 @@ pub struct KokoroSpeechSynthesizer {
 impl KokoroSpeechSynthesizer {
     pub fn new(config: KokoroConfig, runtime: KokoroSpeechSynthesizerConfig) -> Self {
         let text_processor = KokoroTextProcessor::new(config.clone());
+        Self::with_text_processor(config, runtime, text_processor)
+    }
+
+    pub fn with_text_processor(
+        config: KokoroConfig,
+        runtime: KokoroSpeechSynthesizerConfig,
+        text_processor: KokoroTextProcessor,
+    ) -> Self {
         Self {
             provider_name: "kokoro-beta".to_string(),
             config,
@@ -926,8 +1081,9 @@ fn pad_input_ids(token_ids: &[i64]) -> Vec<i64> {
 mod tests {
     use super::{
         normalize_phoneme_text, pad_input_ids, write_wav_f32, KokoroConfig,
-        KokoroInferenceError, KokoroTextProcessingError, KokoroTextProcessor,
-        KokoroTokenizationError, STYLE_VECTOR_WIDTH,
+        KokoroExternalPhonemizerConfig, KokoroExternalPhonemizerError, KokoroInferenceError,
+        KokoroTextProcessingError, KokoroTextProcessor, KokoroTokenizationError,
+        STYLE_VECTOR_WIDTH,
     };
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1111,6 +1267,59 @@ mod tests {
             }
             other => panic!("unexpected error: {other}"),
         }
+    }
+
+    #[test]
+    fn external_command_phonemizer_can_prepare_text() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.json"), sample_config_json()).unwrap();
+
+        let processor = KokoroTextProcessor::with_external_command(
+            KokoroConfig::from_assets_root(&root),
+            KokoroExternalPhonemizerConfig {
+                program: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), "printf 'h ə l o'".to_string()],
+            },
+        );
+        let prepared = processor.prepare_text("ignored plain text").unwrap();
+
+        assert_eq!(prepared.mode, "external-command");
+        assert_eq!(prepared.normalized_phonemes, "h ə l o");
+        assert_eq!(prepared.token_ids, vec![50, 16, 83, 16, 54, 16, 57]);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn external_command_phonemizer_reports_process_failure() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.json"), sample_config_json()).unwrap();
+
+        let processor = KokoroTextProcessor::with_external_command(
+            KokoroConfig::from_assets_root(&root),
+            KokoroExternalPhonemizerConfig {
+                program: "/bin/sh".to_string(),
+                args: vec![
+                    "-c".to_string(),
+                    "echo boom >&2; exit 4".to_string(),
+                ],
+            },
+        );
+        let error = processor.prepare_text("ignored plain text").unwrap_err();
+
+        match error {
+            KokoroTextProcessingError::ExternalCommand(
+                KokoroExternalPhonemizerError::ProcessFailed { status, stderr },
+            ) => {
+                assert_eq!(status, Some(4));
+                assert_eq!(stderr, "boom");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let _ = fs::remove_dir_all(root);
     }
 
     fn temp_dir() -> std::path::PathBuf {

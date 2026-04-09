@@ -30,3 +30,10 @@ produce token IDs.
 
 The high-level Rust synthesizer currently accepts explicit phoneme-prefixed
 input such as `phon: h ə l o` or `ipa: h ə l o`.
+
+The phonemization boundary is separate from synthesis. Today there are two
+Rust-side options:
+
+- explicit phoneme prefixes for deterministic local testing
+- an external command phonemizer adapter, intended for transitional G2P tools
+  such as Misaki wrappers
