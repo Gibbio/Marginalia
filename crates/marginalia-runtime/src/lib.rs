@@ -106,6 +106,7 @@ pub struct FakeRuntime {
     dictation_transcriber: FakeDictationTranscriber,
     rewrite_generator: FakeRewriteGenerator,
     topic_summarizer: FakeTopicSummarizer,
+    provider_doctor_blobs: HashMap<String, serde_json::Value>,
 }
 
 pub struct SqliteRuntime {
@@ -123,6 +124,7 @@ pub struct SqliteRuntime {
     dictation_transcriber: FakeDictationTranscriber,
     rewrite_generator: FakeRewriteGenerator,
     topic_summarizer: FakeTopicSummarizer,
+    provider_doctor_blobs: HashMap<String, serde_json::Value>,
 }
 
 impl Default for FakeRuntime {
@@ -141,6 +143,7 @@ impl Default for FakeRuntime {
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
+            provider_doctor_blobs: HashMap::new(),
         }
     }
 }
@@ -407,28 +410,36 @@ impl FakeRuntime {
     }
 
     pub fn doctor_report(&self) -> serde_json::Value {
-        let playback_provider = self.playback_engine.describe_capabilities().provider_name;
-        let tts_provider = self.tts.describe_capabilities().provider_name;
+        let playback_name = self.playback_engine.describe_capabilities().provider_name;
+        let tts_name = self.tts.describe_capabilities().provider_name;
+
+        let mut checks = serde_json::json!({
+            "playback": { "ready": true, "command": "beta-runtime" },
+            "kokoro": { "ready": false },
+            "piper": { "ready": false },
+            "vosk": { "ready": false },
+            "whisper_cpp": { "ready": false },
+        });
+        if let Some(map) = checks.as_object_mut() {
+            for (key, blob) in &self.provider_doctor_blobs {
+                map.insert(key.clone(), blob.clone());
+            }
+        }
+
         serde_json::json!({
             "providers": {
-                "tts": tts_provider,
+                "tts": tts_name,
                 "command_stt": "fake-command-stt",
                 "dictation_stt": "fake-dictation",
-                "playback": playback_provider,
+                "playback": playback_name,
             },
             "resolved_providers": {
-                "tts": tts_provider,
+                "tts": tts_name,
                 "command_stt": "fake-command-stt",
                 "dictation_stt": "fake-dictation",
-                "playback": playback_provider,
+                "playback": playback_name,
             },
-            "provider_checks": {
-                "playback": { "ready": true, "command": "beta-runtime" },
-                "kokoro": { "ready": false },
-                "piper": { "ready": false },
-                "vosk": { "ready": false },
-                "whisper_cpp": { "ready": false },
-            }
+            "provider_checks": checks,
         })
     }
 
@@ -677,6 +688,7 @@ impl SqliteRuntime {
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
+            provider_doctor_blobs: HashMap::new(),
         })
     }
 
@@ -706,6 +718,7 @@ impl SqliteRuntime {
             dictation_transcriber: FakeDictationTranscriber::default(),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
+            provider_doctor_blobs: HashMap::new(),
         })
     }
 
@@ -725,6 +738,10 @@ impl SqliteRuntime {
         synthesizer: impl SpeechSynthesizer + Send + 'static,
     ) {
         self.tts = Box::new(synthesizer);
+    }
+
+    pub fn set_provider_doctor_blob(&mut self, key: impl Into<String>, blob: serde_json::Value) {
+        self.provider_doctor_blobs.insert(key.into(), blob);
     }
 
     pub fn database(&self) -> &SQLiteDatabase {
@@ -960,26 +977,36 @@ impl SqliteRuntime {
     }
 
     pub fn doctor_report(&self) -> serde_json::Value {
+        let playback_name = self.playback_engine.describe_capabilities().provider_name;
+        let tts_name = self.tts.describe_capabilities().provider_name;
+
+        let mut checks = serde_json::json!({
+            "playback": { "ready": true, "command": "beta-runtime" },
+            "kokoro": { "ready": false },
+            "piper": { "ready": false },
+            "vosk": { "ready": false },
+            "whisper_cpp": { "ready": false },
+        });
+        if let Some(map) = checks.as_object_mut() {
+            for (key, blob) in &self.provider_doctor_blobs {
+                map.insert(key.clone(), blob.clone());
+            }
+        }
+
         serde_json::json!({
             "providers": {
-                "tts": "fake-tts",
+                "tts": tts_name,
                 "command_stt": "fake-command-stt",
                 "dictation_stt": "fake-dictation",
-                "playback": "fake-playback",
+                "playback": playback_name,
             },
             "resolved_providers": {
-                "tts": "fake-tts",
+                "tts": tts_name,
                 "command_stt": "fake-command-stt",
                 "dictation_stt": "fake-dictation",
-                "playback": "fake-playback",
+                "playback": playback_name,
             },
-            "provider_checks": {
-                "playback": { "ready": true, "command": "beta-runtime" },
-                "kokoro": { "ready": false },
-                "piper": { "ready": false },
-                "vosk": { "ready": false },
-                "whisper_cpp": { "ready": false },
-            }
+            "provider_checks": checks,
         })
     }
 
