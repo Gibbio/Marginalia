@@ -64,32 +64,42 @@ The important architectural documents are:
 
 ## Working In This Repo
 
-For Beta engine work:
+Run the full Rust test suite:
 
 ```bash
-cargo test -p marginalia-core
+cargo test
 ```
 
-For the current Alpha Python environment:
-
-```bash
-make bootstrap
-```
-
-For the full Alpha local runtime with real providers:
-
-```bash
-make setup
-```
-
-To run the current Rust TUI against the Alpha backend:
+Run the Rust TUI (Beta desktop path, no Python required):
 
 ```bash
 make tui-rs
 ```
 
+To enable Kokoro TTS, point `KOKORO_ASSETS_DIR` at a directory
+containing the model, config, voices, and ONNX Runtime library.
+See [`models/tts/kokoro/README.md`](models/tts/kokoro/README.md)
+for the expected layout and download instructions.
+
+```bash
+make tui-rs KOKORO_ASSETS_DIR=.kokoro-assets
+```
+
+Verify that Kokoro assets are correctly installed:
+
+```bash
+make beta-doctor KOKORO_ASSETS_DIR=.kokoro-assets
+```
+
+For the Alpha Python environment (migration reference only):
+
+```bash
+make bootstrap
+make setup
+```
+
 More setup detail lives in
-[`docs/contributing/development-setup.md`](/home/debian/sources/Marginalia/docs/contributing/development-setup.md).
+[`docs/contributing/development-setup.md`](docs/contributing/development-setup.md).
 
 ## Documentation Notes
 
