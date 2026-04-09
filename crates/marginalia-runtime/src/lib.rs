@@ -12,8 +12,8 @@ use marginalia_core::frontend::{
     SessionSnapshot,
 };
 use marginalia_core::ports::{
-    CommandRecognizer, PlaybackEngine, SpeechInterruptMonitor, SpeechSynthesizer, SynthesisError,
-    SynthesisRequest,
+    CommandRecognizer, DictationTranscriber, PlaybackEngine, SpeechInterruptMonitor,
+    SpeechSynthesizer, SynthesisError, SynthesisRequest,
 };
 use marginalia_core::ports::storage::{
     DocumentRepository, NoteRepository, SessionRepository,
@@ -104,7 +104,7 @@ pub struct FakeRuntime {
     playback_engine: Box<dyn PlaybackEngine + Send>,
     tts: Box<dyn SpeechSynthesizer + Send>,
     command_recognizer: Box<dyn CommandRecognizer + Send>,
-    dictation_transcriber: FakeDictationTranscriber,
+    dictation_transcriber: Box<dyn DictationTranscriber + Send>,
     rewrite_generator: FakeRewriteGenerator,
     topic_summarizer: FakeTopicSummarizer,
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
@@ -122,7 +122,7 @@ pub struct SqliteRuntime {
     playback_engine: Box<dyn PlaybackEngine + Send>,
     tts: Box<dyn SpeechSynthesizer + Send>,
     command_recognizer: Box<dyn CommandRecognizer + Send>,
-    dictation_transcriber: FakeDictationTranscriber,
+    dictation_transcriber: Box<dyn DictationTranscriber + Send>,
     rewrite_generator: FakeRewriteGenerator,
     topic_summarizer: FakeTopicSummarizer,
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
@@ -141,7 +141,7 @@ impl Default for FakeRuntime {
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
-            dictation_transcriber: FakeDictationTranscriber::default(),
+            dictation_transcriber: Box::new(FakeDictationTranscriber::default()),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
             provider_doctor_blobs: HashMap::new(),
@@ -414,6 +414,7 @@ impl FakeRuntime {
         let playback_name = self.playback_engine.describe_capabilities().provider_name;
         let tts_name = self.tts.describe_capabilities().provider_name;
         let stt_name = self.command_recognizer.describe_capabilities().provider_name;
+        let dictation_name = self.dictation_transcriber.describe_capabilities().provider_name;
 
         let mut checks = serde_json::json!({
             "playback": { "ready": true, "command": "beta-runtime" },
@@ -432,13 +433,13 @@ impl FakeRuntime {
             "providers": {
                 "tts": tts_name,
                 "command_stt": stt_name,
-                "dictation_stt": "fake-dictation",
+                "dictation_stt": dictation_name,
                 "playback": playback_name,
             },
             "resolved_providers": {
                 "tts": tts_name,
                 "command_stt": stt_name,
-                "dictation_stt": "fake-dictation",
+                "dictation_stt": dictation_name,
                 "playback": playback_name,
             },
             "provider_checks": checks,
@@ -453,8 +454,15 @@ impl FakeRuntime {
         self.command_recognizer.open_interrupt_monitor()
     }
 
-    pub fn dictation_transcriber(&self) -> &FakeDictationTranscriber {
-        &self.dictation_transcriber
+    pub fn set_dictation_transcriber(
+        &mut self,
+        transcriber: impl DictationTranscriber + Send + 'static,
+    ) {
+        self.dictation_transcriber = Box::new(transcriber);
+    }
+
+    pub fn dictation_transcriber(&self) -> &dyn DictationTranscriber {
+        self.dictation_transcriber.as_ref()
     }
 
     pub fn rewrite_generator(&self) -> &FakeRewriteGenerator {
@@ -691,7 +699,7 @@ impl SqliteRuntime {
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
-            dictation_transcriber: FakeDictationTranscriber::default(),
+            dictation_transcriber: Box::new(FakeDictationTranscriber::default()),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
             provider_doctor_blobs: HashMap::new(),
@@ -721,7 +729,7 @@ impl SqliteRuntime {
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
-            dictation_transcriber: FakeDictationTranscriber::default(),
+            dictation_transcriber: Box::new(FakeDictationTranscriber::default()),
             rewrite_generator: FakeRewriteGenerator::new(),
             topic_summarizer: FakeTopicSummarizer::new(),
             provider_doctor_blobs: HashMap::new(),
@@ -986,6 +994,7 @@ impl SqliteRuntime {
         let playback_name = self.playback_engine.describe_capabilities().provider_name;
         let tts_name = self.tts.describe_capabilities().provider_name;
         let stt_name = self.command_recognizer.describe_capabilities().provider_name;
+        let dictation_name = self.dictation_transcriber.describe_capabilities().provider_name;
 
         let mut checks = serde_json::json!({
             "playback": { "ready": true, "command": "beta-runtime" },
@@ -1004,13 +1013,13 @@ impl SqliteRuntime {
             "providers": {
                 "tts": tts_name,
                 "command_stt": stt_name,
-                "dictation_stt": "fake-dictation",
+                "dictation_stt": dictation_name,
                 "playback": playback_name,
             },
             "resolved_providers": {
                 "tts": tts_name,
                 "command_stt": stt_name,
-                "dictation_stt": "fake-dictation",
+                "dictation_stt": dictation_name,
                 "playback": playback_name,
             },
             "provider_checks": checks,
@@ -1025,8 +1034,15 @@ impl SqliteRuntime {
         self.command_recognizer.open_interrupt_monitor()
     }
 
-    pub fn dictation_transcriber(&self) -> &FakeDictationTranscriber {
-        &self.dictation_transcriber
+    pub fn set_dictation_transcriber(
+        &mut self,
+        transcriber: impl DictationTranscriber + Send + 'static,
+    ) {
+        self.dictation_transcriber = Box::new(transcriber);
+    }
+
+    pub fn dictation_transcriber(&self) -> &dyn DictationTranscriber {
+        self.dictation_transcriber.as_ref()
     }
 
     pub fn rewrite_generator(&self) -> &FakeRewriteGenerator {

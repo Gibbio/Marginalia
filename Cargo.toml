@@ -9,11 +9,14 @@ members = [
     "crates/marginalia-runtime",
     "crates/marginalia-storage-sqlite",
     "crates/marginalia-stt-vosk",
+    "crates/marginalia-stt-whisper",
     "crates/marginalia-tts-kokoro",
 ]
 # marginalia-stt-vosk requires libvosk native library at link time.
-# Excluded from default members so `cargo build/test` works without it.
-# Build explicitly with: cargo test -p marginalia-stt-vosk (needs libvosk installed)
+# marginalia-stt-whisper requires whisper.cpp C++ compilation (cmake + clang/gcc).
+# Both are excluded from default members so `cargo build/test` works without native deps.
+# Build explicitly: cargo build -p marginalia-stt-vosk (needs libvosk)
+#                   cargo build -p marginalia-stt-whisper (needs cmake + C++ compiler)
 default-members = [
     "apps/tui-rs",
     "crates/marginalia-core",
