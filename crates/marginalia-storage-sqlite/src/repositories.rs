@@ -37,7 +37,6 @@ impl SQLiteDocumentRepository {
 }
 
 impl DocumentRepository for SQLiteDocumentRepository {
-    fn ensure_schema(&mut self) {}
 
     fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
         let mut conn = self.connection.lock().expect("sqlite connection lock poisoned");
@@ -310,7 +309,6 @@ impl SQLiteSessionRepository {
 }
 
 impl SessionRepository for SQLiteSessionRepository {
-    fn ensure_schema(&mut self) {}
 
     fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");
@@ -516,7 +514,6 @@ impl SQLiteNoteRepository {
 }
 
 impl NoteRepository for SQLiteNoteRepository {
-    fn ensure_schema(&mut self) {}
 
     fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");
@@ -658,7 +655,6 @@ impl SQLiteRewriteDraftRepository {
 }
 
 impl RewriteDraftRepository for SQLiteRewriteDraftRepository {
-    fn ensure_schema(&mut self) {}
 
     fn save_draft(&mut self, draft: RewriteDraft) -> Result<(), StorageError> {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");

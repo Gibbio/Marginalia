@@ -283,7 +283,7 @@ fn split_at_sentences(text: &str, base_offset: usize) -> Vec<(String, usize, usi
 
         let next_index = index + current.len_utf8();
         let next_char = text[next_index..].chars().next();
-        if next_char.is_some() && !next_char.unwrap().is_whitespace() {
+        if next_char.map(|c| !c.is_whitespace()).unwrap_or(false) {
             continue;
         }
 

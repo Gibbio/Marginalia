@@ -208,7 +208,6 @@ mod tests {
     }
 
     impl DocumentRepository for StubDocumentRepository {
-        fn ensure_schema(&mut self) {}
 
         fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
             self.documents.push(document);
@@ -237,7 +236,6 @@ mod tests {
     }
 
     impl SessionRepository for StubSessionRepository {
-        fn ensure_schema(&mut self) {}
 
         fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
             self.saved_session = Some(session.clone());
@@ -259,7 +257,6 @@ mod tests {
     }
 
     impl NoteRepository for StubNoteRepository {
-        fn ensure_schema(&mut self) {}
 
         fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
             self.notes.push(note);
@@ -282,7 +279,6 @@ mod tests {
     struct StubDraftRepository;
 
     impl RewriteDraftRepository for StubDraftRepository {
-        fn ensure_schema(&mut self) {}
 
         fn save_draft(&mut self, _draft: RewriteDraft) -> Result<(), StorageError> {
             Ok(())
