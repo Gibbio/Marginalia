@@ -1,126 +1,89 @@
 # Marginalia Rust TUI
 
-This is the Rust TUI frontend for Marginalia.
+This is the Rust TUI frontend for Marginalia, built with ratatui.
 
-In the Beta plan it is retained as a desktop development and administration
-tool. It is not assumed to be the final consumer desktop shell, but it remains
-an important Rust host during the migration away from the Alpha Python-centered
-runtime model.
-
-It can currently run in two modes:
-
-- Beta development mode, now the default on the `beta` branch: talks directly
-  to the Rust `SqliteRuntime`
-- Alpha compatibility mode: talks to the Python backend over `stdio` using the
-  frontend contract exposed by `marginalia_backend serve-stdio`
-
-In the normal Beta build, only the Rust mode is compiled. The Python bridge is
-available only if you build the TUI with `--features alpha-compat`.
-
-In Beta mode the TUI now talks to the embedded frontend gateway exposed by
-`marginalia-runtime`, not to a TUI-local command adapter.
-
-During Beta migration, the Rust mode is the preferred path for local engine
-work, while the Python transport remains available as a compatibility bridge.
+In the Beta plan it is retained as the desktop development and
+administration tool while the shared Rust engine matures. It talks
+directly to the embedded `SqliteRuntime` — no Python process is
+involved.
 
 ## Run
 
-From the repository root, the TUI now starts in Beta mode by default:
-
 ```bash
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
-To be explicit about Beta mode:
+or via Make:
 
 ```bash
-MARGINALIA_TUI_BACKEND=beta \
+make tui-rs
+```
+
+On startup the TUI shows a loading screen while the runtime
+initialises, then fetches the doctor report and surfaces any provider
+issues in the `Log` pane.
+
+## Providers
+
+### Playback
+
+`HostPlaybackEngine` is active by default. It auto-detects `afplay`
+(macOS), `aplay` (Linux), or `ffplay` and plays synthesised WAV files
+via a subprocess.
+
+To disable playback (CI, headless environments):
+
+```bash
+MARGINALIA_TUI_PLAYBACK=fake cargo run --manifest-path apps/tui-rs/Cargo.toml
+```
+
+### TTS — Kokoro
+
+Kokoro TTS is activated when `MARGINALIA_KOKORO_ASSETS` points at a
+directory containing the model, config, voices, and ONNX Runtime
+library. See [`models/tts/kokoro/README.md`](../../models/tts/kokoro/README.md)
+for the expected layout and download instructions.
+
+```bash
+MARGINALIA_KOKORO_ASSETS=.kokoro-assets \
 cargo run --manifest-path apps/tui-rs/Cargo.toml
 ```
 
-By default the Beta mode stores its SQLite state in `.marginalia-beta.sqlite3`
-at the repository root. To choose a different database path:
+If `MARGINALIA_KOKORO_ASSETS` is not set, or the assets directory is
+incomplete, the TUI falls back to a silent fake TTS and logs a warning
+in the `Log` pane. The session still starts; no audio is produced.
 
-```bash
-MARGINALIA_TUI_BACKEND=beta \
-MARGINALIA_TUI_BETA_DB=/tmp/marginalia-beta.sqlite3 \
-cargo run --manifest-path apps/tui-rs/Cargo.toml
-```
+Synthesised WAV files are written to `.marginalia-tts-cache/` next to
+the database by default. Override with `MARGINALIA_TUI_TTS_DIR`.
 
-To try desktop host playback instead of the in-memory fake playback engine:
+## Environment variables
 
-```bash
-MARGINALIA_TUI_BACKEND=beta \
-MARGINALIA_TUI_PLAYBACK=host \
-cargo run --manifest-path apps/tui-rs/Cargo.toml
-```
-
-The current host playback adapter auto-detects `afplay`, `aplay`, or `ffplay`
-when available.
-
-If you still need the Alpha Python bridge, enable the feature first:
-
-```bash
-cargo run --manifest-path apps/tui-rs/Cargo.toml --features alpha-compat
-```
-
-Then, if needed, point it at a specific Python interpreter or repo root:
-
-```bash
-MARGINALIA_TUI_BACKEND=python \
-MARGINALIA_BACKEND_PYTHON=/path/to/.venv/bin/python \
-MARGINALIA_REPO_ROOT=/path/to/Marginalia \
-cargo run --manifest-path apps/tui-rs/Cargo.toml --features alpha-compat
-```
-
-If `marginalia.toml` exists, export it before launch:
-
-```bash
-MARGINALIA_TUI_BACKEND=python \
-MARGINALIA_CONFIG=marginalia.toml \
-cargo run --manifest-path apps/tui-rs/Cargo.toml --features alpha-compat
-```
-
-The TUI also appends its own client-side logs to `marginalia-tui.log` in the
-current working directory. To choose a different path:
-
-```bash
-MARGINALIA_TUI_LOG_FILE=/tmp/marginalia-tui.log \
-cargo run --manifest-path apps/tui-rs/Cargo.toml
-```
-
-On startup the TUI now shows a lightweight loading screen while the selected
-backend initializes. As soon as the backend is ready, the TUI fetches the
-doctor report and surfaces provider fallbacks or missing tooling in the `Log`
-pane.
+| Variable | Default | Description |
+|---|---|---|
+| `MARGINALIA_KOKORO_ASSETS` | _(unset = fake TTS)_ | Path to Kokoro model assets directory |
+| `MARGINALIA_TUI_TTS_DIR` | `<db_dir>/.marginalia-tts-cache/` | Directory for synthesised WAV files |
+| `MARGINALIA_TUI_PLAYBACK` | `host` | Set to `fake` for headless/CI |
+| `MARGINALIA_TUI_BETA_DB` | `.marginalia-beta.sqlite3` | SQLite database path |
+| `MARGINALIA_REPO_ROOT` | current directory | Repository root for relative paths |
+| `MARGINALIA_TUI_LOG_FILE` | `marginalia-tui.log` | Client-side log file path |
 
 ## Interaction
 
 Command bar:
 
 - `Tab` completes the selected suggestion
-- `Enter` confirms the selected suggestion, then runs the command once the
-  input is complete
+- `Enter` confirms the selected suggestion, then runs the command
 - `Up` and `Down` navigate suggestions while typing
 - `Ctrl-P` and `Ctrl-N` navigate command history
 - `Ctrl-C` must be pressed twice within 2 seconds to quit
 
-Session navigation:
+Session navigation (with an empty command bar):
 
-- with an empty command bar, `Up` triggers `previous_chunk`
-- with an empty command bar, `Down` triggers `next_chunk`
-- with an empty command bar, `Left` triggers `previous_chapter`
-- with an empty command bar, `Right` triggers `next_chapter`
-- with an empty command bar, `PageUp` and `PageDown` scroll the `Document` pane
-- with an empty command bar, `Home` jumps to the top of the `Document` pane
-- with an empty command bar, `End` jumps to the bottom of the `Document` pane
+- `Up` / `Down` — previous / next chunk
+- `Left` / `Right` — previous / next chapter
+- `PageUp` / `PageDown` — scroll the Document pane
+- `Home` / `End` — jump to top / bottom of the Document pane
 
-`/ingest` accepts markdown and plain text files. In the current TUI it also:
-
-- expands shell-like paths such as `~/notes/book.md` or `$HOME/notes/book.txt`
-- suggests `.md`, `.markdown`, and `.txt` files from the directory you are
-  currently typing
-- updates the `Document` pane immediately after a successful import
-
-The `Document` pane now renders the full document outline and auto-follows the
-active chunk while keeping the backend timing logs visible in the `Log` pane.
+`/ingest` accepts markdown and plain text files. It expands
+shell-like paths (`~/notes/book.md`, `$HOME/...`) and suggests
+`.md`, `.markdown`, and `.txt` files as you type.
