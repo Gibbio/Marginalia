@@ -1,5 +1,6 @@
 mod app;
 mod backend;
+mod config;
 mod logger;
 
 use app::App;

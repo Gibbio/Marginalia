@@ -1,11 +1,11 @@
-KOKORO_ASSETS_DIR  ?= .kokoro-assets
+KOKORO_ASSETS_DIR  ?= models/tts/kokoro
 VOSK_MODEL_URL     ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
 VOSK_MODEL_NAME    ?= vosk-model-small-it-0.22
-MODELS_DIR         ?= .models
+MODELS_DIR         ?= models/stt
 VOSK_LIB_VERSION   ?= 0.3.45
-VOSK_LIB_DIR       ?= .vosk-lib
+VOSK_LIB_DIR       ?= models/stt/vosk
 ORT_VERSION        ?= 1.20.1
-WHISPER_MODEL_DIR  ?= .models/whisper
+WHISPER_MODEL_DIR  ?= models/stt/whisper
 WHISPER_MODEL_NAME ?= ggml-base.bin
 WHISPER_MODEL_URL  ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(WHISPER_MODEL_NAME)
 
@@ -226,11 +226,8 @@ tui-rs:
 		if [ "$$OS" = "Darwin" ]; then _add kokoro-coreml; echo "  accel:     kokoro → CoreML"; fi; \
 	fi; \
 	VOSK_PATH=$(VOSK_LIB_DIR) \
-	MARGINALIA_VOSK_MODEL=$$VOSK_MODEL \
 	LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$LD_LIBRARY_PATH \
 	DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$DYLD_LIBRARY_PATH \
-	MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
-	MARGINALIA_WHISPER_MODEL=$$WHISPER_MODEL \
 	cargo run --manifest-path apps/tui-rs/Cargo.toml \
 		$$([ -n "$$FEATURES" ] && echo "--features $$FEATURES")
 
@@ -317,7 +314,7 @@ setup-config:
 	allow_fallback = true
 
 	[vosk]
-	model_path = "$$ROOT_DIR/.models/vosk/$(VOSK_MODEL_NAME)"
+	model_path = "$$ROOT_DIR/models/stt/vosk/$(VOSK_MODEL_NAME)"
 	sample_rate = 16000
 	timeout_seconds = 4.0
 
