@@ -572,6 +572,31 @@ impl App {
         self.run_shortcut_command(BackendClient::next_chapter);
     }
 
+    pub fn poll_voice_command(&mut self) -> Option<String> {
+        self.backend.poll_voice_command()
+    }
+
+    pub fn handle_voice_command(&mut self, cmd: &str) {
+        // Only act when a session is active and command listening is enabled.
+        let listening = self
+            .session_snapshot
+            .as_ref()
+            .map(|s| s.command_listening_active)
+            .unwrap_or(false);
+        if !listening {
+            return;
+        }
+        match cmd {
+            "pausa" | "pause" => self.run_shortcut_command(BackendClient::pause_session),
+            "avanti" | "next" => self.navigate_next_chunk(),
+            "indietro" | "back" => self.navigate_previous_chunk(),
+            "stop" => self.run_shortcut_command(BackendClient::stop_session),
+            "ripeti" | "repeat" => self.run_shortcut_command(BackendClient::repeat_chunk),
+            "riprendi" | "resume" => self.run_shortcut_command(BackendClient::resume_session),
+            _ => {}
+        }
+    }
+
     pub fn scroll_document_up(&mut self, amount: u16) {
         self.document_scroll = self.document_scroll.saturating_sub(amount);
     }

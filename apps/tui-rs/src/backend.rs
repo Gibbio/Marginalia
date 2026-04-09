@@ -222,12 +222,18 @@ impl BackendClient {
         let Self::Beta(client) = self;
         client.recent_stderr_entries(after_sequence)
     }
+
+    pub fn poll_voice_command(&mut self) -> Option<String> {
+        let Self::Beta(client) = self;
+        client.poll_voice_command()
+    }
 }
 
 pub(crate) struct BetaBackendClient {
     runtime: SqliteRuntime,
     logs: VecDeque<BackendLogEntry>,
     sequence: u64,
+    voice_cmd_rx: Option<std::sync::mpsc::Receiver<String>>,
 }
 
 impl BetaBackendClient {
@@ -310,10 +316,30 @@ impl BetaBackendClient {
             stt_label = "vosk";
         }
 
+        // Voice command monitor — open and run in background thread.
+        // The monitor is independent from the runtime after creation (owns its own audio stream).
+        // Thread exits automatically when voice_cmd_rx is dropped (tx.send fails).
+        let voice_cmd_rx = {
+            let mut monitor = runtime.open_command_monitor();
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            std::thread::spawn(move || {
+                loop {
+                    let capture = monitor.capture_next_interrupt(Some(2.0));
+                    if let Some(cmd) = capture.recognized_command {
+                        if tx.send(cmd).is_err() {
+                            break;
+                        }
+                    }
+                }
+            });
+            Some(rx)
+        };
+
         let mut client = Self {
             runtime,
             logs: VecDeque::with_capacity(256),
             sequence: 0,
+            voice_cmd_rx,
         };
         client.push_log(format!(
             "beta-runtime ready db={} playback={} tts={} stt={}",
@@ -323,6 +349,10 @@ impl BetaBackendClient {
             stt_label,
         ));
         Ok(client)
+    }
+
+    pub fn poll_voice_command(&mut self) -> Option<String> {
+        self.voice_cmd_rx.as_ref()?.try_recv().ok()
     }
 
     fn get_app_snapshot(&mut self) -> Result<AppSnapshot, String> {

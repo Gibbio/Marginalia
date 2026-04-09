@@ -140,6 +140,11 @@ fn run_tui(
 
         app.flush_pending_play();
 
+        if let Some(cmd) = app.poll_voice_command() {
+            logger.info(format!("voice-command received: {cmd}"));
+            app.handle_voice_command(&cmd);
+        }
+
         if event::poll(Duration::from_millis(100))
             .map_err(|err| log_error(logger, format!("Unable to poll terminal events: {err}")))?
         {

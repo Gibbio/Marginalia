@@ -41,7 +41,7 @@ pub struct SpeechInterruptCapture {
     pub sample_rate: Option<u32>,
 }
 
-pub trait SpeechInterruptMonitor {
+pub trait SpeechInterruptMonitor: Send {
     fn capture_next_interrupt(
         &mut self,
         timeout_seconds: Option<f64>,
