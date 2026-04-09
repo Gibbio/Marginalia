@@ -12,6 +12,14 @@ use std::process::ExitCode;
 enum Command {
     FakePlay { document_path: PathBuf },
     KokoroDoctor { assets_root: PathBuf },
+    KokoroEncodePhonemes { assets_root: PathBuf, phonemes: String },
+    KokoroRunPhonemes {
+        assets_root: PathBuf,
+        voice: String,
+        output_path: PathBuf,
+        phonemes: String,
+        speed: f32,
+    },
     KokoroRunTokens {
         assets_root: PathBuf,
         voice: String,
@@ -70,6 +78,51 @@ where
         [command, assets_root] if command == "kokoro-doctor" => Ok(Command::KokoroDoctor {
             assets_root: PathBuf::from(assets_root),
         }),
+        [command, phonemes] if command == "kokoro-encode-phonemes" => {
+            Ok(Command::KokoroEncodePhonemes {
+                assets_root: PathBuf::from("models/tts/kokoro"),
+                phonemes: phonemes.to_string(),
+            })
+        }
+        [command, assets_root, phonemes] if command == "kokoro-encode-phonemes" => {
+            Ok(Command::KokoroEncodePhonemes {
+                assets_root: PathBuf::from(assets_root),
+                phonemes: phonemes.to_string(),
+            })
+        }
+        [command, voice, output_path, phonemes] if command == "kokoro-run-phonemes" => {
+            Ok(Command::KokoroRunPhonemes {
+                assets_root: PathBuf::from("models/tts/kokoro"),
+                voice: voice.to_string(),
+                output_path: PathBuf::from(output_path),
+                phonemes: phonemes.to_string(),
+                speed: 1.0,
+            })
+        }
+        [command, assets_root, voice, output_path, phonemes]
+            if command == "kokoro-run-phonemes" =>
+        {
+            Ok(Command::KokoroRunPhonemes {
+                assets_root: PathBuf::from(assets_root),
+                voice: voice.to_string(),
+                output_path: PathBuf::from(output_path),
+                phonemes: phonemes.to_string(),
+                speed: 1.0,
+            })
+        }
+        [command, assets_root, voice, output_path, phonemes, speed]
+            if command == "kokoro-run-phonemes" =>
+        {
+            Ok(Command::KokoroRunPhonemes {
+                assets_root: PathBuf::from(assets_root),
+                voice: voice.to_string(),
+                output_path: PathBuf::from(output_path),
+                phonemes: phonemes.to_string(),
+                speed: speed
+                    .parse::<f32>()
+                    .map_err(|_| "invalid speed".to_string())?,
+            })
+        }
         [command, voice, output_path, token_ids] if command == "kokoro-run-tokens" => {
             Ok(Command::KokoroRunTokens {
                 assets_root: PathBuf::from("models/tts/kokoro"),
@@ -219,6 +272,15 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap_or_else(|| "-".to_string())
             );
             println!(
+                "provider.config_path={}",
+                report
+                    .readiness
+                    .config_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            );
+            println!(
                 "provider.voice_path={}",
                 report
                     .readiness
@@ -267,6 +329,53 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
                     println!("provider.missing[{index}]={item}");
                 }
             }
+            Ok(())
+        }
+        Command::KokoroEncodePhonemes { assets_root, phonemes } => {
+            let config = KokoroConfig::from_assets_root(&assets_root);
+            let tokenization = config.tokenize_phonemes(&phonemes)?;
+
+            println!("provider=kokoro-beta");
+            println!("normalized_phonemes={}", tokenization.normalized_phonemes);
+            println!(
+                "token_ids={}",
+                tokenization
+                    .token_ids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            println!("token_count={}", tokenization.token_ids.len());
+            Ok(())
+        }
+        Command::KokoroRunPhonemes {
+            assets_root,
+            voice,
+            output_path,
+            phonemes,
+            speed,
+        } => {
+            let config = KokoroConfig::from_assets_root(&assets_root);
+            let mut model = KokoroOnnxModel::load(config)?;
+            let result = model.infer_phonemes(&phonemes, Some(voice), speed)?;
+            write_wav_f32(&output_path, result.sample_rate_hz, &result.audio)?;
+
+            println!("provider=kokoro-beta");
+            println!("output_path={}", output_path.display());
+            println!("voice={}", result.voice);
+            println!("sample_rate_hz={}", result.sample_rate_hz);
+            println!("input_token_count={}", result.input_token_count);
+            println!("audio_sample_count={}", result.audio.len());
+            println!(
+                "output_shape={}",
+                result
+                    .output_shape
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
             Ok(())
         }
         Command::KokoroRunTokens {
@@ -516,6 +625,8 @@ fn usage() -> &'static str {
     "Usage:
   cargo run -p marginalia-devtools -- fake-play <document>
   cargo run -p marginalia-devtools -- kokoro-doctor [assets_root]
+  cargo run -p marginalia-devtools -- kokoro-encode-phonemes [assets_root] <phoneme_text>
+  cargo run -p marginalia-devtools -- kokoro-run-phonemes [assets_root] <voice> <output_wav> <phoneme_text> [speed]
   cargo run -p marginalia-devtools -- kokoro-run-tokens [assets_root] <voice> <output_wav> <token_ids_csv> [speed]
   cargo run -p marginalia-devtools -- sqlite-ingest <db> <document>
   cargo run -p marginalia-devtools -- sqlite-list-documents <db>
@@ -577,6 +688,39 @@ mod tests {
                 voice: "af".to_string(),
                 output_path: PathBuf::from("/tmp/out.wav"),
                 token_ids: vec![10, 20, 30],
+                speed: 1.0,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_args_accepts_kokoro_encode_phonemes() {
+        let command = parse_args(["kokoro-encode-phonemes", "h ə l o"]).unwrap();
+        assert_eq!(
+            command,
+            Command::KokoroEncodePhonemes {
+                assets_root: PathBuf::from("models/tts/kokoro"),
+                phonemes: "h ə l o".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_args_accepts_kokoro_run_phonemes() {
+        let command = parse_args([
+            "kokoro-run-phonemes",
+            "af",
+            "/tmp/out.wav",
+            "h ə l o",
+        ])
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::KokoroRunPhonemes {
+                assets_root: PathBuf::from("models/tts/kokoro"),
+                voice: "af".to_string(),
+                output_path: PathBuf::from("/tmp/out.wav"),
+                phonemes: "h ə l o".to_string(),
                 speed: 1.0,
             }
         );

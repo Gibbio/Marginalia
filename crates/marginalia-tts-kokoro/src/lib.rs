@@ -1,6 +1,8 @@
 use marginalia_core::ports::{ProviderCapabilities, ProviderExecutionMode};
 use ort::session::Session;
 use ort::value::Tensor;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -12,6 +14,7 @@ const DEFAULT_MODEL_FILE_CANDIDATES: &[&str] = &[
     "model.onnx",
     "kokoro-v1.0.onnx",
 ];
+const DEFAULT_CONFIG_FILE_CANDIDATES: &[&str] = &["config.json", "kokoro.config.json"];
 const DEFAULT_ONNX_RUNTIME_CANDIDATES: &[&str] = &[
     "libonnxruntime.so",
     "libonnxruntime.so.1",
@@ -35,6 +38,7 @@ const KOKORO_MAX_TOKEN_COUNT: usize = 510;
 pub struct KokoroConfig {
     pub assets_root: PathBuf,
     pub model_file_candidates: Vec<String>,
+    pub config_file_candidates: Vec<String>,
     pub onnx_runtime_candidates: Vec<String>,
     pub default_voice: String,
     pub default_language: String,
@@ -46,6 +50,10 @@ impl KokoroConfig {
         Self {
             assets_root: path.as_ref().to_path_buf(),
             model_file_candidates: DEFAULT_MODEL_FILE_CANDIDATES
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            config_file_candidates: DEFAULT_CONFIG_FILE_CANDIDATES
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
@@ -61,6 +69,13 @@ impl KokoroConfig {
 
     pub fn resolve_model_path(&self) -> Option<PathBuf> {
         self.model_file_candidates
+            .iter()
+            .map(|candidate| self.assets_root.join(candidate))
+            .find(|path| path.exists())
+    }
+
+    pub fn resolve_config_path(&self) -> Option<PathBuf> {
+        self.config_file_candidates
             .iter()
             .map(|candidate| self.assets_root.join(candidate))
             .find(|path| path.exists())
@@ -103,12 +118,19 @@ impl KokoroConfig {
 
     pub fn readiness_report(&self) -> KokoroReadinessReport {
         let model_path = self.resolve_model_path();
+        let config_path = self.resolve_config_path();
         let voice_path = self.resolve_voice_path();
         let mut missing = Vec::new();
         if model_path.is_none() {
             missing.push(format!(
                 "missing model file ({})",
                 self.model_file_candidates.join(", ")
+            ));
+        }
+        if config_path.is_none() {
+            missing.push(format!(
+                "missing config file ({})",
+                self.config_file_candidates.join(", ")
             ));
         }
         if voice_path.is_none() {
@@ -122,6 +144,7 @@ impl KokoroConfig {
         KokoroReadinessReport {
             assets_root: self.assets_root.clone(),
             model_path,
+            config_path,
             voice_path,
             default_voice: self.default_voice.clone(),
             default_language: self.default_language.clone(),
@@ -205,6 +228,51 @@ impl KokoroConfig {
         }
     }
 
+    pub fn load_vocabulary(&self) -> Result<KokoroVocabulary, KokoroTokenizationError> {
+        let config_path = self
+            .resolve_config_path()
+            .ok_or_else(|| KokoroTokenizationError::MissingConfigAsset {
+                searched: self.config_file_candidates.clone(),
+            })?;
+        let raw = fs::read_to_string(&config_path).map_err(|error| KokoroTokenizationError::Io {
+            context: format!("failed to read config file {}", config_path.display()),
+            error,
+        })?;
+        let document: Value =
+            serde_json::from_str(&raw).map_err(KokoroTokenizationError::ConfigParse)?;
+        let vocab = document
+            .get("vocab")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                KokoroTokenizationError::InvalidConfig(
+                    "config.json does not contain a vocab object".to_string(),
+                )
+            })?;
+
+        let mut symbol_to_token = HashMap::new();
+        for (symbol, value) in vocab {
+            let token_id = value.as_i64().ok_or_else(|| {
+                KokoroTokenizationError::InvalidConfig(format!(
+                    "vocab entry for {symbol:?} is not an integer"
+                ))
+            })?;
+            symbol_to_token.insert(symbol.clone(), token_id);
+        }
+
+        Ok(KokoroVocabulary {
+            config_path,
+            symbol_to_token,
+        })
+    }
+
+    pub fn tokenize_phonemes(
+        &self,
+        phonemes: &str,
+    ) -> Result<KokoroTokenizationResult, KokoroTokenizationError> {
+        let vocabulary = self.load_vocabulary()?;
+        vocabulary.encode_phonemes(phonemes)
+    }
+
     pub fn load_voice_style(
         &self,
         voice: Option<&str>,
@@ -267,6 +335,7 @@ impl KokoroConfig {
 pub struct KokoroReadinessReport {
     pub assets_root: PathBuf,
     pub model_path: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
     pub voice_path: Option<PathBuf>,
     pub default_voice: String,
     pub default_language: String,
@@ -321,6 +390,50 @@ impl KokoroDoctorReport {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KokoroVocabulary {
+    pub config_path: PathBuf,
+    pub symbol_to_token: HashMap<String, i64>,
+}
+
+impl KokoroVocabulary {
+    pub fn encode_phonemes(
+        &self,
+        phonemes: &str,
+    ) -> Result<KokoroTokenizationResult, KokoroTokenizationError> {
+        let normalized = normalize_phoneme_text(phonemes);
+        let mut token_ids = Vec::with_capacity(normalized.chars().count());
+        let mut unknown_symbols = Vec::new();
+
+        for symbol in normalized.chars() {
+            let symbol = symbol.to_string();
+            if let Some(token_id) = self.symbol_to_token.get(&symbol) {
+                token_ids.push(*token_id);
+            } else {
+                unknown_symbols.push(symbol);
+            }
+        }
+
+        if !unknown_symbols.is_empty() {
+            return Err(KokoroTokenizationError::UnknownSymbols {
+                normalized_phonemes: normalized,
+                unknown_symbols,
+            });
+        }
+
+        Ok(KokoroTokenizationResult {
+            normalized_phonemes: normalized,
+            token_ids,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KokoroTokenizationResult {
+    pub normalized_phonemes: String,
+    pub token_ids: Vec<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct KokoroVoiceStyle {
     pub voice: String,
@@ -352,6 +465,36 @@ pub struct KokoroOnnxModel {
     session: Session,
 }
 
+#[derive(Debug)]
+pub enum KokoroTokenizationError {
+    MissingConfigAsset { searched: Vec<String> },
+    InvalidConfig(String),
+    UnknownSymbols {
+        normalized_phonemes: String,
+        unknown_symbols: Vec<String>,
+    },
+    Io { context: String, error: std::io::Error },
+    ConfigParse(serde_json::Error),
+}
+
+impl Display for KokoroTokenizationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingConfigAsset { searched } => {
+                write!(f, "missing config asset ({})", searched.join(", "))
+            }
+            Self::InvalidConfig(message) => f.write_str(message),
+            Self::UnknownSymbols {
+                unknown_symbols, ..
+            } => write!(f, "unsupported phoneme symbols: {}", unknown_symbols.join(", ")),
+            Self::Io { context, error } => write!(f, "{context}: {error}"),
+            Self::ConfigParse(error) => Display::fmt(error, f),
+        }
+    }
+}
+
+impl Error for KokoroTokenizationError {}
+
 impl KokoroOnnxModel {
     pub fn load(config: KokoroConfig) -> Result<Self, KokoroInferenceError> {
         let model_path = config
@@ -374,6 +517,23 @@ impl KokoroOnnxModel {
             .map_err(KokoroInferenceError::Ort)?;
 
         Ok(Self { config, session })
+    }
+
+    pub fn infer_phonemes(
+        &mut self,
+        phonemes: &str,
+        voice: Option<String>,
+        speed: f32,
+    ) -> Result<KokoroInferenceResult, KokoroInferenceError> {
+        let tokenization = self
+            .config
+            .tokenize_phonemes(phonemes)
+            .map_err(KokoroInferenceError::Tokenization)?;
+        self.infer(KokoroInferenceRequest {
+            token_ids: tokenization.token_ids,
+            voice,
+            speed,
+        })
     }
 
     pub fn infer(
@@ -436,6 +596,7 @@ pub enum KokoroInferenceError {
     InvalidVoiceData(String),
     InvalidTokens(String),
     InvalidSpeed(String),
+    Tokenization(KokoroTokenizationError),
     Io { context: String, error: std::io::Error },
     Ort(ort::Error),
 }
@@ -459,6 +620,7 @@ impl Display for KokoroInferenceError {
             Self::InvalidVoiceData(message) => f.write_str(message),
             Self::InvalidTokens(message) => f.write_str(message),
             Self::InvalidSpeed(message) => f.write_str(message),
+            Self::Tokenization(error) => Display::fmt(error, f),
             Self::Io { context, error } => write!(f, "{context}: {error}"),
             Self::Ort(error) => Display::fmt(error, f),
         }
@@ -501,6 +663,24 @@ pub fn write_wav_f32(
     fs::write(path, bytes)
 }
 
+fn normalize_phoneme_text(input: &str) -> String {
+    let mut normalized = String::with_capacity(input.len());
+    let mut previous_was_space = false;
+    for ch in input.chars() {
+        let mapped = if ch.is_whitespace() { ' ' } else { ch };
+        if mapped == ' ' {
+            if !previous_was_space && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            previous_was_space = true;
+        } else {
+            normalized.push(mapped);
+            previous_was_space = false;
+        }
+    }
+    normalized.trim().to_string()
+}
+
 fn pad_input_ids(token_ids: &[i64]) -> Vec<i64> {
     let mut padded = Vec::with_capacity(token_ids.len() + 2);
     padded.push(0);
@@ -512,7 +692,8 @@ fn pad_input_ids(token_ids: &[i64]) -> Vec<i64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        pad_input_ids, write_wav_f32, KokoroConfig, KokoroInferenceError, STYLE_VECTOR_WIDTH,
+        normalize_phoneme_text, pad_input_ids, write_wav_f32, KokoroConfig,
+        KokoroInferenceError, KokoroTokenizationError, STYLE_VECTOR_WIDTH,
     };
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -527,7 +708,7 @@ mod tests {
         let report = KokoroConfig::from_assets_root(&root).readiness_report();
 
         assert!(!report.is_ready());
-        assert_eq!(report.missing.len(), 2);
+        assert_eq!(report.missing.len(), 3);
 
         let _ = fs::remove_dir_all(root);
     }
@@ -537,6 +718,7 @@ mod tests {
         let root = temp_dir();
         fs::create_dir_all(root.join("voices")).unwrap();
         fs::write(root.join("kokoro.onnx"), b"onnx").unwrap();
+        fs::write(root.join("config.json"), sample_config_json()).unwrap();
         fs::write(root.join("voices").join("af.bin"), vec![0_u8; STYLE_VECTOR_WIDTH * 8]).unwrap();
 
         let report = KokoroConfig::from_assets_root(&root).readiness_report();
@@ -629,6 +811,45 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[test]
+    fn tokenize_phonemes_uses_vocab_from_config() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.json"), sample_config_json()).unwrap();
+
+        let config = KokoroConfig::from_assets_root(&root);
+        let tokenization = config.tokenize_phonemes("h ə l o").unwrap();
+
+        assert_eq!(tokenization.normalized_phonemes, "h ə l o");
+        assert_eq!(tokenization.token_ids, vec![50, 16, 83, 16, 54, 16, 57]);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn tokenize_phonemes_reports_unknown_symbols() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.json"), sample_config_json()).unwrap();
+
+        let config = KokoroConfig::from_assets_root(&root);
+        let error = config.tokenize_phonemes("h λ").unwrap_err();
+
+        match error {
+            KokoroTokenizationError::UnknownSymbols { unknown_symbols, .. } => {
+                assert_eq!(unknown_symbols, vec!["λ".to_string()]);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn normalize_phoneme_text_collapses_whitespace() {
+        assert_eq!(normalize_phoneme_text(" h\tə \n l o "), "h ə l o");
+    }
+
     fn temp_dir() -> std::path::PathBuf {
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("marginalia-kokoro-test-{id}"))
@@ -637,5 +858,17 @@ mod tests {
     fn temp_file(extension: &str) -> std::path::PathBuf {
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("marginalia-kokoro-test-{id}.{extension}"))
+    }
+
+    fn sample_config_json() -> &'static str {
+        r#"{
+  "vocab": {
+    " ": 16,
+    "h": 50,
+    "l": 54,
+    "o": 57,
+    "ə": 83
+  }
+}"#
     }
 }

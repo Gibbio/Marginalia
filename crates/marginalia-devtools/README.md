@@ -12,6 +12,13 @@ Current commands:
   - checks Kokoro assets
   - resolves the ONNX Runtime dynamic library
   - attempts to open the ONNX model
+- `kokoro-encode-phonemes [assets_root] <phoneme_text>`
+  - loads `config.json`
+  - maps phoneme symbols to Kokoro token IDs
+- `kokoro-run-phonemes [assets_root] <voice> <output_wav> <phoneme_text> [speed]`
+  - tokenizes phoneme text with `config.json`
+  - runs low-level Kokoro ONNX inference
+  - writes the generated waveform to a local WAV file
 - `kokoro-run-tokens [assets_root] <voice> <output_wav> <token_ids_csv> [speed]`
   - runs low-level Kokoro ONNX inference from token IDs
   - writes the generated waveform to a local WAV file
