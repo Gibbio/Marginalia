@@ -151,6 +151,9 @@ bootstrap-vosk-lib:
 		find /tmp/vosk-lib-extract -name "libvosk.*" -exec cp {} $(VOSK_LIB_DIR)/ \; && \
 		rm -rf /tmp/vosk-lib.zip /tmp/vosk-lib-extract && \
 		echo "Vosk library installed at $(VOSK_LIB_DIR)/$$LIB"; \
+		if [ "$$OS" = "Darwin" ]; then \
+			xattr -d com.apple.quarantine $(VOSK_LIB_DIR)/$$LIB 2>/dev/null || true; \
+		fi; \
 	fi
 
 # ---------------------------------------------------------------------------
