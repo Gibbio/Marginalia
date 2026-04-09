@@ -20,4 +20,4 @@ pub use stt::{
     CommandRecognition, CommandRecognizer, DictationSegment, DictationTranscript,
     DictationTranscriber, SpeechInterruptCapture, SpeechInterruptMonitor,
 };
-pub use tts::{SpeechSynthesizer, SynthesisRequest, SynthesisResult};
+pub use tts::{SpeechSynthesizer, SynthesisError, SynthesisRequest, SynthesisResult};

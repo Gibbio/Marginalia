@@ -27,3 +27,6 @@ Expected runtime layout:
 This crate still does not implement grapheme-to-phoneme. The current ONNX path
 starts from phoneme strings and uses the official `config.json` vocabulary to
 produce token IDs.
+
+The high-level Rust synthesizer currently accepts explicit phoneme-prefixed
+input such as `phon: h ə l o` or `ipa: h ə l o`.
