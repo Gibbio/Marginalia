@@ -1,77 +1,78 @@
 KOKORO_ASSETS_DIR ?= .kokoro-assets
+VOSK_MODEL_URL    ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
+VOSK_MODEL_NAME   ?= vosk-model-small-it-0.22
+MODELS_DIR        ?= .models
+VOSK_LIB_VERSION  ?= 0.3.45
+VOSK_LIB_DIR      ?= .vosk-lib
+ORT_VERSION       ?= 1.20.1
 
-PYTHON ?= python3
-VENV_DIR ?= .venv
-VENV_PYTHON := $(VENV_DIR)/bin/python
-VENV_PIP := $(VENV_PYTHON) -m pip
-PYTHONPATH_LOCAL := apps/backend/src:apps/cli/src:packages/core/src:packages/adapters/src:packages/infra/src
-VOSK_MODEL_URL ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
-VOSK_MODEL_NAME ?= vosk-model-small-it-0.22
-MODELS_DIR ?= .models
-VOSK_LIB_VERSION ?= 0.3.45
-VOSK_LIB_DIR ?= .vosk-lib
-
-.PHONY: bootstrap bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib bootstrap-whisper bootstrap-providers \
-        bootstrap-system-deps setup format lint test smoke run-cli-help doctor tui-rs \
-        beta-test beta-doctor \
-        clean clean-session
+.PHONY: \
+	bootstrap-beta bootstrap-kokoro bootstrap-ort bootstrap-vosk bootstrap-vosk-lib \
+	tui-rs beta-test beta-doctor \
+	setup bootstrap bootstrap-runtime-deps bootstrap-providers \
+	bootstrap-kokoro-python bootstrap-whisper bootstrap-system-deps setup-config \
+	format lint test smoke run-cli-help doctor \
+	clean clean-alpha clean-session
 
 # ---------------------------------------------------------------------------
-# Full setup — one command to get everything running
+# Beta — provider bootstrapping
 # ---------------------------------------------------------------------------
 
-setup: bootstrap-system-deps bootstrap bootstrap-runtime-deps bootstrap-providers setup-config
+# Download all Beta providers in one shot.
+bootstrap-beta: bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib
 	@echo ""
-	@echo "============================================================"
-	@echo "  Setup complete. Running doctor to verify..."
-	@echo "============================================================"
-	@echo ""
-	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_cli doctor
-	@echo ""
-	@echo "============================================================"
-	@echo "  Ready! Start with:"
-	@echo "    make tui-rs"
-	@echo "  or:"
-	@echo "    PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_backend describe-contract"
-	@echo "============================================================"
+	@echo "Beta providers ready. Run 'make beta-doctor' to verify."
 
-# ---------------------------------------------------------------------------
-# System dependencies (macOS / Homebrew)
-# ---------------------------------------------------------------------------
+# Download Kokoro ONNX model assets and ONNX Runtime library.
+# Requires huggingface-cli (pip install huggingface-hub).
+bootstrap-kokoro: bootstrap-ort
+	@echo "Downloading Kokoro ONNX model assets (hexgrad/Kokoro-82M)..."
+	@mkdir -p $(KOKORO_ASSETS_DIR)
+	@command -v huggingface-cli >/dev/null 2>&1 || { \
+		echo "huggingface-cli not found. Install with: pip install huggingface-hub"; exit 1; \
+	}
+	huggingface-cli download hexgrad/Kokoro-82M kokoro.onnx config.json \
+		--local-dir $(KOKORO_ASSETS_DIR)
+	@echo "Downloading Kokoro voice files..."
+	huggingface-cli download hexgrad/Kokoro-82M \
+		--include "voices/*" --local-dir $(KOKORO_ASSETS_DIR)
+	@echo "Kokoro assets ready at $(KOKORO_ASSETS_DIR)/"
+	@echo "Run 'make beta-doctor' to verify."
 
-bootstrap-system-deps:
-	@echo "Checking system dependencies..."
-	@command -v brew >/dev/null 2>&1 || { echo "Error: Homebrew is required. Install from https://brew.sh"; exit 1; }
-	@brew list portaudio >/dev/null 2>&1 || { echo "Installing portaudio..."; brew install portaudio; }
-	@brew list espeak-ng >/dev/null 2>&1 || { echo "Installing espeak-ng..."; brew install espeak-ng; }
-	@command -v uv >/dev/null 2>&1 || { echo "Installing uv..."; brew install uv; }
-	@echo "System dependencies OK."
+# Download ONNX Runtime dynamic library for the current platform.
+bootstrap-ort:
+	@echo "Downloading ONNX Runtime v$(ORT_VERSION)..."
+	@mkdir -p $(KOKORO_ASSETS_DIR)/lib
+	@OS=$$(uname -s); ARCH=$$(uname -m); \
+	if [ "$$OS" = "Darwin" ]; then \
+		if [ "$$ARCH" = "arm64" ]; then \
+			URL="https://github.com/microsoft/onnxruntime/releases/download/v$(ORT_VERSION)/onnxruntime-osx-arm64-$(ORT_VERSION).tgz"; \
+		else \
+			URL="https://github.com/microsoft/onnxruntime/releases/download/v$(ORT_VERSION)/onnxruntime-osx-x86_64-$(ORT_VERSION).tgz"; \
+		fi; \
+		LIB_GLOB="libonnxruntime*.dylib"; \
+	elif [ "$$OS" = "Linux" ]; then \
+		if [ "$$ARCH" = "aarch64" ] || [ "$$ARCH" = "arm64" ]; then \
+			URL="https://github.com/microsoft/onnxruntime/releases/download/v$(ORT_VERSION)/onnxruntime-linux-aarch64-$(ORT_VERSION).tgz"; \
+		else \
+			URL="https://github.com/microsoft/onnxruntime/releases/download/v$(ORT_VERSION)/onnxruntime-linux-x64-$(ORT_VERSION).tgz"; \
+		fi; \
+		LIB_GLOB="libonnxruntime.so*"; \
+	else \
+		echo "Unsupported OS: $$OS"; exit 1; \
+	fi; \
+	if ls $(KOKORO_ASSETS_DIR)/lib/libonnxruntime* >/dev/null 2>&1; then \
+		echo "ONNX Runtime already present in $(KOKORO_ASSETS_DIR)/lib/, skipping."; \
+	else \
+		echo "Downloading $$URL..."; \
+		curl -L -o /tmp/ort.tgz "$$URL" && \
+		tar -xzf /tmp/ort.tgz -C /tmp && \
+		find /tmp/onnxruntime-* -name "$$LIB_GLOB" -exec cp {} $(KOKORO_ASSETS_DIR)/lib/ \; && \
+		rm -rf /tmp/ort.tgz /tmp/onnxruntime-* && \
+		echo "ONNX Runtime installed at $(KOKORO_ASSETS_DIR)/lib/"; \
+	fi
 
-# ---------------------------------------------------------------------------
-# Python environment
-# ---------------------------------------------------------------------------
-
-bootstrap:
-	$(PYTHON) -m venv $(VENV_DIR)
-	$(VENV_PIP) install --upgrade pip
-	$(VENV_PIP) install -e ".[dev]"
-
-bootstrap-runtime-deps:
-	@echo "Installing runtime Python packages..."
-	$(VENV_PIP) install vosk sounddevice numpy
-
-# ---------------------------------------------------------------------------
-# Provider setup
-# ---------------------------------------------------------------------------
-
-bootstrap-providers: bootstrap-kokoro bootstrap-vosk bootstrap-whisper
-	@echo "All providers bootstrapped."
-
-bootstrap-kokoro:
-	@echo "Setting up Kokoro TTS..."
-	uv venv .venv-kokoro --python 3.12 --seed --clear
-	uv pip install --python .venv-kokoro/bin/python "kokoro>=0.9.4,<1.0" soundfile
-
+# Download Vosk acoustic model (Italian, small).
 bootstrap-vosk:
 	@echo "Downloading Vosk model ($(VOSK_MODEL_NAME))..."
 	@mkdir -p $(MODELS_DIR)/vosk
@@ -84,7 +85,16 @@ bootstrap-vosk:
 		echo "Vosk model installed at $(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)"; \
 	fi
 
+# Download Vosk native library (libvosk.so / libvosk.dylib).
+# On Linux also ensures libasound2-dev is installed (required by cpal).
 bootstrap-vosk-lib:
+	@OS=$$(uname -s); \
+	if [ "$$OS" = "Linux" ]; then \
+		if ! pkg-config --exists alsa 2>/dev/null; then \
+			echo "Installing libasound2-dev (required by cpal on Linux)..."; \
+			sudo apt-get install -y libasound2-dev; \
+		fi; \
+	fi
 	@echo "Downloading Vosk native library v$(VOSK_LIB_VERSION)..."
 	@mkdir -p $(VOSK_LIB_DIR)
 	@OS=$$(uname -s); ARCH=$$(uname -m); \
@@ -112,23 +122,123 @@ bootstrap-vosk-lib:
 		echo "Vosk library installed at $(VOSK_LIB_DIR)/$$LIB"; \
 	fi
 
+# ---------------------------------------------------------------------------
+# Beta — run and verify
+# ---------------------------------------------------------------------------
+
+# Launch the Beta TUI. Detects available providers automatically:
+#   - stt=vosk  if $(VOSK_LIB_DIR)/libvosk.* and $(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME) exist
+#   - tts=kokoro if $(KOKORO_ASSETS_DIR)/ exists
+# Run 'make bootstrap-beta' first to install providers.
+tui-rs:
+	@VOSK_LIB=$$(ls $(VOSK_LIB_DIR)/libvosk.* 2>/dev/null | head -1); \
+	VOSK_MODEL=$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME); \
+	KOKORO_DIR=$(KOKORO_ASSETS_DIR); \
+	echo ""; \
+	echo "=== marginalia-tui — provider check ==="; \
+	if [ -n "$$VOSK_LIB" ]; then \
+		echo "  stt:     vosk  ($$VOSK_LIB)"; \
+		if [ -d "$$VOSK_MODEL" ]; then \
+			echo "  model:   $$VOSK_MODEL"; \
+		else \
+			echo "  model:   MISSING ($$VOSK_MODEL) — stt → fake"; \
+			VOSK_LIB=""; \
+		fi; \
+	else \
+		echo "  stt:     fake  (run 'make bootstrap-vosk-lib bootstrap-vosk' to enable)"; \
+	fi; \
+	if [ -d "$$KOKORO_DIR" ]; then \
+		echo "  tts:     kokoro  ($$KOKORO_DIR)"; \
+	else \
+		echo "  tts:     fake  (run 'make bootstrap-kokoro' to enable)"; \
+	fi; \
+	echo "======================================="; \
+	echo ""; \
+	if [ -n "$$VOSK_LIB" ]; then \
+		VOSK_PATH=$(VOSK_LIB_DIR) \
+		MARGINALIA_VOSK_MODEL=$$VOSK_MODEL \
+		LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$LD_LIBRARY_PATH \
+		DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$DYLD_LIBRARY_PATH \
+		MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
+		cargo run --manifest-path apps/tui-rs/Cargo.toml --features vosk-stt; \
+	else \
+		MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
+		cargo run --manifest-path apps/tui-rs/Cargo.toml; \
+	fi
+
+beta-test:
+	cargo test
+
+beta-doctor:
+	cargo run -p marginalia-devtools -- kokoro-doctor --assets-root $(KOKORO_ASSETS_DIR)
+
+# ---------------------------------------------------------------------------
+# Clean
+# ---------------------------------------------------------------------------
+
+clean:
+	rm -rf target/
+	@echo "Rust build artifacts cleaned."
+
+clean-alpha:
+	rm -rf build/ dist/ *.egg-info .eggs/
+	rm -rf .mypy_cache/ .pytest_cache/ .ruff_cache/ .coverage htmlcov/
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@echo "Alpha Python build artifacts cleaned."
+
+clean-session:
+	rm -rf .marginalia/
+	@echo "Session data cleaned."
+
+# ---------------------------------------------------------------------------
+# Alpha reference (migration reference only — do not use for Beta development)
+# ---------------------------------------------------------------------------
+
+PYTHON           ?= python3
+VENV_DIR         ?= .venv
+VENV_PYTHON      := $(VENV_DIR)/bin/python
+VENV_PIP         := $(VENV_PYTHON) -m pip
+PYTHONPATH_LOCAL := apps/backend/src:apps/cli/src:packages/core/src:packages/adapters/src:packages/infra/src
+
+setup: bootstrap-system-deps bootstrap bootstrap-runtime-deps bootstrap-providers setup-config
+	@echo "Alpha setup complete. Run 'make doctor' to verify."
+
+bootstrap-system-deps:
+	@echo "Checking system dependencies (macOS/Homebrew)..."
+	@command -v brew >/dev/null 2>&1 || { echo "Error: Homebrew required."; exit 1; }
+	@brew list portaudio >/dev/null 2>&1 || brew install portaudio
+	@brew list espeak-ng >/dev/null 2>&1 || brew install espeak-ng
+	@command -v uv >/dev/null 2>&1 || brew install uv
+	@echo "System dependencies OK."
+
+bootstrap:
+	$(PYTHON) -m venv $(VENV_DIR)
+	$(VENV_PIP) install --upgrade pip
+	$(VENV_PIP) install -e ".[dev]"
+
+bootstrap-runtime-deps:
+	$(VENV_PIP) install vosk sounddevice numpy
+
+bootstrap-providers: bootstrap-kokoro-python bootstrap-vosk bootstrap-whisper
+	@echo "Alpha providers bootstrapped."
+
+# Alpha Python Kokoro (not used by Beta runtime).
+bootstrap-kokoro-python:
+	@echo "Setting up Alpha Python Kokoro TTS..."
+	uv venv .venv-kokoro --python 3.12 --seed --clear
+	uv pip install --python .venv-kokoro/bin/python "kokoro>=0.9.4,<1.0" soundfile
+
 bootstrap-whisper:
 	@echo "Cloning and building whisper.cpp..."
 	git clone --depth 1 https://github.com/ggerganov/whisper.cpp .whisper-cpp || true
 	cd .whisper-cpp && make -j
-	@echo "Downloading ggml-base model..."
 	cd .whisper-cpp && ./models/download-ggml-model.sh base
 	@echo "whisper.cpp ready."
-
-# ---------------------------------------------------------------------------
-# Config generation
-# ---------------------------------------------------------------------------
 
 setup-config:
 	@if [ -f marginalia.toml ]; then \
 		echo "Config file marginalia.toml already exists, skipping."; \
 	else \
-		echo "Generating marginalia.toml..."; \
 		ROOT_DIR=$$(pwd); \
 		cat > marginalia.toml <<-TOML_EOF
 	environment = "local"
@@ -144,12 +254,6 @@ setup-config:
 	playback = "subprocess"
 	llm = "fake"
 	allow_fallback = true
-
-	[kokoro]
-	python_executable = "$$ROOT_DIR/.venv-kokoro/bin/python"
-	default_voice = "if_sara"
-	lang_code = "i"
-	speed = 1.0
 
 	[vosk]
 	model_path = "$$ROOT_DIR/.models/vosk/$(VOSK_MODEL_NAME)"
@@ -185,62 +289,5 @@ smoke:
 doctor:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_CONFIG=marginalia.toml $(VENV_PYTHON) -m marginalia_cli doctor
 
-tui-rs:
-	@VOSK_LIB=$$(ls $(VOSK_LIB_DIR)/libvosk.* 2>/dev/null | head -1); \
-	VOSK_MODEL=$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME); \
-	KOKORO_DIR=$(KOKORO_ASSETS_DIR); \
-	echo ""; \
-	echo "=== marginalia-tui — provider check ==="; \
-	if [ -n "$$VOSK_LIB" ]; then \
-		echo "  stt:     vosk  ($$VOSK_LIB)"; \
-		if [ -d "$$VOSK_MODEL" ]; then \
-			echo "  model:   $$VOSK_MODEL"; \
-		else \
-			echo "  model:   MISSING ($$VOSK_MODEL) — stt → fake"; \
-			VOSK_LIB=""; \
-		fi; \
-	else \
-		echo "  stt:     fake  (run 'make bootstrap-vosk-lib bootstrap-vosk' to enable)"; \
-	fi; \
-	if [ -d "$$KOKORO_DIR" ]; then \
-		echo "  tts:     kokoro  ($$KOKORO_DIR)"; \
-	else \
-		echo "  tts:     fake  (set KOKORO_ASSETS_DIR or run 'make bootstrap-kokoro')"; \
-	fi; \
-	echo "======================================="; \
-	echo ""; \
-	if [ -n "$$VOSK_LIB" ]; then \
-		VOSK_PATH=$(VOSK_LIB_DIR) \
-		MARGINALIA_VOSK_MODEL=$$VOSK_MODEL \
-		LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$LD_LIBRARY_PATH \
-		DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$DYLD_LIBRARY_PATH \
-		MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
-		cargo run --manifest-path apps/tui-rs/Cargo.toml --features vosk-stt; \
-	else \
-		MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
-		cargo run --manifest-path apps/tui-rs/Cargo.toml; \
-	fi
-
-beta-test:
-	cargo test
-
-beta-doctor:
-	cargo run -p marginalia-devtools -- kokoro-doctor --assets-root $(KOKORO_ASSETS_DIR)
-
 run-cli-help:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_cli --help
-
-# ---------------------------------------------------------------------------
-# Cleanup
-# ---------------------------------------------------------------------------
-
-clean:
-	rm -rf build/ dist/ *.egg-info .eggs/
-	rm -rf .mypy_cache/ .pytest_cache/ .ruff_cache/ .coverage htmlcov/
-	rm -rf target/
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@echo "Build artifacts cleaned."
-
-clean-session:
-	rm -rf .marginalia/
-	@echo "Session data cleaned (database, audio cache, runtime)."
