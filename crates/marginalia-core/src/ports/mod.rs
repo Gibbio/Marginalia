@@ -10,6 +10,7 @@ pub mod tts;
 
 pub use capabilities::{ProviderCapabilities, ProviderExecutionMode};
 pub use importing::{DocumentImportError, DocumentImporter};
+pub use storage::StorageError;
 pub use llm::{
     RewriteGenerator, RewriteInstruction, RewriteOutput, SummaryInstruction, SummaryOutput,
     TopicSummarizer,

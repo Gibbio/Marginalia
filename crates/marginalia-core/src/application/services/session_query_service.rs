@@ -177,7 +177,9 @@ where
             .or_else(|| session.playback_provider.clone());
         session.playback_process_id = snapshot.process_id.or(session.playback_process_id);
         session.touch();
-        self.session_repository.save_session(session.clone());
+        if let Err(e) = self.session_repository.save_session(session.clone()) {
+            eprintln!("WARNING: failed to persist session state during playback hydration: {e}");
+        }
 
         snapshot
     }
@@ -195,7 +197,7 @@ mod tests {
         PlaybackEngine, PlaybackSnapshot, ProviderCapabilities, SynthesisResult,
     };
     use crate::ports::storage::{
-        DocumentRepository, NoteRepository, RewriteDraftRepository, SessionRepository,
+        DocumentRepository, NoteRepository, RewriteDraftRepository, SessionRepository, StorageError,
     };
     use crate::domain::RewriteDraft;
     use chrono::Utc;
@@ -208,8 +210,9 @@ mod tests {
     impl DocumentRepository for StubDocumentRepository {
         fn ensure_schema(&mut self) {}
 
-        fn save_document(&mut self, document: Document) {
+        fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
             self.documents.push(document);
+            Ok(())
         }
 
         fn get_document(&self, document_id: &str) -> Option<Document> {
@@ -236,9 +239,10 @@ mod tests {
     impl SessionRepository for StubSessionRepository {
         fn ensure_schema(&mut self) {}
 
-        fn save_session(&mut self, session: ReadingSession) {
+        fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
             self.saved_session = Some(session.clone());
             self.active_session = Some(session);
+            Ok(())
         }
 
         fn get_active_session(&self) -> Option<ReadingSession> {
@@ -257,8 +261,9 @@ mod tests {
     impl NoteRepository for StubNoteRepository {
         fn ensure_schema(&mut self) {}
 
-        fn save_note(&mut self, note: VoiceNote) {
+        fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
             self.notes.push(note);
+            Ok(())
         }
 
         fn list_notes_for_document(&self, document_id: &str) -> Vec<VoiceNote> {
@@ -279,7 +284,9 @@ mod tests {
     impl RewriteDraftRepository for StubDraftRepository {
         fn ensure_schema(&mut self) {}
 
-        fn save_draft(&mut self, _draft: RewriteDraft) {}
+        fn save_draft(&mut self, _draft: RewriteDraft) -> Result<(), StorageError> {
+            Ok(())
+        }
 
         fn list_drafts_for_document(&self, _document_id: &str) -> Vec<RewriteDraft> {
             Vec::new()

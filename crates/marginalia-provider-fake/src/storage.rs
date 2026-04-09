@@ -2,7 +2,7 @@ use marginalia_core::domain::{
     Document, ReadingSession, RewriteDraft, SearchQuery, SearchResult, VoiceNote,
 };
 use marginalia_core::ports::storage::{
-    DocumentRepository, NoteRepository, RewriteDraftRepository, SessionRepository,
+    DocumentRepository, NoteRepository, RewriteDraftRepository, SessionRepository, StorageError,
 };
 use std::collections::HashMap;
 
@@ -20,8 +20,9 @@ impl InMemoryDocumentRepository {
 impl DocumentRepository for InMemoryDocumentRepository {
     fn ensure_schema(&mut self) {}
 
-    fn save_document(&mut self, document: Document) {
+    fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
         self.documents.insert(document.document_id.clone(), document);
+        Ok(())
     }
 
     fn get_document(&self, document_id: &str) -> Option<Document> {
@@ -85,8 +86,9 @@ impl InMemorySessionRepository {
 impl SessionRepository for InMemorySessionRepository {
     fn ensure_schema(&mut self) {}
 
-    fn save_session(&mut self, session: ReadingSession) {
+    fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
         self.sessions.insert(session.session_id.clone(), session);
+        Ok(())
     }
 
     fn get_active_session(&self) -> Option<ReadingSession> {
@@ -119,9 +121,10 @@ impl InMemoryNoteRepository {
 impl NoteRepository for InMemoryNoteRepository {
     fn ensure_schema(&mut self) {}
 
-    fn save_note(&mut self, note: VoiceNote) {
+    fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
         self.notes.push(note);
         self.notes.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+        Ok(())
     }
 
     fn list_notes_for_document(&self, document_id: &str) -> Vec<VoiceNote> {
@@ -182,8 +185,9 @@ impl InMemoryRewriteDraftRepository {
 impl RewriteDraftRepository for InMemoryRewriteDraftRepository {
     fn ensure_schema(&mut self) {}
 
-    fn save_draft(&mut self, draft: RewriteDraft) {
+    fn save_draft(&mut self, draft: RewriteDraft) -> Result<(), StorageError> {
         self.drafts.push(draft);
+        Ok(())
     }
 
     fn list_drafts_for_document(&self, document_id: &str) -> Vec<RewriteDraft> {
@@ -226,7 +230,7 @@ mod tests {
                 source_anchor: Some("section:0".to_string()),
             }],
             imported_at: chrono::Utc::now(),
-        });
+        }).unwrap();
 
         let results = repository.search_documents(&SearchQuery {
             text: "beta".to_string(),
@@ -242,7 +246,7 @@ mod tests {
     fn session_repository_returns_active_session() {
         let mut repository = InMemorySessionRepository::new();
         let session = ReadingSession::new("session-1", "doc-1");
-        repository.save_session(session.clone());
+        repository.save_session(session.clone()).unwrap();
 
         assert_eq!(repository.get_active_session(), Some(session));
     }
@@ -260,7 +264,7 @@ mod tests {
             language: "it".to_string(),
             raw_audio_path: None,
             created_at: chrono::Utc::now(),
-        });
+        }).unwrap();
 
         let results = repository.search_notes(&SearchQuery {
             text: "passage".to_string(),
