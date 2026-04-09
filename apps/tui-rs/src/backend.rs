@@ -3,6 +3,8 @@ use marginalia_runtime::SqliteRuntime;
 use marginalia_tts_kokoro::{KokoroConfig, KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig};
 #[cfg(feature = "vosk-stt")]
 use marginalia_stt_vosk::{VoskCommandRecognizer, VoskConfig};
+#[cfg(feature = "whisper-stt")]
+use marginalia_stt_whisper::{WhisperConfig, WhisperDictationTranscriber};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -316,6 +318,20 @@ impl BetaBackendClient {
             stt_label = "vosk";
         }
 
+        // Dictation STT: Whisper se MARGINALIA_WHISPER_MODEL è impostato
+        #[allow(unused_mut, unused_variables)]
+        let mut dictation_label = "fake";
+        #[cfg(feature = "whisper-stt")]
+        if let Ok(model_path) = env::var("MARGINALIA_WHISPER_MODEL") {
+            let whisper_config = WhisperConfig::new(&model_path);
+            runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(whisper_config));
+            runtime.set_provider_doctor_blob(
+                "whisper_cpp",
+                json!({ "ready": true, "model_path": model_path }),
+            );
+            dictation_label = "whisper";
+        }
+
         // Voice command monitor — open and run in background thread.
         // The monitor is independent from the runtime after creation (owns its own audio stream).
         // Thread exits automatically when voice_cmd_rx is dropped (tx.send fails).
@@ -342,11 +358,12 @@ impl BetaBackendClient {
             voice_cmd_rx,
         };
         client.push_log(format!(
-            "beta-runtime ready db={} playback={} tts={} stt={}",
+            "beta-runtime ready db={} playback={} tts={} stt={} dictation={}",
             db_path.display(),
             playback_label,
             tts_label,
             stt_label,
+            dictation_label,
         ));
         Ok(client)
     }

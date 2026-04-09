@@ -1,10 +1,13 @@
-KOKORO_ASSETS_DIR ?= .kokoro-assets
-VOSK_MODEL_URL    ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
-VOSK_MODEL_NAME   ?= vosk-model-small-it-0.22
-MODELS_DIR        ?= .models
-VOSK_LIB_VERSION  ?= 0.3.45
-VOSK_LIB_DIR      ?= .vosk-lib
-ORT_VERSION       ?= 1.20.1
+KOKORO_ASSETS_DIR  ?= .kokoro-assets
+VOSK_MODEL_URL     ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
+VOSK_MODEL_NAME    ?= vosk-model-small-it-0.22
+MODELS_DIR         ?= .models
+VOSK_LIB_VERSION   ?= 0.3.45
+VOSK_LIB_DIR       ?= .vosk-lib
+ORT_VERSION        ?= 1.20.1
+WHISPER_MODEL_DIR  ?= .models/whisper
+WHISPER_MODEL_NAME ?= ggml-base.bin
+WHISPER_MODEL_URL  ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(WHISPER_MODEL_NAME)
 
 .PHONY: \
 	bootstrap-beta bootstrap-kokoro bootstrap-ort bootstrap-vosk bootstrap-vosk-lib \
@@ -20,7 +23,7 @@ ORT_VERSION       ?= 1.20.1
 # ---------------------------------------------------------------------------
 
 # Download all Beta providers in one shot.
-bootstrap-beta: bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib
+bootstrap-beta: bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib bootstrap-whisper
 	@echo ""
 	@echo "Beta providers ready. Run 'make beta-doctor' to verify."
 
@@ -153,49 +156,77 @@ bootstrap-vosk-lib:
 		echo "Vosk library installed at $(VOSK_LIB_DIR)/$$LIB"; \
 	fi
 
+# Download Whisper ggml model for dictation transcription.
+# Uses ggml-base (multilingual, ~145 MB) from the whisper.cpp HuggingFace repo.
+# Override WHISPER_MODEL_NAME to use a different model (e.g. ggml-small.bin).
+# NOTE: building marginalia-stt-whisper also requires cmake and libclang-dev.
+#       On Debian/Ubuntu: sudo apt-get install -y cmake libclang-dev
+bootstrap-whisper:
+	@echo "Downloading Whisper model ($(WHISPER_MODEL_NAME))..."
+	@mkdir -p $(WHISPER_MODEL_DIR)
+	@if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
+		echo "Whisper model already present, skipping."; \
+	else \
+		echo "  Downloading $(WHISPER_MODEL_URL)..."; \
+		curl -fL --progress-bar -o "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" "$(WHISPER_MODEL_URL)" \
+			|| { echo "Failed to download Whisper model"; exit 1; }; \
+		echo "Whisper model installed at $(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)"; \
+	fi
+
 # ---------------------------------------------------------------------------
 # Beta — run and verify
 # ---------------------------------------------------------------------------
 
 # Launch the Beta TUI. Detects available providers automatically:
-#   - stt=vosk  if $(VOSK_LIB_DIR)/libvosk.* and $(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME) exist
-#   - tts=kokoro if $(KOKORO_ASSETS_DIR)/ exists
+#   - stt=vosk     if $(VOSK_LIB_DIR)/libvosk.* and $(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME) exist
+#   - tts=kokoro   if $(KOKORO_ASSETS_DIR)/ exists
+#   - dictation=whisper if $(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME) exists
 # Run 'make bootstrap-beta' first to install providers.
 tui-rs:
 	@VOSK_LIB=$$(ls $(VOSK_LIB_DIR)/libvosk.* 2>/dev/null | head -1); \
 	VOSK_MODEL=$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME); \
 	KOKORO_DIR=$(KOKORO_ASSETS_DIR); \
+	WHISPER_MODEL=$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME); \
 	echo ""; \
 	echo "=== marginalia-tui — provider check ==="; \
 	if [ -n "$$VOSK_LIB" ]; then \
-		echo "  stt:     vosk  ($$VOSK_LIB)"; \
+		echo "  stt:       vosk  ($$VOSK_LIB)"; \
 		if [ -d "$$VOSK_MODEL" ]; then \
-			echo "  model:   $$VOSK_MODEL"; \
+			echo "  stt model: $$VOSK_MODEL"; \
 		else \
-			echo "  model:   MISSING ($$VOSK_MODEL) — stt → fake"; \
+			echo "  stt model: MISSING ($$VOSK_MODEL) — stt → fake"; \
 			VOSK_LIB=""; \
 		fi; \
 	else \
-		echo "  stt:     fake  (run 'make bootstrap-vosk-lib bootstrap-vosk' to enable)"; \
+		echo "  stt:       fake  (run 'make bootstrap-vosk-lib bootstrap-vosk' to enable)"; \
 	fi; \
 	if [ -d "$$KOKORO_DIR" ]; then \
-		echo "  tts:     kokoro  ($$KOKORO_DIR)"; \
+		echo "  tts:       kokoro  ($$KOKORO_DIR)"; \
 	else \
-		echo "  tts:     fake  (run 'make bootstrap-kokoro' to enable)"; \
+		echo "  tts:       fake  (run 'make bootstrap-kokoro' to enable)"; \
+	fi; \
+	if [ -f "$$WHISPER_MODEL" ]; then \
+		echo "  dictation: whisper  ($$WHISPER_MODEL)"; \
+	else \
+		echo "  dictation: fake  (run 'make bootstrap-whisper' to enable)"; \
+		WHISPER_MODEL=""; \
 	fi; \
 	echo "======================================="; \
 	echo ""; \
-	if [ -n "$$VOSK_LIB" ]; then \
-		VOSK_PATH=$(VOSK_LIB_DIR) \
-		MARGINALIA_VOSK_MODEL=$$VOSK_MODEL \
-		LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$LD_LIBRARY_PATH \
-		DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$DYLD_LIBRARY_PATH \
-		MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
-		cargo run --manifest-path apps/tui-rs/Cargo.toml --features vosk-stt; \
-	else \
-		MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
-		cargo run --manifest-path apps/tui-rs/Cargo.toml; \
-	fi
+	FEATURES=""; \
+	if [ -n "$$VOSK_LIB" ]; then FEATURES="vosk-stt"; fi; \
+	if [ -n "$$WHISPER_MODEL" ]; then \
+		if [ -n "$$FEATURES" ]; then FEATURES="$$FEATURES,whisper-stt"; \
+		else FEATURES="whisper-stt"; fi; \
+	fi; \
+	VOSK_PATH=$(VOSK_LIB_DIR) \
+	MARGINALIA_VOSK_MODEL=$$VOSK_MODEL \
+	LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$LD_LIBRARY_PATH \
+	DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$DYLD_LIBRARY_PATH \
+	MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
+	MARGINALIA_WHISPER_MODEL=$$WHISPER_MODEL \
+	cargo run --manifest-path apps/tui-rs/Cargo.toml \
+		$$([ -n "$$FEATURES" ] && echo "--features $$FEATURES")
 
 beta-test:
 	cargo test

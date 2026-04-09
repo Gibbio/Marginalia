@@ -1,0 +1,10 @@
+[package]
+name = "marginalia-stt-whisper"
+version = "0.1.0"
+edition = "2021"
+description = "Whisper-based dictation transcriber for Marginalia Beta"
+
+[dependencies]
+marginalia-core = { path = "../marginalia-core" }
+cpal = "0.15"
+whisper-rs = "0.14"
