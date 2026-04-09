@@ -8,8 +8,10 @@ PYTHONPATH_LOCAL := apps/backend/src:apps/cli/src:packages/core/src:packages/ada
 VOSK_MODEL_URL ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
 VOSK_MODEL_NAME ?= vosk-model-small-it-0.22
 MODELS_DIR ?= .models
+VOSK_LIB_VERSION ?= 0.3.45
+VOSK_LIB_DIR ?= .vosk-lib
 
-.PHONY: bootstrap bootstrap-kokoro bootstrap-vosk bootstrap-whisper bootstrap-providers \
+.PHONY: bootstrap bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib bootstrap-whisper bootstrap-providers \
         bootstrap-system-deps setup format lint test smoke run-cli-help doctor tui-rs \
         beta-test beta-doctor \
         clean clean-session
@@ -80,6 +82,34 @@ bootstrap-vosk:
 		unzip -qo /tmp/$(VOSK_MODEL_NAME).zip -d $(MODELS_DIR)/vosk && \
 		rm /tmp/$(VOSK_MODEL_NAME).zip && \
 		echo "Vosk model installed at $(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)"; \
+	fi
+
+bootstrap-vosk-lib:
+	@echo "Downloading Vosk native library v$(VOSK_LIB_VERSION)..."
+	@mkdir -p $(VOSK_LIB_DIR)
+	@OS=$$(uname -s); ARCH=$$(uname -m); \
+	if [ "$$OS" = "Darwin" ]; then \
+		URL="https://github.com/alphacep/vosk-api/releases/download/v$(VOSK_LIB_VERSION)/vosk-osx-universal-$(VOSK_LIB_VERSION).zip"; \
+		LIB="libvosk.dylib"; \
+	elif [ "$$OS" = "Linux" ]; then \
+		if [ "$$ARCH" = "aarch64" ] || [ "$$ARCH" = "arm64" ]; then \
+			URL="https://github.com/alphacep/vosk-api/releases/download/v$(VOSK_LIB_VERSION)/vosk-linux-aarch64-$(VOSK_LIB_VERSION).zip"; \
+		else \
+			URL="https://github.com/alphacep/vosk-api/releases/download/v$(VOSK_LIB_VERSION)/vosk-linux-x86_64-$(VOSK_LIB_VERSION).zip"; \
+		fi; \
+		LIB="libvosk.so"; \
+	else \
+		echo "Unsupported OS: $$OS"; exit 1; \
+	fi; \
+	if [ -f "$(VOSK_LIB_DIR)/$$LIB" ]; then \
+		echo "$$LIB already present in $(VOSK_LIB_DIR)/, skipping."; \
+	else \
+		echo "Downloading $$URL..."; \
+		curl -L -o /tmp/vosk-lib.zip "$$URL" && \
+		unzip -qo /tmp/vosk-lib.zip -d /tmp/vosk-lib-extract && \
+		find /tmp/vosk-lib-extract -name "libvosk.*" -exec cp {} $(VOSK_LIB_DIR)/ \; && \
+		rm -rf /tmp/vosk-lib.zip /tmp/vosk-lib-extract && \
+		echo "Vosk library installed at $(VOSK_LIB_DIR)/$$LIB"; \
 	fi
 
 bootstrap-whisper:
@@ -156,7 +186,40 @@ doctor:
 	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_CONFIG=marginalia.toml $(VENV_PYTHON) -m marginalia_cli doctor
 
 tui-rs:
-	MARGINALIA_KOKORO_ASSETS=$(KOKORO_ASSETS_DIR) cargo run --manifest-path apps/tui-rs/Cargo.toml
+	@VOSK_LIB=$$(ls $(VOSK_LIB_DIR)/libvosk.* 2>/dev/null | head -1); \
+	VOSK_MODEL=$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME); \
+	KOKORO_DIR=$(KOKORO_ASSETS_DIR); \
+	echo ""; \
+	echo "=== marginalia-tui — provider check ==="; \
+	if [ -n "$$VOSK_LIB" ]; then \
+		echo "  stt:     vosk  ($$VOSK_LIB)"; \
+		if [ -d "$$VOSK_MODEL" ]; then \
+			echo "  model:   $$VOSK_MODEL"; \
+		else \
+			echo "  model:   MISSING ($$VOSK_MODEL) — stt → fake"; \
+			VOSK_LIB=""; \
+		fi; \
+	else \
+		echo "  stt:     fake  (run 'make bootstrap-vosk-lib bootstrap-vosk' to enable)"; \
+	fi; \
+	if [ -d "$$KOKORO_DIR" ]; then \
+		echo "  tts:     kokoro  ($$KOKORO_DIR)"; \
+	else \
+		echo "  tts:     fake  (set KOKORO_ASSETS_DIR or run 'make bootstrap-kokoro')"; \
+	fi; \
+	echo "======================================="; \
+	echo ""; \
+	if [ -n "$$VOSK_LIB" ]; then \
+		VOSK_PATH=$(VOSK_LIB_DIR) \
+		MARGINALIA_VOSK_MODEL=$$VOSK_MODEL \
+		LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$LD_LIBRARY_PATH \
+		DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$$DYLD_LIBRARY_PATH \
+		MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
+		cargo run --manifest-path apps/tui-rs/Cargo.toml --features vosk-stt; \
+	else \
+		MARGINALIA_KOKORO_ASSETS=$$KOKORO_DIR \
+		cargo run --manifest-path apps/tui-rs/Cargo.toml; \
+	fi
 
 beta-test:
 	cargo test
