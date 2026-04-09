@@ -1,0 +1,10 @@
+[package]
+name = "marginalia-stt-vosk"
+version = "0.1.0"
+edition = "2021"
+description = "Vosk-based command recognition for Marginalia Beta"
+
+[dependencies]
+marginalia-core = { path = "../marginalia-core" }
+cpal = "0.15"
+vosk = "0.3"
