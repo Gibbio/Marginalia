@@ -1,13 +1,51 @@
 use crate::domain::{build_document_from_import, Document};
 use crate::events::{DomainEvent, EventName};
 use crate::ports::events::EventPublisher;
-use crate::ports::storage::DocumentRepository;
+use crate::ports::storage::{DocumentRepository, StorageError};
 use crate::ports::{DocumentImportError, DocumentImporter};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IngestionError {
+    Import(DocumentImportError),
+    Storage(StorageError),
+}
+
+impl Display for IngestionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Import(e) => write!(f, "{e}"),
+            Self::Storage(e) => write!(f, "storage error during ingestion: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for IngestionError {}
+
+impl From<DocumentImportError> for IngestionError {
+    fn from(e: DocumentImportError) -> Self {
+        Self::Import(e)
+    }
+}
+
+impl From<StorageError> for IngestionError {
+    fn from(e: StorageError) -> Self {
+        Self::Storage(e)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Outcome
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DocumentIngestionStats {
@@ -24,6 +62,10 @@ pub struct DocumentIngestionOutcome {
     pub already_present: bool,
     pub stats: DocumentIngestionStats,
 }
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
 
 pub struct DocumentIngestionService<R, I, E>
 where
@@ -57,7 +99,7 @@ where
         }
     }
 
-    pub fn ingest_path(&mut self, source_path: &Path) -> Result<DocumentIngestionOutcome, DocumentImportError> {
+    pub fn ingest_path(&mut self, source_path: &Path) -> Result<DocumentIngestionOutcome, IngestionError> {
         let imported = self.importer.import_path(source_path)?;
         let raw_char_count = imported.canonical_text().chars().count();
         let document = build_document_from_import(imported, self.chunk_target_chars);
@@ -65,7 +107,7 @@ where
             .document_repository
             .get_document(&document.document_id)
             .is_some();
-        self.document_repository.save_document(document.clone());
+        self.document_repository.save_document(document.clone())?;
 
         let chunk_lengths = document
             .sections
@@ -122,11 +164,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::DocumentIngestionService;
+    use super::{DocumentIngestionService, IngestionError};
     use crate::domain::{ImportedDocument, ImportedSection, SearchQuery, SearchResult};
     use crate::events::{DomainEvent, EventName};
     use crate::ports::events::EventPublisher;
-    use crate::ports::storage::DocumentRepository;
+    use crate::ports::storage::{DocumentRepository, StorageError};
     use crate::ports::{DocumentImportError, DocumentImporter};
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
@@ -159,9 +201,10 @@ mod tests {
     impl DocumentRepository for StubDocumentRepository {
         fn ensure_schema(&mut self) {}
 
-        fn save_document(&mut self, document: crate::domain::Document) {
+        fn save_document(&mut self, document: crate::domain::Document) -> Result<(), StorageError> {
             self.documents.retain(|existing| existing.document_id != document.document_id);
             self.documents.push(document);
+            Ok(())
         }
 
         fn get_document(&self, document_id: &str) -> Option<crate::domain::Document> {
@@ -245,9 +288,9 @@ mod tests {
 
         assert_eq!(
             error,
-            DocumentImportError::EmptyContent {
+            IngestionError::Import(DocumentImportError::EmptyContent {
                 source_path: PathBuf::from("/tmp/empty.md"),
-            }
+            })
         );
     }
 

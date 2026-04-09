@@ -3,11 +3,27 @@ use marginalia_core::domain::{
     ReadingSession, RewriteDraft, RewriteStatus, SearchQuery, SearchResult, VoiceNote,
 };
 use marginalia_core::ports::storage::{
-    DocumentRepository, NoteRepository, RewriteDraftRepository, SessionRepository,
+    DocumentRepository, NoteRepository, RewriteDraftRepository, SessionRepository, StorageError,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+// ---------------------------------------------------------------------------
+// Error mapping
+// ---------------------------------------------------------------------------
+
+fn storage_err(e: rusqlite::Error) -> StorageError {
+    StorageError(e.to_string())
+}
+
+fn json_err(e: serde_json::Error) -> StorageError {
+    StorageError(format!("json serialization: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// DocumentRepository
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct SQLiteDocumentRepository {
@@ -23,79 +39,87 @@ impl SQLiteDocumentRepository {
 impl DocumentRepository for SQLiteDocumentRepository {
     fn ensure_schema(&mut self) {}
 
-    fn save_document(&mut self, document: Document) {
-        let connection = self.connection.lock().expect("sqlite connection lock poisoned");
-        connection
-            .execute(
+    fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
+        let mut conn = self.connection.lock().expect("sqlite connection lock poisoned");
+        let tx = conn.transaction().map_err(storage_err)?;
+
+        tx.execute(
+            "
+            INSERT INTO documents(document_id, title, source_path, imported_at, outline_json)
+            VALUES(?, ?, ?, ?, ?)
+            ON CONFLICT(document_id) DO UPDATE SET
+                title = excluded.title,
+                source_path = excluded.source_path,
+                imported_at = excluded.imported_at,
+                outline_json = excluded.outline_json
+            ",
+            params![
+                document.document_id,
+                document.title,
+                document.source_path.to_string_lossy().to_string(),
+                document.imported_at.to_rfc3339(),
+                document_to_json(&document).map_err(json_err)?,
+            ],
+        )
+        .map_err(storage_err)?;
+
+        tx.execute(
+            "DELETE FROM document_chunks WHERE document_id = ?",
+            params![document.document_id],
+        )
+        .map_err(storage_err)?;
+
+        tx.execute(
+            "DELETE FROM document_sections WHERE document_id = ?",
+            params![document.document_id],
+        )
+        .map_err(storage_err)?;
+
+        for section in &document.sections {
+            tx.execute(
                 "
-                INSERT INTO documents(document_id, title, source_path, imported_at, outline_json)
-                VALUES(?, ?, ?, ?, ?)
-                ON CONFLICT(document_id) DO UPDATE SET
-                    title = excluded.title,
-                    source_path = excluded.source_path,
-                    imported_at = excluded.imported_at,
-                    outline_json = excluded.outline_json
+                INSERT INTO document_sections(document_id, section_index, title, source_anchor)
+                VALUES(?, ?, ?, ?)
                 ",
                 params![
                     document.document_id,
-                    document.title,
-                    document.source_path.to_string_lossy().to_string(),
-                    document.imported_at.to_rfc3339(),
-                    document_to_json(&document),
+                    section.index as i64,
+                    section.title,
+                    section.source_anchor,
                 ],
             )
-            .unwrap();
-        connection
-            .execute("DELETE FROM document_chunks WHERE document_id = ?", params![document.document_id.clone()])
-            .unwrap();
-        connection
-            .execute("DELETE FROM document_sections WHERE document_id = ?", params![document.document_id.clone()])
-            .unwrap();
+            .map_err(storage_err)?;
 
-        for section in &document.sections {
-            connection
-                .execute(
+            for chunk in &section.chunks {
+                tx.execute(
                     "
-                    INSERT INTO document_sections(document_id, section_index, title, source_anchor)
-                    VALUES(?, ?, ?, ?)
+                    INSERT INTO document_chunks(
+                        document_id,
+                        section_index,
+                        chunk_index,
+                        anchor,
+                        text,
+                        char_start,
+                        char_end
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?)
                     ",
                     params![
                         document.document_id,
                         section.index as i64,
-                        section.title,
-                        section.source_anchor,
+                        chunk.index as i64,
+                        format!("section:{}/chunk:{}", section.index, chunk.index),
+                        chunk.text,
+                        chunk.char_start as i64,
+                        chunk.char_end as i64,
                     ],
                 )
-                .unwrap();
-
-            for chunk in &section.chunks {
-                connection
-                    .execute(
-                        "
-                        INSERT INTO document_chunks(
-                            document_id,
-                            section_index,
-                            chunk_index,
-                            anchor,
-                            text,
-                            char_start,
-                            char_end
-                        )
-                        VALUES(?, ?, ?, ?, ?, ?, ?)
-                        ",
-                        params![
-                            document.document_id,
-                            section.index as i64,
-                            chunk.index as i64,
-                            format!("section:{}/chunk:{}", section.index, chunk.index),
-                            chunk.text,
-                            chunk.char_start as i64,
-                            chunk.char_end as i64,
-                        ],
-                    )
-                    .unwrap();
+                .map_err(storage_err)?;
             }
         }
+
+        tx.commit().map_err(storage_err)?;
+        Ok(())
     }
 
     fn get_document(&self, document_id: &str) -> Option<Document> {
@@ -118,7 +142,7 @@ impl DocumentRepository for SQLiteDocumentRepository {
                 },
             )
             .optional()
-            .unwrap()?;
+            .unwrap_or(None)?;
 
         let mut sections_statement = connection
             .prepare(
@@ -129,7 +153,8 @@ impl DocumentRepository for SQLiteDocumentRepository {
                 ORDER BY section_index ASC
                 ",
             )
-            .unwrap();
+            .ok()?;
+
         let section_rows = sections_statement
             .query_map(params![document_id], |row| {
                 Ok((
@@ -138,11 +163,11 @@ impl DocumentRepository for SQLiteDocumentRepository {
                     row.get::<_, Option<String>>(2)?,
                 ))
             })
-            .unwrap();
+            .ok()?;
 
         let mut sections = Vec::new();
         for row in section_rows {
-            let (section_index, title, source_anchor) = row.unwrap();
+            let (section_index, title, source_anchor) = row.ok()?;
             let mut chunk_statement = connection
                 .prepare(
                     "
@@ -152,7 +177,7 @@ impl DocumentRepository for SQLiteDocumentRepository {
                     ORDER BY chunk_index ASC
                     ",
                 )
-                .unwrap();
+                .ok()?;
             let chunk_rows = chunk_statement
                 .query_map(params![document_id, section_index as i64], |row| {
                     Ok(DocumentChunk {
@@ -162,8 +187,8 @@ impl DocumentRepository for SQLiteDocumentRepository {
                         char_end: row.get::<_, i64>(3)? as usize,
                     })
                 })
-                .unwrap();
-            let chunks = chunk_rows.map(|row| row.unwrap()).collect::<Vec<_>>();
+                .ok()?;
+            let chunks = chunk_rows.filter_map(|row| row.ok()).collect::<Vec<_>>();
 
             sections.push(DocumentSection {
                 index: section_index,
@@ -173,13 +198,15 @@ impl DocumentRepository for SQLiteDocumentRepository {
             });
         }
 
+        let imported_at = chrono::DateTime::parse_from_rfc3339(&row.3)
+            .ok()?
+            .with_timezone(&chrono::Utc);
+
         Some(Document {
             document_id: row.0,
             title: row.1,
             source_path: PathBuf::from(row.2),
-            imported_at: chrono::DateTime::parse_from_rfc3339(&row.3)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
+            imported_at,
             sections,
         })
     }
@@ -187,14 +214,23 @@ impl DocumentRepository for SQLiteDocumentRepository {
     fn list_documents(&self) -> Vec<Document> {
         let document_ids = {
             let connection = self.connection.lock().expect("sqlite connection lock poisoned");
-            let mut statement = connection
+            let mut statement = match connection
                 .prepare("SELECT document_id FROM documents ORDER BY imported_at DESC")
-                .unwrap();
-            let rows = statement
-                .query_map([], |row| row.get::<_, String>(0))
-                .unwrap();
-
-            rows.map(|row| row.unwrap()).collect::<Vec<_>>()
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("WARNING: failed to list documents: {e}");
+                    return Vec::new();
+                }
+            };
+            let rows = match statement.query_map([], |row| row.get::<_, String>(0)) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("WARNING: failed to query documents: {e}");
+                    return Vec::new();
+                }
+            };
+            rows.filter_map(|row| row.ok()).collect::<Vec<_>>()
         };
 
         document_ids
@@ -229,9 +265,15 @@ impl DocumentRepository for SQLiteDocumentRepository {
         sql.push_str(" ORDER BY d.imported_at DESC, c.section_index ASC, c.chunk_index ASC LIMIT ?");
         params_vec.push(Box::new(query.limit.max(1) as i64));
 
-        let mut statement = connection.prepare(&sql).unwrap();
+        let mut statement = match connection.prepare(&sql) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("WARNING: failed to prepare document search: {e}");
+                return Vec::new();
+            }
+        };
         let params_ref = params_vec.iter().map(|value| value.as_ref()).collect::<Vec<_>>();
-        let rows = statement
+        let rows = match statement
             .query_map(rusqlite::params_from_iter(params_ref), |row| {
                 Ok(SearchResult {
                     entity_kind: "document".to_string(),
@@ -240,12 +282,21 @@ impl DocumentRepository for SQLiteDocumentRepository {
                     excerpt: row.get::<_, String>(1)?,
                     anchor: row.get::<_, String>(2)?,
                 })
-            })
-            .unwrap();
+            }) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("WARNING: failed to execute document search: {e}");
+                return Vec::new();
+            }
+        };
 
-        rows.map(|row| row.unwrap()).collect()
+        rows.filter_map(|row| row.ok()).collect()
     }
 }
+
+// ---------------------------------------------------------------------------
+// SessionRepository
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct SQLiteSessionRepository {
@@ -261,15 +312,16 @@ impl SQLiteSessionRepository {
 impl SessionRepository for SQLiteSessionRepository {
     fn ensure_schema(&mut self) {}
 
-    fn save_session(&mut self, session: ReadingSession) {
+    fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");
+
         if session.is_active {
             connection
                 .execute(
                     "UPDATE sessions SET is_active = 0 WHERE session_id != ? AND is_active = 1",
-                    params![session.session_id.clone()],
+                    params![session.session_id],
                 )
-                .unwrap();
+                .map_err(storage_err)?;
         }
 
         connection
@@ -357,7 +409,9 @@ impl SessionRepository for SQLiteSessionRepository {
                     session.updated_at.to_rfc3339(),
                 ],
             )
-            .unwrap();
+            .map_err(storage_err)?;
+
+        Ok(())
     }
 
     fn get_active_session(&self) -> Option<ReadingSession> {
@@ -373,6 +427,14 @@ impl SessionRepository for SQLiteSessionRepository {
                 ",
                 [],
                 |row| {
+                    let updated_at_str: String = row.get("updated_at")?;
+                    let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
+                        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        ))?
+                        .with_timezone(&chrono::Utc);
                     Ok(ReadingSession {
                         session_id: row.get::<_, String>("session_id")?,
                         document_id: row.get::<_, String>("document_id")?,
@@ -387,8 +449,7 @@ impl SessionRepository for SQLiteSessionRepository {
                         },
                         active_note_id: row.get::<_, Option<String>>("active_note_id")?,
                         last_command: row.get::<_, Option<String>>("last_command")?,
-                        last_command_source: row
-                            .get::<_, Option<String>>("last_command_source")?,
+                        last_command_source: row.get::<_, Option<String>>("last_command_source")?,
                         last_recognized_command: row
                             .get::<_, Option<String>>("last_recognized_command")?,
                         voice: row.get::<_, Option<String>>("voice")?,
@@ -397,49 +458,51 @@ impl SessionRepository for SQLiteSessionRepository {
                             .get::<_, Option<String>>("command_stt_provider")?,
                         playback_provider: row.get::<_, Option<String>>("playback_provider")?,
                         command_listening_active: row
-                            .get::<_, i64>("command_listening_active")?
-                            != 0,
+                            .get::<_, i64>("command_listening_active")? != 0,
                         command_language: row.get::<_, Option<String>>("command_language")?,
                         audio_reference: row.get::<_, Option<String>>("audio_reference")?,
                         playback_process_id: row
                             .get::<_, Option<i64>>("playback_process_id")?
-                            .map(|value| value as u32),
+                            .map(|v| v as u32),
                         runtime_process_id: row
                             .get::<_, Option<i64>>("runtime_process_id")?
-                            .map(|value| value as u32),
+                            .map(|v| v as u32),
                         runtime_status: row.get::<_, Option<String>>("runtime_status")?,
                         runtime_error: row.get::<_, Option<String>>("runtime_error")?,
                         startup_cleanup_summary: row
                             .get::<_, Option<String>>("startup_cleanup_summary")?,
                         is_active: row.get::<_, i64>("is_active")? != 0,
-                        updated_at: chrono::DateTime::parse_from_rfc3339(
-                            &row.get::<_, String>("updated_at")?,
-                        )
-                        .unwrap()
-                        .with_timezone(&chrono::Utc),
+                        updated_at,
                     })
                 },
             )
             .optional()
-            .unwrap()
+            .unwrap_or(None)
     }
 
     fn deactivate_stale_sessions(&mut self, max_inactive_hours: u32) -> u32 {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");
-        let count = connection
-            .execute(
-                "
-                UPDATE sessions
-                SET is_active = 0
-                WHERE is_active = 1
-                  AND updated_at < datetime('now', ? || ' hours')
-                ",
-                params![format!("-{}", max_inactive_hours)],
-            )
-            .unwrap();
-        count as u32
+        match connection.execute(
+            "
+            UPDATE sessions
+            SET is_active = 0
+            WHERE is_active = 1
+              AND updated_at < datetime('now', ? || ' hours')
+            ",
+            params![format!("-{}", max_inactive_hours)],
+        ) {
+            Ok(count) => count as u32,
+            Err(e) => {
+                eprintln!("WARNING: failed to deactivate stale sessions: {e}");
+                0
+            }
+        }
     }
 }
+
+// ---------------------------------------------------------------------------
+// NoteRepository
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct SQLiteNoteRepository {
@@ -455,7 +518,7 @@ impl SQLiteNoteRepository {
 impl NoteRepository for SQLiteNoteRepository {
     fn ensure_schema(&mut self) {}
 
-    fn save_note(&mut self, note: VoiceNote) {
+    fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");
         connection
             .execute(
@@ -500,18 +563,29 @@ impl NoteRepository for SQLiteNoteRepository {
                     note.created_at.to_rfc3339(),
                 ],
             )
-            .unwrap();
+            .map_err(storage_err)?;
+        Ok(())
     }
 
     fn list_notes_for_document(&self, document_id: &str) -> Vec<VoiceNote> {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");
-        let mut statement = connection
+        let mut statement = match connection
             .prepare("SELECT * FROM notes WHERE document_id = ? ORDER BY created_at ASC")
-            .unwrap();
-        let rows = statement
-            .query_map(params![document_id], note_from_row)
-            .unwrap();
-        rows.map(|row| row.unwrap()).collect()
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("WARNING: failed to list notes for document {document_id}: {e}");
+                return Vec::new();
+            }
+        };
+        let rows = match statement.query_map(params![document_id], note_from_row) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("WARNING: failed to query notes for document {document_id}: {e}");
+                return Vec::new();
+            }
+        };
+        rows.filter_map(|row| row.ok()).collect()
     }
 
     fn search_notes(&self, query: &SearchQuery) -> Vec<SearchResult> {
@@ -536,27 +610,41 @@ impl NoteRepository for SQLiteNoteRepository {
         sql.push_str(" ORDER BY created_at DESC LIMIT ?");
         params_vec.push(Box::new(query.limit.max(1) as i64));
 
-        let mut statement = connection.prepare(&sql).unwrap();
+        let mut statement = match connection.prepare(&sql) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("WARNING: failed to prepare note search: {e}");
+                return Vec::new();
+            }
+        };
         let params_ref = params_vec.iter().map(|value| value.as_ref()).collect::<Vec<_>>();
-        let rows = statement
-            .query_map(rusqlite::params_from_iter(params_ref), |row| {
-                Ok(SearchResult {
-                    entity_kind: "note".to_string(),
-                    entity_id: row.get::<_, String>(0)?,
-                    score: 1.0,
-                    excerpt: row.get::<_, String>(3)?,
-                    anchor: format!(
-                        "section:{}/chunk:{}",
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, i64>(2)?
-                    ),
-                })
+        let rows = match statement.query_map(rusqlite::params_from_iter(params_ref), |row| {
+            Ok(SearchResult {
+                entity_kind: "note".to_string(),
+                entity_id: row.get::<_, String>(0)?,
+                score: 1.0,
+                excerpt: row.get::<_, String>(3)?,
+                anchor: format!(
+                    "section:{}/chunk:{}",
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?
+                ),
             })
-            .unwrap();
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("WARNING: failed to execute note search: {e}");
+                return Vec::new();
+            }
+        };
 
-        rows.map(|row| row.unwrap()).collect()
+        rows.filter_map(|row| row.ok()).collect()
     }
 }
+
+// ---------------------------------------------------------------------------
+// RewriteDraftRepository
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct SQLiteRewriteDraftRepository {
@@ -572,8 +660,10 @@ impl SQLiteRewriteDraftRepository {
 impl RewriteDraftRepository for SQLiteRewriteDraftRepository {
     fn ensure_schema(&mut self) {}
 
-    fn save_draft(&mut self, draft: RewriteDraft) {
+    fn save_draft(&mut self, draft: RewriteDraft) -> Result<(), StorageError> {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");
+        let note_transcripts_json = serde_json::to_string(&draft.note_transcripts)
+            .map_err(json_err)?;
         connection
             .execute(
                 "
@@ -607,47 +697,79 @@ impl RewriteDraftRepository for SQLiteRewriteDraftRepository {
                     draft.section_index as i64,
                     draft.source_anchor,
                     draft.source_excerpt,
-                    serde_json::to_string(&draft.note_transcripts).unwrap(),
+                    note_transcripts_json,
                     draft.rewritten_text,
                     draft.provider_name,
                     rewrite_status_to_str(draft.status),
                     draft.created_at.to_rfc3339(),
                 ],
             )
-            .unwrap();
+            .map_err(storage_err)?;
+        Ok(())
     }
 
     fn list_drafts_for_document(&self, document_id: &str) -> Vec<RewriteDraft> {
         let connection = self.connection.lock().expect("sqlite connection lock poisoned");
-        let mut statement = connection
+        let mut statement = match connection
             .prepare("SELECT * FROM drafts WHERE document_id = ? ORDER BY created_at DESC")
-            .unwrap();
-        let rows = statement
-            .query_map(params![document_id], |row| {
-                Ok(RewriteDraft {
-                    draft_id: row.get::<_, String>("draft_id")?,
-                    document_id: row.get::<_, String>("document_id")?,
-                    section_index: row.get::<_, i64>("section_index")? as usize,
-                    source_anchor: row.get::<_, String>("source_anchor")?,
-                    source_excerpt: row.get::<_, String>("source_excerpt")?,
-                    note_transcripts: serde_json::from_str(
-                        &row.get::<_, String>("note_transcripts_json")?,
-                    )
-                    .unwrap_or_default(),
-                    rewritten_text: row.get::<_, String>("rewritten_text")?,
-                    provider_name: row.get::<_, String>("provider_name")?,
-                    status: rewrite_status_from_str(&row.get::<_, String>("status")?),
-                    created_at: chrono::DateTime::parse_from_rfc3339(
-                        &row.get::<_, String>("created_at")?,
-                    )
-                    .unwrap()
-                    .with_timezone(&chrono::Utc),
-                })
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("WARNING: failed to list drafts for document {document_id}: {e}");
+                return Vec::new();
+            }
+        };
+        let rows = match statement.query_map(params![document_id], |row| {
+            let note_json: String = row.get("note_transcripts_json")?;
+            let created_at_str: String = row.get("created_at")?;
+            let status_str: String = row.get("status")?;
+            Ok((
+                row.get::<_, String>("draft_id")?,
+                row.get::<_, String>("document_id")?,
+                row.get::<_, i64>("section_index")?,
+                row.get::<_, String>("source_anchor")?,
+                row.get::<_, String>("source_excerpt")?,
+                note_json,
+                row.get::<_, String>("rewritten_text")?,
+                row.get::<_, String>("provider_name")?,
+                status_str,
+                created_at_str,
+            ))
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("WARNING: failed to query drafts for document {document_id}: {e}");
+                return Vec::new();
+            }
+        };
+
+        rows.filter_map(|row| {
+            let (draft_id, document_id, section_index, source_anchor, source_excerpt,
+                 note_json, rewritten_text, provider_name, status_str, created_at_str) = row.ok()?;
+            let note_transcripts = serde_json::from_str(&note_json).unwrap_or_default();
+            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
+                .ok()?
+                .with_timezone(&chrono::Utc);
+            Some(RewriteDraft {
+                draft_id,
+                document_id,
+                section_index: section_index as usize,
+                source_anchor,
+                source_excerpt,
+                note_transcripts,
+                rewritten_text,
+                provider_name,
+                status: rewrite_status_from_str(&status_str),
+                created_at,
             })
-            .unwrap();
-        rows.map(|row| row.unwrap()).collect()
+        })
+        .collect()
     }
 }
+
+// ---------------------------------------------------------------------------
+// Row helpers
+// ---------------------------------------------------------------------------
 
 fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<VoiceNote> {
     Ok(VoiceNote {
@@ -666,13 +788,17 @@ fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<VoiceNote> {
             .get::<_, Option<String>>("raw_audio_path")?
             .map(PathBuf::from),
         created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>("created_at")?)
-            .unwrap()
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(e),
+            ))?
             .with_timezone(&chrono::Utc),
     })
 }
 
-fn document_to_json(document: &Document) -> String {
-    serde_json::json!({
+fn document_to_json(document: &Document) -> serde_json::Result<String> {
+    serde_json::to_string(&serde_json::json!({
         "document_id": document.document_id,
         "title": document.title,
         "source_path": document.source_path.to_string_lossy(),
@@ -692,8 +818,7 @@ fn document_to_json(document: &Document) -> String {
                 }).collect::<Vec<_>>(),
             })
         }).collect::<Vec<_>>(),
-    })
-    .to_string()
+    }))
 }
 
 fn reader_state_to_str(state: ReaderState) -> &'static str {
@@ -785,7 +910,7 @@ mod tests {
         let database = SQLiteDatabase::open_in_memory().unwrap();
         let mut repository = SQLiteDocumentRepository::new(database.connection());
 
-        repository.save_document(test_document());
+        repository.save_document(test_document()).unwrap();
         let loaded = repository.get_document("doc-1").unwrap();
 
         assert_eq!(loaded.title, "Doc");
@@ -798,7 +923,7 @@ mod tests {
         let mut repository = SQLiteSessionRepository::new(database.connection());
         let session = ReadingSession::new("session-1", "doc-1");
 
-        repository.save_session(session.clone());
+        repository.save_session(session.clone()).unwrap();
 
         assert_eq!(repository.get_active_session(), Some(session));
     }
@@ -817,7 +942,7 @@ mod tests {
             language: "it".to_string(),
             raw_audio_path: None,
             created_at: chrono::Utc::now(),
-        });
+        }).unwrap();
 
         let notes = repository.list_notes_for_document("doc-1");
         let results = repository.search_notes(&SearchQuery {
@@ -845,10 +970,34 @@ mod tests {
             provider_name: "fake".to_string(),
             status: RewriteStatus::Generated,
             created_at: chrono::Utc::now(),
-        });
+        }).unwrap();
 
         let drafts = repository.list_drafts_for_document("doc-1");
         assert_eq!(drafts.len(), 1);
         assert_eq!(drafts[0].status, RewriteStatus::Generated);
+    }
+
+    #[test]
+    fn save_document_is_atomic_on_concurrent_sections() {
+        let database = SQLiteDatabase::open_in_memory().unwrap();
+        let mut repository = SQLiteDocumentRepository::new(database.connection());
+
+        let mut doc = test_document();
+        doc.sections.push(DocumentSection {
+            index: 1,
+            title: "Chapter Two".to_string(),
+            chunks: vec![DocumentChunk {
+                index: 0,
+                text: "Second chapter content".to_string(),
+                char_start: 17,
+                char_end: 38,
+            }],
+            source_anchor: Some("section:1".to_string()),
+        });
+
+        repository.save_document(doc).unwrap();
+        let loaded = repository.get_document("doc-1").unwrap();
+        assert_eq!(loaded.sections.len(), 2);
+        assert_eq!(loaded.sections[1].title, "Chapter Two");
     }
 }

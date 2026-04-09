@@ -1,7 +1,8 @@
 mod frontend;
 
 use marginalia_core::application::{
-    DocumentIngestionOutcome, DocumentIngestionService, SessionQueryError, SessionQueryService,
+    DocumentIngestionOutcome, DocumentIngestionService, IngestionError, SessionQueryError,
+    SessionQueryService,
 };
 use marginalia_core::domain::{
     ReadingPosition, ReadingSession, ReaderState, VoiceNote, DEFAULT_CHUNK_TARGET_CHARS,
@@ -12,8 +13,8 @@ use marginalia_core::frontend::{
     SessionSnapshot,
 };
 use marginalia_core::ports::{
-    CommandRecognizer, DictationTranscriber, PlaybackEngine, SpeechInterruptMonitor,
-    SpeechSynthesizer, SynthesisError, SynthesisRequest,
+    CommandRecognizer, DictationTranscriber, PlaybackEngine, RewriteGenerator, SpeechInterruptMonitor,
+    SpeechSynthesizer, SynthesisError, SynthesisRequest, TopicSummarizer,
 };
 use marginalia_core::ports::storage::{
     DocumentRepository, NoteRepository, SessionRepository,
@@ -105,8 +106,8 @@ pub struct FakeRuntime {
     tts: Box<dyn SpeechSynthesizer + Send>,
     command_recognizer: Box<dyn CommandRecognizer + Send>,
     dictation_transcriber: Box<dyn DictationTranscriber + Send>,
-    rewrite_generator: FakeRewriteGenerator,
-    topic_summarizer: FakeTopicSummarizer,
+    rewrite_generator: Box<dyn RewriteGenerator + Send>,
+    topic_summarizer: Box<dyn TopicSummarizer + Send>,
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
 }
 
@@ -123,8 +124,8 @@ pub struct SqliteRuntime {
     tts: Box<dyn SpeechSynthesizer + Send>,
     command_recognizer: Box<dyn CommandRecognizer + Send>,
     dictation_transcriber: Box<dyn DictationTranscriber + Send>,
-    rewrite_generator: FakeRewriteGenerator,
-    topic_summarizer: FakeTopicSummarizer,
+    rewrite_generator: Box<dyn RewriteGenerator + Send>,
+    topic_summarizer: Box<dyn TopicSummarizer + Send>,
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
 }
 
@@ -142,8 +143,8 @@ impl Default for FakeRuntime {
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
             dictation_transcriber: Box::new(FakeDictationTranscriber::default()),
-            rewrite_generator: FakeRewriteGenerator::new(),
-            topic_summarizer: FakeTopicSummarizer::new(),
+            rewrite_generator: Box::new(FakeRewriteGenerator::new()),
+            topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
         }
     }
@@ -182,7 +183,7 @@ impl FakeRuntime {
     pub fn ingest_path(
         &mut self,
         source_path: &Path,
-    ) -> Result<DocumentIngestionOutcome, marginalia_core::ports::DocumentImportError> {
+    ) -> Result<DocumentIngestionOutcome, IngestionError> {
         let mut service = DocumentIngestionService::new(
             &mut self.document_repository,
             &self.importer,
@@ -239,7 +240,9 @@ impl FakeRuntime {
         session.playback_process_id = playback.process_id;
         session.runtime_status = Some("active".to_string());
         session.touch();
-        self.session_repository.save_session(session.clone());
+        if let Err(e) = self.session_repository.save_session(session.clone()) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
 
         self.publish_runtime_event(
             EventName::ReadingStarted,
@@ -311,7 +314,9 @@ impl FakeRuntime {
         session.last_command = Some("pause_session".to_string());
         session.runtime_status = Some("paused".to_string());
         session.touch();
-        self.session_repository.save_session(session);
+        if let Err(e) = self.session_repository.save_session(session) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         Ok(())
     }
 
@@ -326,7 +331,9 @@ impl FakeRuntime {
         session.last_command = Some("resume_session".to_string());
         session.runtime_status = Some("active".to_string());
         session.touch();
-        self.session_repository.save_session(session);
+        if let Err(e) = self.session_repository.save_session(session) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         Ok(())
     }
 
@@ -343,7 +350,9 @@ impl FakeRuntime {
         session.command_listening_active = false;
         session.is_active = false;
         session.touch();
-        self.session_repository.save_session(session);
+        if let Err(e) = self.session_repository.save_session(session) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         Ok(())
     }
 
@@ -395,10 +404,14 @@ impl FakeRuntime {
             raw_audio_path: None,
             created_at: chrono::Utc::now(),
         };
-        self.note_repository.save_note(note.clone());
+        if let Err(e) = self.note_repository.save_note(note.clone()) {
+            eprintln!("WARNING: failed to save note: {e}");
+        }
         session.last_command = Some("create_note".to_string());
         session.touch();
-        self.session_repository.save_session(session.clone());
+        if let Err(e) = self.session_repository.save_session(session.clone()) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         self.publish_runtime_event(
             EventName::NoteSaved,
             HashMap::from([
@@ -465,12 +478,12 @@ impl FakeRuntime {
         self.dictation_transcriber.as_ref()
     }
 
-    pub fn rewrite_generator(&self) -> &FakeRewriteGenerator {
-        &self.rewrite_generator
+    pub fn rewrite_generator(&self) -> &dyn RewriteGenerator {
+        self.rewrite_generator.as_ref()
     }
 
-    pub fn topic_summarizer(&self) -> &FakeTopicSummarizer {
-        &self.topic_summarizer
+    pub fn topic_summarizer(&self) -> &dyn TopicSummarizer {
+        self.topic_summarizer.as_ref()
     }
 
     fn publish_runtime_event(&self, name: EventName, payload: HashMap<String, String>) {
@@ -594,7 +607,9 @@ impl FakeRuntime {
         session.playback_process_id = playback.process_id;
         session.runtime_status = Some("active".to_string());
         session.touch();
-        self.session_repository.save_session(session);
+        if let Err(e) = self.session_repository.save_session(session) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         Ok(())
     }
 }
@@ -700,8 +715,8 @@ impl SqliteRuntime {
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
             dictation_transcriber: Box::new(FakeDictationTranscriber::default()),
-            rewrite_generator: FakeRewriteGenerator::new(),
-            topic_summarizer: FakeTopicSummarizer::new(),
+            rewrite_generator: Box::new(FakeRewriteGenerator::new()),
+            topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
         })
     }
@@ -730,8 +745,8 @@ impl SqliteRuntime {
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
             dictation_transcriber: Box::new(FakeDictationTranscriber::default()),
-            rewrite_generator: FakeRewriteGenerator::new(),
-            topic_summarizer: FakeTopicSummarizer::new(),
+            rewrite_generator: Box::new(FakeRewriteGenerator::new()),
+            topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
         })
     }
@@ -765,7 +780,7 @@ impl SqliteRuntime {
     pub fn ingest_path(
         &mut self,
         source_path: &Path,
-    ) -> Result<DocumentIngestionOutcome, marginalia_core::ports::DocumentImportError> {
+    ) -> Result<DocumentIngestionOutcome, IngestionError> {
         let mut service = DocumentIngestionService::new(
             &mut self.document_repository,
             &self.importer,
@@ -819,7 +834,9 @@ impl SqliteRuntime {
         session.playback_process_id = playback.process_id;
         session.runtime_status = Some("active".to_string());
         session.touch();
-        self.session_repository.save_session(session.clone());
+        if let Err(e) = self.session_repository.save_session(session.clone()) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
 
         self.publish_runtime_event(
             EventName::ReadingStarted,
@@ -891,7 +908,9 @@ impl SqliteRuntime {
         session.last_command = Some("pause_session".to_string());
         session.runtime_status = Some("paused".to_string());
         session.touch();
-        self.session_repository.save_session(session);
+        if let Err(e) = self.session_repository.save_session(session) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         Ok(())
     }
 
@@ -906,7 +925,9 @@ impl SqliteRuntime {
         session.last_command = Some("resume_session".to_string());
         session.runtime_status = Some("active".to_string());
         session.touch();
-        self.session_repository.save_session(session);
+        if let Err(e) = self.session_repository.save_session(session) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         Ok(())
     }
 
@@ -923,7 +944,9 @@ impl SqliteRuntime {
         session.command_listening_active = false;
         session.is_active = false;
         session.touch();
-        self.session_repository.save_session(session);
+        if let Err(e) = self.session_repository.save_session(session) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         Ok(())
     }
 
@@ -975,10 +998,14 @@ impl SqliteRuntime {
             raw_audio_path: None,
             created_at: chrono::Utc::now(),
         };
-        self.note_repository.save_note(note.clone());
+        if let Err(e) = self.note_repository.save_note(note.clone()) {
+            eprintln!("WARNING: failed to save note: {e}");
+        }
         session.last_command = Some("create_note".to_string());
         session.touch();
-        self.session_repository.save_session(session.clone());
+        if let Err(e) = self.session_repository.save_session(session.clone()) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         self.publish_runtime_event(
             EventName::NoteSaved,
             HashMap::from([
@@ -1045,12 +1072,12 @@ impl SqliteRuntime {
         self.dictation_transcriber.as_ref()
     }
 
-    pub fn rewrite_generator(&self) -> &FakeRewriteGenerator {
-        &self.rewrite_generator
+    pub fn rewrite_generator(&self) -> &dyn RewriteGenerator {
+        self.rewrite_generator.as_ref()
     }
 
-    pub fn topic_summarizer(&self) -> &FakeTopicSummarizer {
-        &self.topic_summarizer
+    pub fn topic_summarizer(&self) -> &dyn TopicSummarizer {
+        self.topic_summarizer.as_ref()
     }
 
     fn publish_runtime_event(&self, name: EventName, payload: HashMap<String, String>) {
@@ -1174,7 +1201,9 @@ impl SqliteRuntime {
         session.playback_process_id = playback.process_id;
         session.runtime_status = Some("active".to_string());
         session.touch();
-        self.session_repository.save_session(session);
+        if let Err(e) = self.session_repository.save_session(session) {
+            eprintln!("WARNING: failed to save session: {e}");
+        }
         Ok(())
     }
 }
