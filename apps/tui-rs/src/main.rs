@@ -18,10 +18,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
-#[cfg(feature = "alpha-compat")]
-use std::env;
 use std::io::stdout;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
@@ -29,18 +27,10 @@ use std::time::Duration;
 
 fn main() -> Result<(), String> {
     let logger = AppLogger::from_env()?;
-    #[cfg(feature = "alpha-compat")]
-    let config_path = env::var("MARGINALIA_CONFIG").ok().map(PathBuf::from);
-    #[cfg(not(feature = "alpha-compat"))]
-    let config_path: Option<PathBuf> = None;
     logger.info(format!(
-        "Starting Marginalia tui-rs (version={}, log_file={}, config={})",
+        "Starting Marginalia tui-rs (version={}, log_file={})",
         env!("CARGO_PKG_VERSION"),
         logger.path().display(),
-        config_path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "-".to_string())
     ));
 
     enable_raw_mode()
@@ -55,7 +45,7 @@ fn main() -> Result<(), String> {
         .show_cursor()
         .map_err(|err| log_error(&logger, format!("Unable to show terminal cursor: {err}")))?;
 
-    let mut app = wait_for_app(&mut terminal, &logger, config_path)?;
+    let mut app = wait_for_app(&mut terminal, &logger)?;
     let result = run_tui(&mut terminal, &mut app, &logger);
 
     disable_raw_mode()
@@ -80,13 +70,12 @@ fn main() -> Result<(), String> {
 fn wait_for_app(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     logger: &AppLogger,
-    config_path: Option<PathBuf>,
 ) -> Result<App, String> {
     let (tx, rx) = mpsc::channel();
     let worker_logger = logger.clone();
     thread::spawn(move || {
         let _ = tx.send(StartupEvent::Stage("Starting Marginalia engine...".to_string()));
-        let backend = match BackendClient::spawn(config_path.as_deref()) {
+        let backend = match BackendClient::spawn() {
             Ok(backend) => backend,
             Err(message) => {
                 let _ = tx.send(StartupEvent::Failed(message));

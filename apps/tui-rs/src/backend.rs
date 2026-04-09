@@ -1,18 +1,11 @@
-#[cfg(feature = "alpha-compat")]
-#[path = "backend_alpha.rs"]
-mod backend_alpha;
-
 use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::SqliteRuntime;
+use marginalia_tts_kokoro::{KokoroConfig, KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::env;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "alpha-compat")]
-use serde::Serialize;
-#[cfg(feature = "alpha-compat")]
-use backend_alpha::ProcessBackendClient;
 
 #[derive(Debug, Clone)]
 pub struct BackendLogEntry {
@@ -103,98 +96,45 @@ pub struct DocumentView {
     pub title: String,
 }
 
-#[cfg(feature = "alpha-compat")]
-#[derive(Debug, Serialize)]
-pub(crate) struct RequestEnvelope<'a> {
-    #[serde(rename = "type")]
-    request_type: &'a str,
-    name: &'a str,
-    payload: Value,
-    id: String,
-    protocol_version: u32,
-}
-
 pub(crate) enum BackendClient {
-    #[cfg(feature = "alpha-compat")]
-    Process(ProcessBackendClient),
     Beta(BetaBackendClient),
 }
 
 impl BackendClient {
-    pub fn spawn(config_path: Option<&Path>) -> Result<Self, String> {
-        #[cfg(not(feature = "alpha-compat"))]
-        let _ = config_path;
-
-        let mode = env::var("MARGINALIA_TUI_BACKEND")
-            .ok()
-            .map(|value| value.to_ascii_lowercase());
-
-        match mode.as_deref() {
-            None | Some("beta") | Some("rust") => BetaBackendClient::spawn().map(Self::Beta),
-            #[cfg(feature = "alpha-compat")]
-            Some("python") | Some("alpha") => {
-                ProcessBackendClient::spawn(config_path).map(Self::Process)
-            }
-            #[cfg(not(feature = "alpha-compat"))]
-            Some("python") | Some("alpha") => Err(
-                "This TUI build does not include Alpha Python compatibility. Rebuild with --features alpha-compat."
-                    .to_string(),
-            ),
-            Some(other) => Err(format!(
-                "Unsupported MARGINALIA_TUI_BACKEND value: {other}. Expected beta, rust, python, or alpha."
-            )),
-        }
+    pub fn spawn() -> Result<Self, String> {
+        BetaBackendClient::spawn().map(Self::Beta)
     }
 
     pub fn mode_label(&self) -> &'static str {
-        match self {
-            #[cfg(feature = "alpha-compat")]
-            Self::Process(_) => "Alpha Python backend",
-            Self::Beta(_) => "Beta Rust runtime",
-        }
+        "Beta Rust runtime"
     }
 
     pub fn get_app_snapshot(&mut self) -> Result<AppSnapshot, String> {
-        match self {
-            #[cfg(feature = "alpha-compat")]
-            Self::Process(client) => client.get_app_snapshot(),
-            Self::Beta(client) => client.get_app_snapshot(),
-        }
+        let Self::Beta(client) = self;
+        client.get_app_snapshot()
     }
 
     pub fn get_session_snapshot(&mut self) -> Result<Option<SessionSnapshot>, String> {
-        match self {
-            #[cfg(feature = "alpha-compat")]
-            Self::Process(client) => client.get_session_snapshot(),
-            Self::Beta(client) => client.get_session_snapshot(),
-        }
+        let Self::Beta(client) = self;
+        client.get_session_snapshot()
     }
 
     pub fn get_doctor_report(&mut self) -> Result<Value, String> {
-        match self {
-            #[cfg(feature = "alpha-compat")]
-            Self::Process(client) => client.get_doctor_report(),
-            Self::Beta(client) => client.get_doctor_report(),
-        }
+        let Self::Beta(client) = self;
+        client.get_doctor_report()
     }
 
     pub fn list_documents(&mut self) -> Result<Vec<DocumentListItem>, String> {
-        match self {
-            #[cfg(feature = "alpha-compat")]
-            Self::Process(client) => client.list_documents(),
-            Self::Beta(client) => client.list_documents(),
-        }
+        let Self::Beta(client) = self;
+        client.list_documents()
     }
 
     pub fn get_document_view(
         &mut self,
         document_id: Option<&str>,
     ) -> Result<Option<DocumentView>, String> {
-        match self {
-            #[cfg(feature = "alpha-compat")]
-            Self::Process(client) => client.get_document_view(document_id),
-            Self::Beta(client) => client.get_document_view(document_id),
-        }
+        let Self::Beta(client) = self;
+        client.get_document_view(document_id)
     }
 
     pub fn ingest_document(&mut self, path: &Path) -> Result<IngestDocumentResult, String> {
@@ -272,19 +212,13 @@ impl BackendClient {
         name: &str,
         payload: Value,
     ) -> Result<ResponseEnvelope, String> {
-        match self {
-            #[cfg(feature = "alpha-compat")]
-            Self::Process(client) => client.execute_command_response(name, payload),
-            Self::Beta(client) => client.execute_command_response(name, payload),
-        }
+        let Self::Beta(client) = self;
+        client.execute_command_response(name, payload)
     }
 
     pub fn recent_stderr_entries(&self, after_sequence: u64) -> Vec<BackendLogEntry> {
-        match self {
-            #[cfg(feature = "alpha-compat")]
-            Self::Process(client) => client.recent_stderr_entries(after_sequence),
-            Self::Beta(client) => client.recent_stderr_entries(after_sequence),
-        }
+        let Self::Beta(client) = self;
+        client.recent_stderr_entries(after_sequence)
     }
 }
 
@@ -304,11 +238,52 @@ impl BetaBackendClient {
             .unwrap_or_else(|_| repo_root.join(".marginalia-beta.sqlite3"));
         let mut runtime = SqliteRuntime::open(&db_path)
             .map_err(|err| format!("Unable to open beta runtime database: {err}"))?;
-        if env::var("MARGINALIA_TUI_PLAYBACK")
+
+        // Playback: HostPlaybackEngine di default, fake solo se esplicitamente richiesto
+        let use_fake_playback = env::var("MARGINALIA_TUI_PLAYBACK")
             .ok()
-            .is_some_and(|value| value.eq_ignore_ascii_case("host"))
-        {
+            .is_some_and(|v| v.eq_ignore_ascii_case("fake"));
+        let playback_label = if use_fake_playback {
+            "fake"
+        } else {
             runtime.set_playback_engine(HostPlaybackEngine::default());
+            "host"
+        };
+
+        // TTS: Kokoro se MARGINALIA_KOKORO_ASSETS è impostato, altrimenti fake
+        let mut tts_label = "fake";
+        if let Ok(assets_root) = env::var("MARGINALIA_KOKORO_ASSETS") {
+            let kokoro_config = KokoroConfig::from_assets_root(&assets_root);
+            let readiness = kokoro_config.readiness_report();
+            if readiness.is_ready() {
+                let tts_dir = env::var("MARGINALIA_TUI_TTS_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| {
+                        db_path
+                            .parent()
+                            .unwrap_or_else(|| Path::new("."))
+                            .join(".marginalia-tts-cache")
+                    });
+                let synth_config = KokoroSpeechSynthesizerConfig::new(&tts_dir);
+                runtime.set_speech_synthesizer(KokoroSpeechSynthesizer::new(
+                    kokoro_config,
+                    synth_config,
+                ));
+                runtime.set_provider_doctor_blob(
+                    "kokoro",
+                    json!({ "ready": true, "assets_root": assets_root }),
+                );
+                tts_label = "kokoro";
+            } else {
+                runtime.set_provider_doctor_blob(
+                    "kokoro",
+                    json!({
+                        "ready": false,
+                        "assets_root": assets_root,
+                        "missing": readiness.missing,
+                    }),
+                );
+            }
         }
 
         let mut client = Self {
@@ -317,9 +292,10 @@ impl BetaBackendClient {
             sequence: 0,
         };
         client.push_log(format!(
-            "beta-runtime ready db={} playback={}",
+            "beta-runtime ready db={} playback={} tts={}",
             db_path.display(),
-            env::var("MARGINALIA_TUI_PLAYBACK").unwrap_or_else(|_| "fake".to_string())
+            playback_label,
+            tts_label,
         ));
         Ok(client)
     }
