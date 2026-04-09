@@ -6,8 +6,12 @@ description = "Rust TUI frontend for Marginalia"
 
 [features]
 default = []
-vosk-stt = ["dep:marginalia-stt-vosk"]
-whisper-stt = ["dep:marginalia-stt-whisper"]
+vosk-stt          = ["dep:marginalia-stt-vosk"]
+whisper-stt       = ["dep:marginalia-stt-whisper"]
+whisper-stt-metal = ["dep:marginalia-stt-whisper", "marginalia-stt-whisper/metal"]
+whisper-stt-cuda  = ["dep:marginalia-stt-whisper", "marginalia-stt-whisper/cuda"]
+kokoro-coreml     = ["marginalia-tts-kokoro/coreml"]
+kokoro-cuda       = ["marginalia-tts-kokoro/cuda"]
 
 [dependencies]
 marginalia-stt-vosk = { path = "../../crates/marginalia-stt-vosk", optional = true }

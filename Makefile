@@ -214,11 +214,16 @@ tui-rs:
 	fi; \
 	echo "======================================="; \
 	echo ""; \
+	OS=$$(uname -s); \
 	FEATURES=""; \
-	if [ -n "$$VOSK_LIB" ]; then FEATURES="vosk-stt"; fi; \
+	_add() { if [ -z "$$FEATURES" ]; then FEATURES="$$1"; else FEATURES="$$FEATURES,$$1"; fi; }; \
+	if [ -n "$$VOSK_LIB" ]; then _add vosk-stt; fi; \
 	if [ -n "$$WHISPER_MODEL" ]; then \
-		if [ -n "$$FEATURES" ]; then FEATURES="$$FEATURES,whisper-stt"; \
-		else FEATURES="whisper-stt"; fi; \
+		if [ "$$OS" = "Darwin" ]; then _add whisper-stt-metal; echo "  accel:     whisper → Metal"; \
+		else _add whisper-stt; fi; \
+	fi; \
+	if [ -d "$$KOKORO_DIR" ]; then \
+		if [ "$$OS" = "Darwin" ]; then _add kokoro-coreml; echo "  accel:     kokoro → CoreML"; fi; \
 	fi; \
 	VOSK_PATH=$(VOSK_LIB_DIR) \
 	MARGINALIA_VOSK_MODEL=$$VOSK_MODEL \
