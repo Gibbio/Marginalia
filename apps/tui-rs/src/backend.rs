@@ -326,7 +326,7 @@ impl BetaBackendClient {
             let whisper_config = WhisperConfig::new(&model_path);
             runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(whisper_config));
             runtime.set_provider_doctor_blob(
-                "whisper_cpp",
+                "whisper_dictation_stt",
                 json!({ "ready": true, "model_path": model_path }),
             );
             dictation_label = "whisper";

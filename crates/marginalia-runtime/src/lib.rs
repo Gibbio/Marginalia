@@ -421,7 +421,7 @@ impl FakeRuntime {
             "kokoro": { "ready": false },
             "piper": { "ready": false },
             "vosk": { "ready": false },
-            "whisper_cpp": { "ready": false },
+            "whisper_dictation_stt": { "ready": false },
         });
         if let Some(map) = checks.as_object_mut() {
             for (key, blob) in &self.provider_doctor_blobs {
@@ -1001,7 +1001,7 @@ impl SqliteRuntime {
             "kokoro": { "ready": false },
             "piper": { "ready": false },
             "vosk": { "ready": false },
-            "whisper_cpp": { "ready": false },
+            "whisper_dictation_stt": { "ready": false },
         });
         if let Some(map) = checks.as_object_mut() {
             for (key, blob) in &self.provider_doctor_blobs {

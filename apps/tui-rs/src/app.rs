@@ -902,8 +902,8 @@ fn startup_warnings(report: &Value) -> Vec<String> {
         resolved,
         checks,
         "dictation_stt",
-        "whisper-cpp",
-        "whisper.cpp dictation STT is not ready",
+        "whisper-dictation-stt",
+        "Whisper dictation STT is not ready",
     );
     push_provider_warning(
         &mut warnings,
