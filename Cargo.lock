@@ -520,6 +520,7 @@ dependencies = [
  "crossterm",
  "marginalia-playback-host",
  "marginalia-runtime",
+ "marginalia-tts-kokoro",
  "ratatui",
  "serde",
  "serde_json",
