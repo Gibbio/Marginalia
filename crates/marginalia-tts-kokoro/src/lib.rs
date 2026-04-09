@@ -1,4 +1,7 @@
-use marginalia_core::ports::{ProviderCapabilities, ProviderExecutionMode};
+use marginalia_core::ports::{
+    ProviderCapabilities, ProviderExecutionMode, SpeechSynthesizer, SynthesisError,
+    SynthesisRequest, SynthesisResult,
+};
 use ort::session::Session;
 use ort::value::Tensor;
 use serde_json::Value;
@@ -8,6 +11,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const DEFAULT_MODEL_FILE_CANDIDATES: &[&str] = &[
     "kokoro.onnx",
@@ -33,6 +37,8 @@ const LEGACY_VOICE_FILE_CANDIDATES: &[&str] = &["voices.bin", "voices.json", "vo
 const DEFAULT_VOICE: &str = "af";
 const STYLE_VECTOR_WIDTH: usize = 256;
 const KOKORO_MAX_TOKEN_COUNT: usize = 510;
+
+static AUDIO_OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KokoroConfig {
@@ -434,6 +440,63 @@ pub struct KokoroTokenizationResult {
     pub token_ids: Vec<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KokoroTextPreparation {
+    pub normalized_phonemes: String,
+    pub token_ids: Vec<i64>,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KokoroTextProcessor {
+    config: KokoroConfig,
+}
+
+impl KokoroTextProcessor {
+    pub fn new(config: KokoroConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn prepare_text(
+        &self,
+        text: &str,
+    ) -> Result<KokoroTextPreparation, KokoroTextProcessingError> {
+        let raw = text.trim();
+        let Some((mode, phonemes)) = extract_explicit_phonemes(raw) else {
+            return Err(KokoroTextProcessingError::UnsupportedText(
+                "Kokoro Beta does not yet include grapheme-to-phoneme. Use `phon:` or `ipa:` prefixes."
+                    .to_string(),
+            ));
+        };
+        let tokenization = self
+            .config
+            .tokenize_phonemes(phonemes)
+            .map_err(KokoroTextProcessingError::Tokenization)?;
+        Ok(KokoroTextPreparation {
+            normalized_phonemes: tokenization.normalized_phonemes,
+            token_ids: tokenization.token_ids,
+            mode: mode.to_string(),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum KokoroTextProcessingError {
+    UnsupportedText(String),
+    Tokenization(KokoroTokenizationError),
+}
+
+impl Display for KokoroTextProcessingError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedText(message) => f.write_str(message),
+            Self::Tokenization(error) => Display::fmt(error, f),
+        }
+    }
+}
+
+impl Error for KokoroTextProcessingError {}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct KokoroVoiceStyle {
     pub voice: String,
@@ -463,6 +526,50 @@ pub struct KokoroInferenceResult {
 pub struct KokoroOnnxModel {
     config: KokoroConfig,
     session: Session,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KokoroSpeechSynthesizerConfig {
+    pub output_dir: PathBuf,
+    pub default_speed: f32,
+}
+
+impl KokoroSpeechSynthesizerConfig {
+    pub fn new(output_dir: impl AsRef<Path>) -> Self {
+        Self {
+            output_dir: output_dir.as_ref().to_path_buf(),
+            default_speed: 1.0,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct KokoroSpeechSynthesizer {
+    provider_name: String,
+    config: KokoroConfig,
+    runtime: KokoroSpeechSynthesizerConfig,
+    text_processor: KokoroTextProcessor,
+    model: Option<KokoroOnnxModel>,
+}
+
+impl KokoroSpeechSynthesizer {
+    pub fn new(config: KokoroConfig, runtime: KokoroSpeechSynthesizerConfig) -> Self {
+        let text_processor = KokoroTextProcessor::new(config.clone());
+        Self {
+            provider_name: "kokoro-beta".to_string(),
+            config,
+            runtime,
+            text_processor,
+            model: None,
+        }
+    }
+
+    fn ensure_model(&mut self) -> Result<&mut KokoroOnnxModel, KokoroInferenceError> {
+        if self.model.is_none() {
+            self.model = Some(KokoroOnnxModel::load(self.config.clone())?);
+        }
+        Ok(self.model.as_mut().expect("model initialized"))
+    }
 }
 
 #[derive(Debug)]
@@ -588,6 +695,92 @@ impl KokoroOnnxModel {
     }
 }
 
+impl SpeechSynthesizer for KokoroSpeechSynthesizer {
+    fn describe_capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            provider_name: self.provider_name.clone(),
+            interface_kind: "tts".to_string(),
+            supported_languages: vec!["it".to_string(), "en".to_string()],
+            supports_streaming: false,
+            supports_partial_results: false,
+            supports_timestamps: false,
+            low_latency_suitable: true,
+            offline_capable: true,
+            execution_mode: ProviderExecutionMode::Local,
+        }
+    }
+
+    fn synthesize(&mut self, request: SynthesisRequest) -> Result<SynthesisResult, SynthesisError> {
+        let prepared = self
+            .text_processor
+            .prepare_text(&request.text)
+            .map_err(|error| {
+                SynthesisError::new(self.provider_name.clone(), error.to_string())
+                    .with_metadata("language", request.language.clone())
+            })?;
+
+        let selected_voice = request
+            .voice
+            .clone()
+            .unwrap_or_else(|| self.config.default_voice.clone());
+        let default_speed = self.runtime.default_speed;
+        let inference = self
+            .ensure_model()
+            .and_then(|model| {
+                model.infer(KokoroInferenceRequest {
+                    token_ids: prepared.token_ids.clone(),
+                    voice: Some(selected_voice.clone()),
+                    speed: default_speed,
+                })
+            })
+            .map_err(|error| {
+                SynthesisError::new(self.provider_name.clone(), error.to_string())
+                    .with_metadata("voice", selected_voice.clone())
+                    .with_metadata("language", request.language.clone())
+                    .with_metadata("mode", prepared.mode.clone())
+            })?;
+
+        fs::create_dir_all(&self.runtime.output_dir).map_err(|error| {
+            SynthesisError::new(
+                self.provider_name.clone(),
+                format!(
+                    "failed to create output directory {}: {error}",
+                    self.runtime.output_dir.display()
+                ),
+            )
+        })?;
+        let output_path = next_audio_output_path(&self.runtime.output_dir, &selected_voice);
+        write_wav_f32(&output_path, inference.sample_rate_hz, &inference.audio).map_err(|error| {
+            SynthesisError::new(
+                self.provider_name.clone(),
+                format!("failed to write wav {}: {error}", output_path.display()),
+            )
+        })?;
+
+        let mut metadata = HashMap::new();
+        metadata.insert("language".to_string(), request.language);
+        metadata.insert("mode".to_string(), prepared.mode);
+        metadata.insert("phonemes".to_string(), prepared.normalized_phonemes);
+        metadata.insert(
+            "token_count".to_string(),
+            inference.input_token_count.to_string(),
+        );
+
+        Ok(SynthesisResult {
+            provider_name: self.provider_name.clone(),
+            voice: selected_voice,
+            content_type: "audio/wav".to_string(),
+            audio_reference: output_path.display().to_string(),
+            byte_length: output_path
+                .metadata()
+                .map(|metadata| metadata.len() as usize)
+                .unwrap_or(0),
+            text_excerpt: request.text.chars().take(120).collect(),
+            metadata,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub enum KokoroInferenceError {
     MissingModelAsset { searched: Vec<String> },
@@ -628,6 +821,46 @@ impl Display for KokoroInferenceError {
 }
 
 impl Error for KokoroInferenceError {}
+
+fn extract_explicit_phonemes(text: &str) -> Option<(&'static str, &str)> {
+    for (prefix, mode) in [
+        ("phonemes:", "phonemes"),
+        ("phon:", "phonemes"),
+        ("ipa:", "ipa"),
+    ] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            return Some((mode, rest.trim()));
+        }
+    }
+    None
+}
+
+fn next_audio_output_path(output_dir: &Path, voice: &str) -> PathBuf {
+    let id = AUDIO_OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    output_dir.join(format!(
+        "kokoro-{id}-{}.wav",
+        sanitize_path_fragment(voice)
+    ))
+}
+
+fn sanitize_path_fragment(input: &str) -> String {
+    let rendered = input
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let trimmed = rendered.trim_matches('_');
+    if trimmed.is_empty() {
+        "voice".to_string()
+    } else {
+        trimmed.chars().take(24).collect()
+    }
+}
 
 pub fn write_wav_f32(
     path: impl AsRef<Path>,
@@ -693,7 +926,8 @@ fn pad_input_ids(token_ids: &[i64]) -> Vec<i64> {
 mod tests {
     use super::{
         normalize_phoneme_text, pad_input_ids, write_wav_f32, KokoroConfig,
-        KokoroInferenceError, KokoroTokenizationError, STYLE_VECTOR_WIDTH,
+        KokoroInferenceError, KokoroTextProcessingError, KokoroTextProcessor,
+        KokoroTokenizationError, STYLE_VECTOR_WIDTH,
     };
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -848,6 +1082,35 @@ mod tests {
     #[test]
     fn normalize_phoneme_text_collapses_whitespace() {
         assert_eq!(normalize_phoneme_text(" h\tə \n l o "), "h ə l o");
+    }
+
+    #[test]
+    fn text_processor_accepts_explicit_phoneme_prefix() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.json"), sample_config_json()).unwrap();
+
+        let processor = KokoroTextProcessor::new(KokoroConfig::from_assets_root(&root));
+        let prepared = processor.prepare_text("phon: h ə l o").unwrap();
+
+        assert_eq!(prepared.mode, "phonemes");
+        assert_eq!(prepared.normalized_phonemes, "h ə l o");
+        assert_eq!(prepared.token_ids, vec![50, 16, 83, 16, 54, 16, 57]);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn text_processor_rejects_plain_text_without_g2p() {
+        let processor = KokoroTextProcessor::new(KokoroConfig::from_assets_root(temp_dir()));
+        let error = processor.prepare_text("ciao mondo").unwrap_err();
+
+        match error {
+            KokoroTextProcessingError::UnsupportedText(message) => {
+                assert!(message.contains("grapheme-to-phoneme"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 
     fn temp_dir() -> std::path::PathBuf {

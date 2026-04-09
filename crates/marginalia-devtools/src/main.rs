@@ -1,7 +1,9 @@
 use marginalia_core::frontend::{AppSnapshot, SessionSnapshot};
+use marginalia_core::ports::SpeechSynthesizer;
 use marginalia_runtime::{FakeRuntime, SqliteRuntime};
 use marginalia_tts_kokoro::{
     write_wav_f32, KokoroConfig, KokoroInferenceRequest, KokoroOnnxModel,
+    KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig,
 };
 use std::env;
 use std::path::Path;
@@ -12,6 +14,11 @@ use std::process::ExitCode;
 enum Command {
     FakePlay { document_path: PathBuf },
     KokoroDoctor { assets_root: PathBuf },
+    KokoroSynthesizeText {
+        assets_root: PathBuf,
+        output_dir: PathBuf,
+        text: String,
+    },
     KokoroEncodePhonemes { assets_root: PathBuf, phonemes: String },
     KokoroRunPhonemes {
         assets_root: PathBuf,
@@ -78,6 +85,20 @@ where
         [command, assets_root] if command == "kokoro-doctor" => Ok(Command::KokoroDoctor {
             assets_root: PathBuf::from(assets_root),
         }),
+        [command, output_dir, text] if command == "kokoro-synthesize-text" => {
+            Ok(Command::KokoroSynthesizeText {
+                assets_root: PathBuf::from("models/tts/kokoro"),
+                output_dir: PathBuf::from(output_dir),
+                text: text.to_string(),
+            })
+        }
+        [command, assets_root, output_dir, text] if command == "kokoro-synthesize-text" => {
+            Ok(Command::KokoroSynthesizeText {
+                assets_root: PathBuf::from(assets_root),
+                output_dir: PathBuf::from(output_dir),
+                text: text.to_string(),
+            })
+        }
         [command, phonemes] if command == "kokoro-encode-phonemes" => {
             Ok(Command::KokoroEncodePhonemes {
                 assets_root: PathBuf::from("models/tts/kokoro"),
@@ -329,6 +350,29 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
                     println!("provider.missing[{index}]={item}");
                 }
             }
+            Ok(())
+        }
+        Command::KokoroSynthesizeText {
+            assets_root,
+            output_dir,
+            text,
+        } => {
+            let config = KokoroConfig::from_assets_root(&assets_root);
+            let mut synthesizer = KokoroSpeechSynthesizer::new(
+                config,
+                KokoroSpeechSynthesizerConfig::new(&output_dir),
+            );
+            let result = synthesizer.synthesize(marginalia_core::ports::SynthesisRequest {
+                text,
+                voice: None,
+                language: "it".to_string(),
+            })?;
+
+            println!("provider={}", result.provider_name);
+            println!("audio_reference={}", result.audio_reference);
+            println!("voice={}", result.voice);
+            println!("byte_length={}", result.byte_length);
+            println!("content_type={}", result.content_type);
             Ok(())
         }
         Command::KokoroEncodePhonemes { assets_root, phonemes } => {
@@ -625,6 +669,7 @@ fn usage() -> &'static str {
     "Usage:
   cargo run -p marginalia-devtools -- fake-play <document>
   cargo run -p marginalia-devtools -- kokoro-doctor [assets_root]
+  cargo run -p marginalia-devtools -- kokoro-synthesize-text [assets_root] <output_dir> <text>
   cargo run -p marginalia-devtools -- kokoro-encode-phonemes [assets_root] <phoneme_text>
   cargo run -p marginalia-devtools -- kokoro-run-phonemes [assets_root] <voice> <output_wav> <phoneme_text> [speed]
   cargo run -p marginalia-devtools -- kokoro-run-tokens [assets_root] <voice> <output_wav> <token_ids_csv> [speed]
@@ -701,6 +746,24 @@ mod tests {
             Command::KokoroEncodePhonemes {
                 assets_root: PathBuf::from("models/tts/kokoro"),
                 phonemes: "h ə l o".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_args_accepts_kokoro_synthesize_text() {
+        let command = parse_args([
+            "kokoro-synthesize-text",
+            "/tmp/out",
+            "phon: h ə l o",
+        ])
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::KokoroSynthesizeText {
+                assets_root: PathBuf::from("models/tts/kokoro"),
+                output_dir: PathBuf::from("/tmp/out"),
+                text: "phon: h ə l o".to_string(),
             }
         );
     }

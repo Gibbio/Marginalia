@@ -12,7 +12,7 @@ use marginalia_core::frontend::{
     SessionSnapshot,
 };
 use marginalia_core::ports::{
-    PlaybackEngine, SpeechSynthesizer, SynthesisRequest,
+    PlaybackEngine, SpeechSynthesizer, SynthesisError, SynthesisRequest,
 };
 use marginalia_core::ports::storage::{
     DocumentRepository, NoteRepository, SessionRepository,
@@ -58,6 +58,7 @@ pub enum RuntimeError {
     MissingActiveSession,
     MissingDocument { document_id: String },
     EmptyDocument { document_id: String },
+    Synthesis(SynthesisError),
     Query(SessionQueryError),
 }
 
@@ -71,6 +72,7 @@ impl Display for RuntimeError {
             Self::EmptyDocument { document_id } => {
                 write!(f, "Document {} has no readable chunks.", document_id)
             }
+            Self::Synthesis(error) => write!(f, "Speech synthesis failed: {error}"),
             Self::Query(error) => write!(f, "Runtime query failed: {:?}", error),
         }
     }
@@ -81,6 +83,12 @@ impl Error for RuntimeError {}
 impl From<SessionQueryError> for RuntimeError {
     fn from(value: SessionQueryError) -> Self {
         Self::Query(value)
+    }
+}
+
+impl From<SynthesisError> for RuntimeError {
+    fn from(value: SynthesisError) -> Self {
+        Self::Synthesis(value)
     }
 }
 
@@ -197,11 +205,12 @@ impl FakeRuntime {
                 document_id: document_id.to_string(),
             })?;
 
+        let tts_provider = self.tts.describe_capabilities().provider_name;
         let synthesis = self.tts.synthesize(SynthesisRequest {
             text: chunk.text.clone(),
             voice: Some("narrator".to_string()),
             language: "it".to_string(),
-        });
+        })?;
         let playback = self
             .playback_engine
             .start(&document, &position, Some(synthesis));
@@ -217,7 +226,7 @@ impl FakeRuntime {
         session.last_command = Some("start_session".to_string());
         session.last_command_source = Some("runtime".to_string());
         session.voice = Some("narrator".to_string());
-        session.tts_provider = Some("fake-tts".to_string());
+        session.tts_provider = Some(tts_provider);
         session.command_stt_provider = Some("fake-command-stt".to_string());
         session.playback_provider = playback.provider_name.clone();
         session.command_listening_active = true;
@@ -548,7 +557,7 @@ impl FakeRuntime {
                 .command_language
                 .clone()
                 .unwrap_or_else(|| "it".to_string()),
-        });
+        })?;
         let playback = self
             .playback_engine
             .start(&document, &session.position, Some(synthesis));
@@ -749,11 +758,12 @@ impl SqliteRuntime {
                 document_id: document_id.to_string(),
             })?;
 
+        let tts_provider = self.tts.describe_capabilities().provider_name;
         let synthesis = self.tts.synthesize(SynthesisRequest {
             text: chunk.text.clone(),
             voice: Some("narrator".to_string()),
             language: "it".to_string(),
-        });
+        })?;
         let playback = self
             .playback_engine
             .start(&document, &position, Some(synthesis));
@@ -769,7 +779,7 @@ impl SqliteRuntime {
         session.last_command = Some("start_session".to_string());
         session.last_command_source = Some("runtime".to_string());
         session.voice = Some("narrator".to_string());
-        session.tts_provider = Some("fake-tts".to_string());
+        session.tts_provider = Some(tts_provider);
         session.command_stt_provider = Some("fake-command-stt".to_string());
         session.playback_provider = playback.provider_name.clone();
         session.command_listening_active = true;
@@ -1098,7 +1108,7 @@ impl SqliteRuntime {
                 .command_language
                 .clone()
                 .unwrap_or_else(|| "it".to_string()),
-        });
+        })?;
         let playback = self
             .playback_engine
             .start(&document, &session.position, Some(synthesis));

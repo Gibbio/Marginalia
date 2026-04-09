@@ -1,5 +1,5 @@
 use marginalia_core::ports::{
-    ProviderCapabilities, ProviderExecutionMode, SpeechSynthesizer, SynthesisRequest,
+    ProviderCapabilities, ProviderExecutionMode, SpeechSynthesizer, SynthesisError, SynthesisRequest,
     SynthesisResult,
 };
 use std::collections::HashMap;
@@ -45,7 +45,7 @@ impl SpeechSynthesizer for FakeSpeechSynthesizer {
         }
     }
 
-    fn synthesize(&mut self, request: SynthesisRequest) -> SynthesisResult {
+    fn synthesize(&mut self, request: SynthesisRequest) -> Result<SynthesisResult, SynthesisError> {
         let voice = request
             .voice
             .clone()
@@ -57,7 +57,7 @@ impl SpeechSynthesizer for FakeSpeechSynthesizer {
         let mut metadata = HashMap::new();
         metadata.insert("language".to_string(), request.language);
 
-        SynthesisResult {
+        Ok(SynthesisResult {
             provider_name: self.provider_name.clone(),
             voice: voice.clone(),
             content_type: "audio/wav".to_string(),
@@ -65,7 +65,7 @@ impl SpeechSynthesizer for FakeSpeechSynthesizer {
             byte_length: excerpt.len(),
             text_excerpt: excerpt,
             metadata,
-        }
+        })
     }
 }
 
@@ -135,7 +135,7 @@ mod tests {
             text: "Alpha beta gamma".to_string(),
             voice: None,
             language: "it".to_string(),
-        });
+        }).unwrap();
 
         assert_eq!(result.provider_name, "fake-tts");
         assert_eq!(result.voice, "narrator");

@@ -12,6 +12,9 @@ Current commands:
   - checks Kokoro assets
   - resolves the ONNX Runtime dynamic library
   - attempts to open the ONNX model
+- `kokoro-synthesize-text [assets_root] <output_dir> <text>`
+  - exercises the Rust `SpeechSynthesizer` wrapper
+  - currently expects text prefixed with `phon:` or `ipa:`
 - `kokoro-encode-phonemes [assets_root] <phoneme_text>`
   - loads `config.json`
   - maps phoneme symbols to Kokoro token IDs
