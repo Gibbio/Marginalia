@@ -268,19 +268,12 @@ clean:
 	rm -rf benchmark/macos-apple-silicon/rust-voice/target/
 	rm -rf benchmark/macos-apple-silicon/rust-mlx/target/
 	rm -rf .bench-venv/
-	rm -f *.log
-	rm -f marginalia-cli.db marginalia-cli.db-shm marginalia-cli.db-wal
-	@echo "Rust build artifacts and benchmark caches cleaned."
-
-clean-alpha:
-	rm -rf build/ dist/ *.egg-info .eggs/
-	rm -rf .mypy_cache/ .pytest_cache/ .ruff_cache/ .coverage htmlcov/
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@echo "Alpha Python build artifacts cleaned."
-
-clean-session:
 	rm -rf .marginalia/
-	@echo "Session data cleaned."
+	rm -rf .marginalia-tts-cache/
+	rm -f apps/tui-rs/marginalia.toml
+	rm -f *.log *.db *.db-shm *.db-wal
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@echo "All build artifacts, caches, and session data cleaned."
 
 # ---------------------------------------------------------------------------
 # Alpha reference (migration reference only — do not use for Beta development)
