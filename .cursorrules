@@ -116,12 +116,31 @@ cargo test                               # all tests
 
 Building marginalia-tts-mlx requires Xcode + Metal Toolchain on macOS.
 
+## STT — voice commands
+
+Two backends for voice commands, configured in `marginalia.toml`:
+
+| Backend | Latency | Accuracy | Mic behavior |
+|---|---|---|---|
+| **Whisper** | ~2s | Excellent (full speech recognition) | Persistent stream |
+| **Vosk** | Instant | Good (grammar-based, may false-positive) | Persistent stream |
+
+**Whisper** (recommended): records audio, runs inference, matches commands in transcript.
+Configurable: `speech_threshold`, `silence_timeout`, `max_record_seconds`.
+
+**Vosk**: real-time grammar recognizer. Has **adaptive noise floor** — continuously
+measures ambient noise and auto-adjusts speech detection threshold. Configure with
+`speech_threshold = "auto"` (default) or a fixed number.
+
+Both backends keep the microphone open for the entire session (no icon flickering).
+The monitor thread runs independently from the runtime (no lock contention).
+
 ## Key conventions
 
 - Italian is the primary language (documents, TTS voices, STT commands)
 - Chunk target: ~300 characters per chunk
 - Audio: 24kHz sample rate (Kokoro), 22050Hz (Piper)
-- Config: TOML (`apps/tui-rs/marginalia.toml`)
+- Config: TOML (`apps/tui-rs/marginalia.toml`), generated from template by `make tui-rs`
 - Default voice: `af_bella` (English), `if_sara` / `im_nicola` (Italian)
 - espeak-ng is used as external phonemizer (all languages, clause-by-clause)
 - Phonemizer rules follow misaki (hexgrad/misaki) — the Kokoro reference G2P
@@ -135,3 +154,4 @@ Building marginalia-tts-mlx requires Xcode + Metal Toolchain on macOS.
 - Don't add unnecessary abstractions — three similar lines > premature abstraction
 - Don't invent phonemizer rules — check misaki (hexgrad/misaki) first
 - Don't call espeak-ng on full text (strips punctuation) — call per clause
+- Don't open/close audio streams per capture cycle — keep them persistent
