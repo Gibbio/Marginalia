@@ -1,89 +1,94 @@
-# Marginalia Rust TUI
+# Marginalia TUI
 
-This is the Rust TUI frontend for Marginalia, built with ratatui.
-
-In the Beta plan it is retained as the desktop development and
-administration tool while the shared Rust engine matures. It talks
-directly to the embedded `SqliteRuntime` — no Python process is
-involved.
+Terminal UI for Marginalia, built with ratatui.
 
 ## Run
-
-```bash
-cargo run --manifest-path apps/tui-rs/Cargo.toml
-```
-
-or via Make:
 
 ```bash
 make tui-rs
 ```
 
-On startup the TUI shows a loading screen while the runtime
-initialises, then fetches the doctor report and surfaces any provider
-issues in the `Log` pane.
+On macOS Apple Silicon this auto-enables Kokoro MLX (Metal GPU, ~1s per chunk).
+On other platforms it falls back to Kokoro ONNX or fake TTS.
 
-## Providers
+## Configuration
 
-### Playback
+Edit `apps/tui-rs/marginalia.toml`:
 
-`HostPlaybackEngine` is active by default. It auto-detects `afplay`
-(macOS), `aplay` (Linux), or `ffplay` and plays synthesised WAV files
-via a subprocess.
+```toml
+database_path = ".marginalia/beta.sqlite3"
 
-To disable playback (CI, headless environments):
+# ── TTS — MLX (macOS Apple Silicon, auto-enabled) ────────────
+[mlx]
+# model = "prince-canuma/Kokoro-82M"   # HuggingFace repo (auto-download)
+voice = "if_sara"                       # Italian female voice
 
-```bash
-MARGINALIA_TUI_PLAYBACK=fake cargo run --manifest-path apps/tui-rs/Cargo.toml
+# Available voices:
+#   Italian:  if_sara (F), im_nicola (M)
+#   English:  af_bella, af_heart, af_sarah, af_sky (F)
+#             am_adam, am_michael (M)
+#   British:  bf_emma, bf_alice (F), bm_george, bm_daniel (M)
+#   Other:    50+ voices auto-download from HuggingFace on first use
+
+# ── TTS — Kokoro ONNX (cross-platform fallback) ──────────────
+[kokoro]
+assets_root = "models/tts/kokoro"       # needs make bootstrap-kokoro
+# tts_cache_dir = ".marginalia/tts-cache"
+phonemizer_program = "espeak-ng"
+phonemizer_args = ["-v", "it", "--ipa", "-q"]
+
+# ── STT — Vosk (voice commands) ──────────────────────────────
+[vosk]
+model_path = "models/stt/vosk/vosk-model-small-it-0.22"
+commands = ["pausa", "avanti", "indietro", "stop"]
+
+# ── STT — Whisper (note dictation) ───────────────────────────
+[whisper]
+model_path = "models/stt/whisper/ggml-base.bin"
+language = "it"
+
+# ── Playback ──────────────────────────────────────────────────
+[playback]
+# fake = true   # headless/CI environments
 ```
 
-### TTS — Kokoro
+## Commands
 
-Kokoro TTS is activated when `MARGINALIA_KOKORO_ASSETS` points at a
-directory containing the model, config, voices, and ONNX Runtime
-library. See [`models/tts/kokoro/README.md`](../../models/tts/kokoro/README.md)
-for the expected layout and download instructions.
+| Command | Description |
+|---|---|
+| `/ingest <file>` | Import a .txt or .md file |
+| `/play <path\|id>` | Start reading session |
+| `/pause` | Pause playback |
+| `/resume` | Resume playback |
+| `/stop` | Stop session |
+| `/next` | Next chapter |
+| `/back` | Previous chunk |
+| `/repeat` | Repeat current chunk |
+| `/restart` | Restart current chapter |
+| `/note <text>` | Add a voice note |
+| `/help` | Show available commands |
 
-```bash
-MARGINALIA_KOKORO_ASSETS=.kokoro-assets \
-cargo run --manifest-path apps/tui-rs/Cargo.toml
-```
+## Keyboard shortcuts
 
-If `MARGINALIA_KOKORO_ASSETS` is not set, or the assets directory is
-incomplete, the TUI falls back to a silent fake TTS and logs a warning
-in the `Log` pane. The session still starts; no audio is produced.
+With an empty command bar:
 
-Synthesised WAV files are written to `.marginalia-tts-cache/` next to
-the database by default. Override with `MARGINALIA_TUI_TTS_DIR`.
+| Key | Action |
+|---|---|
+| `Up` / `Down` | Previous / next chunk |
+| `Left` / `Right` | Previous / next chapter |
+| `PageUp` / `PageDown` | Scroll document pane |
+| `Tab` | Autocomplete command |
+| `Ctrl-P` / `Ctrl-N` | Command history |
+| `Ctrl-C` (x2) | Quit |
 
-## Environment variables
+## Build features
 
-| Variable | Default | Description |
-|---|---|---|
-| `MARGINALIA_KOKORO_ASSETS` | _(unset = fake TTS)_ | Path to Kokoro model assets directory |
-| `MARGINALIA_TUI_TTS_DIR` | `<db_dir>/.marginalia-tts-cache/` | Directory for synthesised WAV files |
-| `MARGINALIA_TUI_PLAYBACK` | `host` | Set to `fake` for headless/CI |
-| `MARGINALIA_TUI_BETA_DB` | `.marginalia-beta.sqlite3` | SQLite database path |
-| `MARGINALIA_REPO_ROOT` | current directory | Repository root for relative paths |
-| `MARGINALIA_TUI_LOG_FILE` | `marginalia-tui.log` | Client-side log file path |
+| Feature | What it enables |
+|---|---|
+| `mlx-tts` | Kokoro via MLX Metal GPU (macOS Apple Silicon) |
+| `vosk-stt` | Vosk voice commands (needs libvosk) |
+| `whisper-stt` | Whisper dictation (needs whisper.cpp) |
+| `whisper-stt-metal` | Whisper with Metal acceleration |
+| `kokoro-coreml` | _(broken — CoreML incompatible with Kokoro)_ |
 
-## Interaction
-
-Command bar:
-
-- `Tab` completes the selected suggestion
-- `Enter` confirms the selected suggestion, then runs the command
-- `Up` and `Down` navigate suggestions while typing
-- `Ctrl-P` and `Ctrl-N` navigate command history
-- `Ctrl-C` must be pressed twice within 2 seconds to quit
-
-Session navigation (with an empty command bar):
-
-- `Up` / `Down` — previous / next chunk
-- `Left` / `Right` — previous / next chapter
-- `PageUp` / `PageDown` — scroll the Document pane
-- `Home` / `End` — jump to top / bottom of the Document pane
-
-`/ingest` accepts markdown and plain text files. It expands
-shell-like paths (`~/notes/book.md`, `$HOME/...`) and suggests
-`.md`, `.markdown`, and `.txt` files as you type.
+`make tui-rs` auto-selects features based on platform and available models.
