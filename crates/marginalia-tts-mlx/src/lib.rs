@@ -192,6 +192,8 @@ fn normalize_pauses(text: &str) -> String {
         .replace('\u{2018}', "'")  // left single quote
         .replace('\u{2019}', "'")  // right single quote
         .replace("  ", " ")
+        .replace(", ,", ",")
+        .replace(",,", ",")
 }
 
 fn is_clause_punct(c: char) -> bool {
