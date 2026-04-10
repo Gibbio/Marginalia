@@ -215,7 +215,7 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 		VOSK_SECTION='# [vosk]  — non installato. Esegui: make bootstrap-vosk bootstrap-vosk-lib'; \
 	fi; \
 	if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
-		WHISPER_SECTION='[whisper]\nmodel_path = "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)"\nlanguage = "it"'; \
+		WHISPER_SECTION='[whisper]\nmodel_path = "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)"\nlanguage = "it"\n# use_for_commands = true  # use Whisper instead of Vosk for voice commands (more accurate, ~2s latency)'; \
 	else \
 		WHISPER_SECTION='# [whisper]  — non installato. Esegui: make bootstrap-whisper'; \
 	fi; \
