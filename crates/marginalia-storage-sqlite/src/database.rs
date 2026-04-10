@@ -3,7 +3,10 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 const MIGRATIONS: &[(&str, &str)] = &[
-    ("001_baseline", include_str!("../migrations/001_baseline.sql")),
+    (
+        "001_baseline",
+        include_str!("../migrations/001_baseline.sql"),
+    ),
     (
         "002_active_session_flag",
         include_str!("../migrations/002_active_session_flag.sql"),
@@ -56,8 +59,8 @@ impl SQLiteDatabase {
         )?;
 
         let applied = {
-            let mut statement =
-                connection.prepare("SELECT migration_id FROM schema_migrations ORDER BY migration_id")?;
+            let mut statement = connection
+                .prepare("SELECT migration_id FROM schema_migrations ORDER BY migration_id")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             let mut applied = Vec::new();
             for row in rows {
@@ -93,7 +96,9 @@ mod tests {
         let connection = connection.lock().unwrap();
 
         let count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
             .unwrap();
 
         assert_eq!(count, 2);

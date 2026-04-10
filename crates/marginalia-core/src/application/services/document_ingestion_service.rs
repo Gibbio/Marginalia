@@ -99,7 +99,10 @@ where
         }
     }
 
-    pub fn ingest_path(&mut self, source_path: &Path) -> Result<DocumentIngestionOutcome, IngestionError> {
+    pub fn ingest_path(
+        &mut self,
+        source_path: &Path,
+    ) -> Result<DocumentIngestionOutcome, IngestionError> {
         let imported = self.importer.import_path(source_path)?;
         let raw_char_count = imported.canonical_text().chars().count();
         let document = build_document_from_import(imported, self.chunk_target_chars);
@@ -184,12 +187,15 @@ mod tests {
                 return Err(error.clone());
             }
 
-            self.document.clone().map(|mut document| {
-                document.source_path = source_path.to_path_buf();
-                document
-            }).ok_or_else(|| DocumentImportError::UnsupportedFormat {
-                source_path: source_path.to_path_buf(),
-            })
+            self.document
+                .clone()
+                .map(|mut document| {
+                    document.source_path = source_path.to_path_buf();
+                    document
+                })
+                .ok_or_else(|| DocumentImportError::UnsupportedFormat {
+                    source_path: source_path.to_path_buf(),
+                })
         }
     }
 
@@ -199,9 +205,9 @@ mod tests {
     }
 
     impl DocumentRepository for StubDocumentRepository {
-
         fn save_document(&mut self, document: crate::domain::Document) -> Result<(), StorageError> {
-            self.documents.retain(|existing| existing.document_id != document.document_id);
+            self.documents
+                .retain(|existing| existing.document_id != document.document_id);
             self.documents.push(document);
             Ok(())
         }
@@ -332,6 +338,9 @@ mod tests {
         let events = service.event_publisher.events.borrow();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, EventName::DocumentIngested);
-        assert_eq!(events[0].payload.get("title").map(String::as_str), Some("Doc"));
+        assert_eq!(
+            events[0].payload.get("title").map(String::as_str),
+            Some("Doc")
+        );
     }
 }

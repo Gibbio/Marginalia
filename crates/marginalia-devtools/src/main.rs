@@ -2,8 +2,8 @@ use marginalia_core::frontend::{AppSnapshot, SessionSnapshot};
 use marginalia_core::ports::SpeechSynthesizer;
 use marginalia_runtime::SqliteRuntime;
 use marginalia_tts_kokoro::{
-    write_wav_f32, KokoroConfig, KokoroInferenceRequest, KokoroOnnxModel,
-    KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig,
+    write_wav_f32, KokoroConfig, KokoroInferenceRequest, KokoroOnnxModel, KokoroSpeechSynthesizer,
+    KokoroSpeechSynthesizerConfig,
 };
 use std::env;
 use std::path::Path;
@@ -12,14 +12,21 @@ use std::process::ExitCode;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Command {
-    FakePlay { document_path: PathBuf },
-    KokoroDoctor { assets_root: PathBuf },
+    FakePlay {
+        document_path: PathBuf,
+    },
+    KokoroDoctor {
+        assets_root: PathBuf,
+    },
     KokoroSynthesizeText {
         assets_root: PathBuf,
         output_dir: PathBuf,
         text: String,
     },
-    KokoroEncodePhonemes { assets_root: PathBuf, phonemes: String },
+    KokoroEncodePhonemes {
+        assets_root: PathBuf,
+        phonemes: String,
+    },
     KokoroRunPhonemes {
         assets_root: PathBuf,
         voice: String,
@@ -34,21 +41,55 @@ enum Command {
         token_ids: Vec<i64>,
         speed: f32,
     },
-    SqliteIngest { db_path: PathBuf, document_path: PathBuf },
-    SqliteListDocuments { db_path: PathBuf },
-    SqlitePlay { db_path: PathBuf, document_path: PathBuf },
-    SqlitePlayTarget { db_path: PathBuf, target: String },
-    SqlitePause { db_path: PathBuf },
-    SqliteResume { db_path: PathBuf },
-    SqliteStop { db_path: PathBuf },
-    SqliteRepeat { db_path: PathBuf },
-    SqliteNextChunk { db_path: PathBuf },
-    SqlitePreviousChunk { db_path: PathBuf },
-    SqliteNextChapter { db_path: PathBuf },
-    SqlitePreviousChapter { db_path: PathBuf },
-    SqliteRestartChapter { db_path: PathBuf },
-    SqliteNote { db_path: PathBuf, text: String },
-    SqliteStatus { db_path: PathBuf },
+    SqliteIngest {
+        db_path: PathBuf,
+        document_path: PathBuf,
+    },
+    SqliteListDocuments {
+        db_path: PathBuf,
+    },
+    SqlitePlay {
+        db_path: PathBuf,
+        document_path: PathBuf,
+    },
+    SqlitePlayTarget {
+        db_path: PathBuf,
+        target: String,
+    },
+    SqlitePause {
+        db_path: PathBuf,
+    },
+    SqliteResume {
+        db_path: PathBuf,
+    },
+    SqliteStop {
+        db_path: PathBuf,
+    },
+    SqliteRepeat {
+        db_path: PathBuf,
+    },
+    SqliteNextChunk {
+        db_path: PathBuf,
+    },
+    SqlitePreviousChunk {
+        db_path: PathBuf,
+    },
+    SqliteNextChapter {
+        db_path: PathBuf,
+    },
+    SqlitePreviousChapter {
+        db_path: PathBuf,
+    },
+    SqliteRestartChapter {
+        db_path: PathBuf,
+    },
+    SqliteNote {
+        db_path: PathBuf,
+        text: String,
+    },
+    SqliteStatus {
+        db_path: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -153,9 +194,7 @@ where
                 speed: 1.0,
             })
         }
-        [command, assets_root, voice, output_path, token_ids]
-            if command == "kokoro-run-tokens" =>
-        {
+        [command, assets_root, voice, output_path, token_ids] if command == "kokoro-run-tokens" => {
             Ok(Command::KokoroRunTokens {
                 assets_root: PathBuf::from(assets_root),
                 voice: voice.to_string(),
@@ -218,11 +257,9 @@ where
                 db_path: PathBuf::from(db_path),
             })
         }
-        [command, db_path] if command == "sqlite-next-chapter" => {
-            Ok(Command::SqliteNextChapter {
-                db_path: PathBuf::from(db_path),
-            })
-        }
+        [command, db_path] if command == "sqlite-next-chapter" => Ok(Command::SqliteNextChapter {
+            db_path: PathBuf::from(db_path),
+        }),
         [command, db_path] if command == "sqlite-previous-chapter" => {
             Ok(Command::SqlitePreviousChapter {
                 db_path: PathBuf::from(db_path),
@@ -255,7 +292,9 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             let outcome = runtime.ingest_path(&document_path)?;
             let session = runtime.start_session(&outcome.document.document_id)?;
             let app_snapshot = runtime.app_snapshot();
-            let session_snapshot = runtime.session_snapshot()?.expect("active session snapshot");
+            let session_snapshot = runtime
+                .session_snapshot()?
+                .expect("active session snapshot");
 
             println!("runtime=fake");
             println!("document_id={}", outcome.document.document_id);
@@ -272,14 +311,8 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
 
             println!("provider={}", capabilities.provider_name);
             println!("provider.ready={}", report.is_ready());
-            println!(
-                "provider.assets_ready={}",
-                report.readiness.is_ready()
-            );
-            println!(
-                "provider.onnx_ready={}",
-                report.onnx_probe.is_ready()
-            );
+            println!("provider.assets_ready={}", report.readiness.is_ready());
+            println!("provider.onnx_ready={}", report.onnx_probe.is_ready());
             println!(
                 "provider.assets_root={}",
                 report.readiness.assets_root.display()
@@ -330,11 +363,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             );
             println!(
                 "provider.onnx_error={}",
-                report
-                    .onnx_probe
-                    .error
-                    .as_deref()
-                    .unwrap_or("-")
+                report.onnx_probe.error.as_deref().unwrap_or("-")
             );
             println!(
                 "provider.default_language={}",
@@ -376,7 +405,10 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             println!("content_type={}", result.content_type);
             Ok(())
         }
-        Command::KokoroEncodePhonemes { assets_root, phonemes } => {
+        Command::KokoroEncodePhonemes {
+            assets_root,
+            phonemes,
+        } => {
             let config = KokoroConfig::from_assets_root(&assets_root);
             let tokenization = config.tokenize_phonemes(&phonemes)?;
 
@@ -479,7 +511,9 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             let outcome = runtime.ingest_path(&document_path)?;
             let session = runtime.start_session(&outcome.document.document_id)?;
             let app_snapshot = runtime.app_snapshot();
-            let session_snapshot = runtime.session_snapshot()?.expect("active session snapshot");
+            let session_snapshot = runtime
+                .session_snapshot()?
+                .expect("active session snapshot");
 
             println!("runtime=sqlite");
             println!("db_path={}", db_path.display());
@@ -493,13 +527,18 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::SqlitePlayTarget { db_path, target } => {
             let mut runtime = SqliteRuntime::open(&db_path)?;
             let document_id = if Path::new(&target).exists() {
-                runtime.ingest_path(Path::new(&target))?.document.document_id
+                runtime
+                    .ingest_path(Path::new(&target))?
+                    .document
+                    .document_id
             } else {
                 target
             };
             let session = runtime.start_session(&document_id)?;
             let app_snapshot = runtime.app_snapshot();
-            let session_snapshot = runtime.session_snapshot()?.expect("active session snapshot");
+            let session_snapshot = runtime
+                .session_snapshot()?
+                .expect("active session snapshot");
 
             println!("runtime=sqlite");
             println!("db_path={}", db_path.display());
@@ -520,7 +559,10 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             for (index, document) in documents.iter().enumerate() {
                 println!("documents[{index}].document_id={}", document.document_id);
                 println!("documents[{index}].title={}", document.title);
-                println!("documents[{index}].chapter_count={}", document.chapter_count);
+                println!(
+                    "documents[{index}].chapter_count={}",
+                    document.chapter_count
+                );
                 println!("documents[{index}].chunk_count={}", document.chunk_count);
             }
             Ok(())
@@ -720,13 +762,7 @@ mod tests {
 
     #[test]
     fn parse_args_accepts_kokoro_run_tokens() {
-        let command = parse_args([
-            "kokoro-run-tokens",
-            "af",
-            "/tmp/out.wav",
-            "10,20,30",
-        ])
-        .unwrap();
+        let command = parse_args(["kokoro-run-tokens", "af", "/tmp/out.wav", "10,20,30"]).unwrap();
         assert_eq!(
             command,
             Command::KokoroRunTokens {
@@ -753,12 +789,7 @@ mod tests {
 
     #[test]
     fn parse_args_accepts_kokoro_synthesize_text() {
-        let command = parse_args([
-            "kokoro-synthesize-text",
-            "/tmp/out",
-            "phon: h ə l o",
-        ])
-        .unwrap();
+        let command = parse_args(["kokoro-synthesize-text", "/tmp/out", "phon: h ə l o"]).unwrap();
         assert_eq!(
             command,
             Command::KokoroSynthesizeText {
@@ -771,13 +802,7 @@ mod tests {
 
     #[test]
     fn parse_args_accepts_kokoro_run_phonemes() {
-        let command = parse_args([
-            "kokoro-run-phonemes",
-            "af",
-            "/tmp/out.wav",
-            "h ə l o",
-        ])
-        .unwrap();
+        let command = parse_args(["kokoro-run-phonemes", "af", "/tmp/out.wav", "h ə l o"]).unwrap();
         assert_eq!(
             command,
             Command::KokoroRunPhonemes {
@@ -803,7 +828,8 @@ mod tests {
 
     #[test]
     fn parse_args_accepts_sqlite_note_with_spaces() {
-        let command = parse_args(["sqlite-note", "/tmp/marginalia.db", "remember", "this"]).unwrap();
+        let command =
+            parse_args(["sqlite-note", "/tmp/marginalia.db", "remember", "this"]).unwrap();
         assert_eq!(
             command,
             Command::SqliteNote {

@@ -1,6 +1,4 @@
-use crate::frontend::{
-    BackendCapabilities, FrontendEvent, FrontendRequest, FrontendResponse,
-};
+use crate::frontend::{BackendCapabilities, FrontendEvent, FrontendRequest, FrontendResponse};
 
 pub trait FrontendGateway {
     fn capabilities(&self) -> BackendCapabilities;

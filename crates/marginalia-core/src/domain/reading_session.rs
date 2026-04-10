@@ -157,8 +157,14 @@ mod tests {
         };
 
         assert_eq!(position.anchor(), "section:3/chunk:7");
-        assert_eq!(ReadingPosition::from_anchor(&position.anchor()).section_index, 3);
-        assert_eq!(ReadingPosition::from_anchor(&position.anchor()).chunk_index, 7);
+        assert_eq!(
+            ReadingPosition::from_anchor(&position.anchor()).section_index,
+            3
+        );
+        assert_eq!(
+            ReadingPosition::from_anchor(&position.anchor()).chunk_index,
+            7
+        );
     }
 
     #[test]

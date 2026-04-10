@@ -152,7 +152,9 @@ impl App {
             Ok(report) => {
                 let warnings = startup_warnings(&report);
                 if warnings.is_empty() {
-                    self.push_message("Startup checks: configured providers look ready.".to_string());
+                    self.push_message(
+                        "Startup checks: configured providers look ready.".to_string(),
+                    );
                     return;
                 }
                 for warning in warnings {
@@ -168,7 +170,8 @@ impl App {
     pub fn refresh_if_due(&mut self) {
         if self.last_refresh.elapsed() >= Duration::from_millis(750) {
             if let Err(message) = self.refresh() {
-                self.logger.warn(format!("Scheduled refresh failed: {message}"));
+                self.logger
+                    .warn(format!("Scheduled refresh failed: {message}"));
             }
         }
     }
@@ -495,12 +498,27 @@ impl App {
                 response.message
             }
             "pause" => self.backend.pause_session()?,
-            "resume" => { self.backend.resume_session(); "Resuming...".to_string() }
+            "resume" => {
+                self.backend.resume_session();
+                "Resuming...".to_string()
+            }
             "stop" => self.backend.stop_session()?,
-            "repeat" => { self.backend.repeat_chunk(); "Repeating chunk...".to_string() }
-            "restart" => { self.backend.restart_chapter(); "Restarting chapter...".to_string() }
-            "back" => { self.backend.previous_chunk(); "Previous chunk...".to_string() }
-            "next" => { self.backend.next_chapter(); "Next chapter...".to_string() }
+            "repeat" => {
+                self.backend.repeat_chunk();
+                "Repeating chunk...".to_string()
+            }
+            "restart" => {
+                self.backend.restart_chapter();
+                "Restarting chapter...".to_string()
+            }
+            "back" => {
+                self.backend.previous_chunk();
+                "Previous chunk...".to_string()
+            }
+            "next" => {
+                self.backend.next_chapter();
+                "Next chapter...".to_string()
+            }
             "note" => {
                 if argument.is_empty() {
                     return Err("Usage: /note <text>".to_string());
@@ -621,7 +639,9 @@ impl App {
             "indietro" | "back" => self.navigate_previous_chunk(),
             "stop" => self.run_shortcut_command(BackendClient::stop_session),
             "ripeti" | "repeat" => self.run_async_shortcut("Repeat", BackendClient::repeat_chunk),
-            "riprendi" | "resume" => self.run_async_shortcut("Resume", BackendClient::resume_session),
+            "riprendi" | "resume" => {
+                self.run_async_shortcut("Resume", BackendClient::resume_session)
+            }
             _ => {}
         }
     }
@@ -992,6 +1012,8 @@ fn push_provider_warning(
     if resolved_name.starts_with("fake-") {
         warnings.push(format!("{message}; backend fell back to {resolved_name}."));
     } else {
-        warnings.push(format!("{message}; the configured provider may fail at runtime."));
+        warnings.push(format!(
+            "{message}; the configured provider may fail at runtime."
+        ));
     }
 }

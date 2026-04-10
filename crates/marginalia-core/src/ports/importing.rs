@@ -5,9 +5,16 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DocumentImportError {
-    EmptyContent { source_path: PathBuf },
-    ReadFailed { source_path: PathBuf, message: String },
-    UnsupportedFormat { source_path: PathBuf },
+    EmptyContent {
+        source_path: PathBuf,
+    },
+    ReadFailed {
+        source_path: PathBuf,
+        message: String,
+    },
+    UnsupportedFormat {
+        source_path: PathBuf,
+    },
 }
 
 impl Display for DocumentImportError {

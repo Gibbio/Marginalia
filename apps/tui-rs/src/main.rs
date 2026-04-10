@@ -12,8 +12,8 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use logger::AppLogger;
-use ratatui::layout::Alignment;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Alignment;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -23,8 +23,8 @@ use std::io::stdout;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Instant;
 use std::time::Duration;
+use std::time::Instant;
 
 fn main() -> Result<(), String> {
     let logger = AppLogger::from_env()?;
@@ -75,7 +75,9 @@ fn wait_for_app(
     let (tx, rx) = mpsc::channel();
     let worker_logger = logger.clone();
     thread::spawn(move || {
-        let _ = tx.send(StartupEvent::Stage("Starting Marginalia engine...".to_string()));
+        let _ = tx.send(StartupEvent::Stage(
+            "Starting Marginalia engine...".to_string(),
+        ));
         let backend = match BackendClient::spawn() {
             Ok(backend) => backend,
             Err(message) => {
@@ -96,7 +98,9 @@ fn wait_for_app(
             }
         };
 
-        let _ = tx.send(StartupEvent::Stage("Checking configured providers...".to_string()));
+        let _ = tx.send(StartupEvent::Stage(
+            "Checking configured providers...".to_string(),
+        ));
         app.run_startup_checks();
 
         let _ = tx.send(StartupEvent::Ready(app));
@@ -150,9 +154,8 @@ fn run_tui(
         if event::poll(Duration::from_millis(100))
             .map_err(|err| log_error(logger, format!("Unable to poll terminal events: {err}")))?
         {
-            if let Event::Key(key) =
-                event::read()
-                    .map_err(|err| log_error(logger, format!("Unable to read terminal event: {err}")))?
+            if let Event::Key(key) = event::read()
+                .map_err(|err| log_error(logger, format!("Unable to read terminal event: {err}")))?
             {
                 if key.kind != KeyEventKind::Press {
                     continue;
@@ -225,7 +228,11 @@ fn render_loading(frame: &mut Frame, stage: &str, elapsed: Duration) {
     let spinner = spinner_frames[((elapsed.as_millis() / 120) as usize) % spinner_frames.len()];
     let content = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(45), Constraint::Length(3), Constraint::Min(0)])
+        .constraints([
+            Constraint::Percentage(45),
+            Constraint::Length(3),
+            Constraint::Min(0),
+        ])
         .split(inner);
     let loading = Paragraph::new(vec![
         Line::from(Span::styled(
@@ -234,7 +241,10 @@ fn render_loading(frame: &mut Frame, stage: &str, elapsed: Duration) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(stage.to_string(), Style::default().fg(Color::Gray))),
+        Line::from(Span::styled(
+            stage.to_string(),
+            Style::default().fg(Color::Gray),
+        )),
         Line::from(Span::styled(
             format!("Loading providers{dots}"),
             Style::default().fg(Color::DarkGray),
@@ -243,6 +253,7 @@ fn render_loading(frame: &mut Frame, stage: &str, elapsed: Duration) {
     frame.render_widget(loading, content[1]);
 }
 
+#[allow(clippy::large_enum_variant)]
 enum StartupEvent {
     Stage(String),
     Ready(App),
@@ -310,8 +321,10 @@ fn render(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(body[0]);
-    let (document_lines, active_document_line) =
-        render_document_lines(app, document_area[1].width.saturating_sub(2).max(1) as usize);
+    let (document_lines, active_document_line) = render_document_lines(
+        app,
+        document_area[1].width.saturating_sub(2).max(1) as usize,
+    );
     let document_heading = Paragraph::new(section_heading(
         &document_heading_title(app),
         document_area[0].width,
@@ -319,7 +332,12 @@ fn render(frame: &mut Frame, app: &mut App) {
         section_style,
     ));
     let document_lines = indented_lines(document_lines, "  ");
-    sync_document_scroll(app, document_area[1], active_document_line, document_lines.len());
+    sync_document_scroll(
+        app,
+        document_area[1],
+        active_document_line,
+        document_lines.len(),
+    );
     let document = Paragraph::new(document_lines).scroll((app.document_scroll(), 0));
 
     let log_area = Layout::default()
@@ -333,8 +351,8 @@ fn render(frame: &mut Frame, app: &mut App) {
         section_style,
         "",
     ));
-    let messages_widget = Paragraph::new(indented_lines(render_messages(app), "  "))
-        .wrap(Wrap { trim: true });
+    let messages_widget =
+        Paragraph::new(indented_lines(render_messages(app), "  ")).wrap(Wrap { trim: true });
     let messages_viewport = log_area[1].height;
     let messages_total = messages_widget.line_count(log_area[1].width) as u16;
     let messages = messages_widget.scroll((messages_total.saturating_sub(messages_viewport), 0));
@@ -355,7 +373,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         title_style,
         section_style,
     ))
-        .style(Style::default().fg(Color::Yellow));
+    .style(Style::default().fg(Color::Yellow));
 
     frame.render_widget(header, vertical[0]);
     frame.render_widget(document_heading, document_area[0]);
@@ -394,7 +412,11 @@ fn shell_title(
     let phase = (app.animation_tick() / 5) % 3;
     let mut spans = vec![Span::styled("─── ", border_style)];
     for index in 0..3 {
-        let style = if index == phase { active_style } else { idle_style };
+        let style = if index == phase {
+            active_style
+        } else {
+            idle_style
+        };
         let glyph = if index == phase { "•" } else { "·" };
         spans.push(Span::styled(glyph, style));
         if index < 2 {
@@ -413,12 +435,7 @@ fn section_lines(
     separator_style: Style,
 ) -> Vec<Line<'static>> {
     let mut result = Vec::with_capacity(lines.len() + 1);
-    result.push(section_heading(
-        title,
-        width,
-        title_style,
-        separator_style,
-    ));
+    result.push(section_heading(title, width, title_style, separator_style));
     result.extend(indented_lines(lines, "  "));
     result
 }

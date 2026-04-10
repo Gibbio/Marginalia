@@ -72,11 +72,7 @@ impl SqliteRuntime {
         }
     }
 
-    fn frontend_query(
-        &mut self,
-        name: &str,
-        payload: Value,
-    ) -> RuntimeFrontendResponse {
+    fn frontend_query(&mut self, name: &str, payload: Value) -> RuntimeFrontendResponse {
         match name {
             "get_app_snapshot" => ok_response(
                 "App snapshot loaded.",
@@ -183,11 +179,7 @@ impl SqliteRuntime {
         }
     }
 
-    fn frontend_command(
-        &mut self,
-        name: &str,
-        payload: Value,
-    ) -> RuntimeFrontendResponse {
+    fn frontend_command(&mut self, name: &str, payload: Value) -> RuntimeFrontendResponse {
         match name {
             "ingest_document" => {
                 let Some(path) = payload.get("path").and_then(Value::as_str) else {
@@ -239,12 +231,18 @@ impl SqliteRuntime {
                     Err(err) => error_response(err.to_string()),
                 }
             }
-            "pause_session" => simple_command_response(self.pause_session(), "Reading session paused."),
+            "pause_session" => {
+                simple_command_response(self.pause_session(), "Reading session paused.")
+            }
             "resume_session" => {
                 simple_command_response(self.resume_session(), "Reading session resumed.")
             }
-            "stop_session" => simple_command_response(self.stop_session(), "Reading session stopped."),
-            "repeat_chunk" => simple_command_response(self.repeat_chunk(), "Current chunk repeated."),
+            "stop_session" => {
+                simple_command_response(self.stop_session(), "Reading session stopped.")
+            }
+            "repeat_chunk" => {
+                simple_command_response(self.repeat_chunk(), "Current chunk repeated.")
+            }
             "restart_chapter" => {
                 simple_command_response(self.restart_chapter(), "Current chapter restarted.")
             }
@@ -264,10 +262,9 @@ impl SqliteRuntime {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 match self.create_note(text) {
-                    Ok(note) => ok_response(
-                        "Note saved.",
-                        json!({ "note": note_view_to_json(note) }),
-                    ),
+                    Ok(note) => {
+                        ok_response("Note saved.", json!({ "note": note_view_to_json(note) }))
+                    }
                     Err(err) => error_response(err.to_string()),
                 }
             }
@@ -471,7 +468,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("marginalia-runtime-frontend-test-{}.{}", timestamp, extension))
+        std::env::temp_dir().join(format!(
+            "marginalia-runtime-frontend-test-{}.{}",
+            timestamp, extension
+        ))
     }
 
     #[test]
@@ -507,10 +507,8 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        let start = runtime.execute_frontend_command(
-            "start_session",
-            json!({ "target": document_id }),
-        );
+        let start =
+            runtime.execute_frontend_command("start_session", json!({ "target": document_id }));
         let view = runtime.execute_frontend_query("get_document_view", json!({}));
 
         assert_eq!(start.status, "ok");

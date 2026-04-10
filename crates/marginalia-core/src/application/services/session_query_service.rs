@@ -1,14 +1,19 @@
 use crate::domain::ReadingSession;
 use crate::frontend::{AppSnapshot, SessionSnapshot};
-use crate::ports::{PlaybackEngine, PlaybackSnapshot};
 use crate::ports::storage::{
     DocumentRepository, NoteRepository, RewriteDraftRepository, SessionRepository,
 };
+use crate::ports::{PlaybackEngine, PlaybackSnapshot};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionQueryError {
-    MissingDocument { document_id: String },
-    MissingSection { document_id: String, section_index: usize },
+    MissingDocument {
+        document_id: String,
+    },
+    MissingSection {
+        document_id: String,
+        section_index: usize,
+    },
     MissingChunk {
         document_id: String,
         section_index: usize,
@@ -58,7 +63,9 @@ where
     pub fn app_snapshot(&mut self) -> AppSnapshot {
         let session = self.session_repository.get_active_session();
         let documents = self.document_repository.list_documents();
-        let latest_document_id = documents.first().map(|document| document.document_id.clone());
+        let latest_document_id = documents
+            .first()
+            .map(|document| document.document_id.clone());
 
         match session {
             Some(session) => {
@@ -95,19 +102,19 @@ where
             return Ok(None);
         };
 
-        let document =
-            self.document_repository
-                .get_document(&session.document_id)
-                .ok_or_else(|| SessionQueryError::MissingDocument {
-                    document_id: session.document_id.clone(),
-                })?;
+        let document = self
+            .document_repository
+            .get_document(&session.document_id)
+            .ok_or_else(|| SessionQueryError::MissingDocument {
+                document_id: session.document_id.clone(),
+            })?;
 
-        let section = document.get_section(session.position.section_index).ok_or_else(|| {
-            SessionQueryError::MissingSection {
+        let section = document
+            .get_section(session.position.section_index)
+            .ok_or_else(|| SessionQueryError::MissingSection {
                 document_id: session.document_id.clone(),
                 section_index: session.position.section_index,
-            }
-        })?;
+            })?;
 
         let chunk = document
             .get_chunk(session.position.section_index, session.position.chunk_index)
@@ -188,18 +195,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::{SessionQueryError, SessionQueryService};
+    use crate::domain::RewriteDraft;
     use crate::domain::{
         Document, DocumentChunk, DocumentSection, PlaybackState, ReadingPosition, ReadingSession,
         SearchQuery, SearchResult, VoiceNote,
     };
     use crate::frontend::{AppSnapshot, SessionSnapshot};
-    use crate::ports::{
-        PlaybackEngine, PlaybackSnapshot, ProviderCapabilities, SynthesisResult,
-    };
     use crate::ports::storage::{
         DocumentRepository, NoteRepository, RewriteDraftRepository, SessionRepository, StorageError,
     };
-    use crate::domain::RewriteDraft;
+    use crate::ports::{PlaybackEngine, PlaybackSnapshot, ProviderCapabilities, SynthesisResult};
     use chrono::Utc;
     use std::path::PathBuf;
 
@@ -208,7 +213,6 @@ mod tests {
     }
 
     impl DocumentRepository for StubDocumentRepository {
-
         fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
             self.documents.push(document);
             Ok(())
@@ -236,7 +240,6 @@ mod tests {
     }
 
     impl SessionRepository for StubSessionRepository {
-
         fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
             self.saved_session = Some(session.clone());
             self.active_session = Some(session);
@@ -257,7 +260,6 @@ mod tests {
     }
 
     impl NoteRepository for StubNoteRepository {
-
         fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
             self.notes.push(note);
             Ok(())
@@ -279,7 +281,6 @@ mod tests {
     struct StubDraftRepository;
 
     impl RewriteDraftRepository for StubDraftRepository {
-
         fn save_draft(&mut self, _draft: RewriteDraft) -> Result<(), StorageError> {
             Ok(())
         }

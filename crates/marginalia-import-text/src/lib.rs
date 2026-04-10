@@ -14,12 +14,11 @@ impl DocumentImporter for TextDocumentImporter {
             .and_then(|extension| extension.to_str())
             .map(|extension| extension.to_ascii_lowercase());
 
-        let raw_text = fs::read_to_string(source_path).map_err(|error| {
-            DocumentImportError::ReadFailed {
+        let raw_text =
+            fs::read_to_string(source_path).map_err(|error| DocumentImportError::ReadFailed {
                 source_path: source_path.to_path_buf(),
                 message: error.to_string(),
-            }
-        })?;
+            })?;
 
         if raw_text.trim().is_empty() {
             return Err(DocumentImportError::EmptyContent {
@@ -53,7 +52,11 @@ fn import_plain_text(source_path: PathBuf, raw_text: &str) -> ImportedDocument {
         }
 
         if line.trim().is_empty() {
-            if !current_paragraphs.last().map(|p| p.is_empty()).unwrap_or(false) {
+            if !current_paragraphs
+                .last()
+                .map(|p| p.is_empty())
+                .unwrap_or(false)
+            {
                 current_paragraphs.push(String::new());
             }
             continue;
@@ -153,7 +156,10 @@ fn flush_section(
         .filter(|paragraph| !paragraph.is_empty())
         .collect::<Vec<_>>();
 
-    if current_title.as_ref().map(|title| title.trim().is_empty()).unwrap_or(true)
+    if current_title
+        .as_ref()
+        .map(|title| title.trim().is_empty())
+        .unwrap_or(true)
         && paragraphs.is_empty()
     {
         return;
@@ -189,7 +195,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("marginalia-import-test-{}.{}", timestamp, extension))
+        std::env::temp_dir().join(format!(
+            "marginalia-import-test-{}.{}",
+            timestamp, extension
+        ))
     }
 
     #[test]
@@ -229,7 +238,10 @@ mod tests {
 
         assert_eq!(imported.sections.len(), 2);
         assert_eq!(imported.sections[0].title, "Intro");
-        assert_eq!(imported.sections[0].paragraphs, vec!["Alpha beta gamma.".to_string()]);
+        assert_eq!(
+            imported.sections[0].paragraphs,
+            vec!["Alpha beta gamma.".to_string()]
+        );
         assert_eq!(imported.sections[1].title, "Two");
         assert_eq!(
             imported.sections[1].paragraphs,

@@ -60,7 +60,10 @@ fn cmd_list(runtime: &SqliteRuntime) {
         println!("Nessun documento. Usa 'ingest <file>' per importarne uno.");
         return;
     }
-    println!("{:<14} {:<6} {:<6} {}", "ID", "Cap.", "Chunks", "Titolo");
+    println!(
+        "{:<14} {:<6} {:<6} {:<20}",
+        "ID", "Cap.", "Chunks", "Titolo"
+    );
     println!("{}", "-".repeat(60));
     for doc in &docs {
         println!(
@@ -225,7 +228,8 @@ fn cmd_bench_tts(document_id: &str, max_chunks: Option<usize>) {
     let tts_cache = dirs_or_default().join(".marginalia-bench-tts-cache");
     let synth_config = KokoroSpeechSynthesizerConfig::new(&tts_cache);
 
-    let phonemizer_program = env::var("MARGINALIA_PHONEMIZER").unwrap_or_else(|_| "espeak-ng".to_string());
+    let phonemizer_program =
+        env::var("MARGINALIA_PHONEMIZER").unwrap_or_else(|_| "espeak-ng".to_string());
     let phonemizer_args = env::var("MARGINALIA_PHONEMIZER_ARGS")
         .map(|s| s.split_whitespace().map(String::from).collect())
         .unwrap_or_else(|_| vec!["-v".into(), "it".into(), "--ipa".into(), "-q".into()]);
@@ -237,12 +241,15 @@ fn cmd_bench_tts(document_id: &str, max_chunks: Option<usize>) {
             args: phonemizer_args,
         },
     );
-    let mut synthesizer =
-        KokoroSpeechSynthesizer::with_text_processor(kokoro_config.clone(), synth_config, text_processor);
+    let mut synthesizer = KokoroSpeechSynthesizer::with_text_processor(
+        kokoro_config.clone(),
+        synth_config,
+        text_processor,
+    );
 
     let language = runtime.config().default_language.clone();
-    let voice = env::var("MARGINALIA_VOICE")
-        .unwrap_or_else(|_| kokoro_config.default_voice.clone());
+    let voice =
+        env::var("MARGINALIA_VOICE").unwrap_or_else(|_| kokoro_config.default_voice.clone());
 
     // Warm up: carica il modello ONNX (puo' richiedere qualche secondo)
     eprint!("  Caricamento modello ONNX...");
@@ -267,13 +274,16 @@ fn cmd_bench_tts(document_id: &str, max_chunks: Option<usize>) {
     let limit = max_chunks.unwrap_or(chunks.len()).min(chunks.len());
 
     println!("bench-tts: \"{}\" ({document_id})", view.title);
-    println!("  Chunks totali: {}  |  Da sintetizzare: {limit}", chunks.len());
+    println!(
+        "  Chunks totali: {}  |  Da sintetizzare: {limit}",
+        chunks.len()
+    );
     println!("  Voce: {voice}  |  Lingua: {language}");
     println!("  Assets: {assets_root}");
     println!();
     println!(
-        "  {:<8} {:<8} {:<10} {:<10} {:<8} {}",
-        "Sez.", "Chunk", "Caratteri", "Tempo", "Bytes", "Anteprima"
+        "  {:<8} {:<8} {:<10} {:<10} {:<8} {:<10}",
+        "Sez.", "Chunk", "Caratteri", "Tempo", "Bytes", "Antepr."
     );
     println!("  {}", "-".repeat(70));
 

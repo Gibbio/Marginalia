@@ -6,17 +6,9 @@ use std::process::{Child, Command, Stdio};
 
 const AUDIO_PLACEHOLDER: &str = "{audio}";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostPlaybackConfig {
     pub command_template: Option<Vec<String>>,
-}
-
-impl Default for HostPlaybackConfig {
-    fn default() -> Self {
-        Self {
-            command_template: None,
-        }
-    }
 }
 
 #[derive(Debug)]
