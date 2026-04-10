@@ -15,7 +15,8 @@ use marginalia_core::frontend::{
 use marginalia_core::ports::storage::{DocumentRepository, NoteRepository, SessionRepository};
 use marginalia_core::ports::{
     CommandRecognizer, DictationTranscriber, PlaybackEngine, RewriteGenerator,
-    SpeechInterruptMonitor, SpeechSynthesizer, SynthesisError, SynthesisRequest, TopicSummarizer,
+    SpeechInterruptMonitor, SpeechSynthesizer, SynthesisError, SynthesisRequest, SynthesisResult,
+    TopicSummarizer,
 };
 use marginalia_import_text::TextDocumentImporter;
 use marginalia_provider_fake::{
@@ -112,6 +113,8 @@ pub struct SqliteRuntime {
     rewrite_generator: Box<dyn RewriteGenerator + Send>,
     topic_summarizer: Box<dyn TopicSummarizer + Send>,
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
+    /// Cache: (document_id, section, chunk, voice) → SynthesisResult
+    tts_cache: HashMap<String, SynthesisResult>,
 }
 
 fn build_document_view<D, S>(
@@ -222,6 +225,7 @@ impl SqliteRuntime {
             rewrite_generator: Box::new(FakeRewriteGenerator::new()),
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
+            tts_cache: HashMap::new(),
         })
     }
 
@@ -252,6 +256,7 @@ impl SqliteRuntime {
             rewrite_generator: Box::new(FakeRewriteGenerator::new()),
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
+            tts_cache: HashMap::new(),
         })
     }
 
@@ -269,6 +274,30 @@ impl SqliteRuntime {
 
     pub fn set_provider_doctor_blob(&mut self, key: impl Into<String>, blob: serde_json::Value) {
         self.provider_doctor_blobs.insert(key.into(), blob);
+    }
+
+    /// Synthesize with cache. Returns cached result if the chunk was already
+    /// synthesized with the same voice and the WAV file still exists on disk.
+    fn synthesize_cached(
+        &mut self,
+        document_id: &str,
+        section_index: usize,
+        chunk_index: usize,
+        request: SynthesisRequest,
+    ) -> Result<SynthesisResult, SynthesisError> {
+        let voice = request.voice.clone().unwrap_or_default();
+        let cache_key = format!("{document_id}:{section_index}:{chunk_index}:{voice}");
+
+        // Check cache: result exists and WAV file is still on disk
+        if let Some(cached) = self.tts_cache.get(&cache_key) {
+            if std::path::Path::new(&cached.audio_reference).exists() {
+                return Ok(cached.clone());
+            }
+        }
+
+        let result = self.tts.synthesize(request)?;
+        self.tts_cache.insert(cache_key, result.clone());
+        Ok(result)
     }
 
     pub fn database(&self) -> &SQLiteDatabase {
@@ -303,11 +332,16 @@ impl SqliteRuntime {
             })?;
 
         let tts_provider = self.tts.describe_capabilities().provider_name;
-        let synthesis = self.tts.synthesize(SynthesisRequest {
-            text: chunk.text.clone(),
-            voice: Some(self.config.default_voice.clone()),
-            language: self.config.default_language.clone(),
-        })?;
+        let synthesis = self.synthesize_cached(
+            document_id,
+            position.section_index,
+            position.chunk_index,
+            SynthesisRequest {
+                text: chunk.text.clone(),
+                voice: Some(self.config.default_voice.clone()),
+                language: self.config.default_language.clone(),
+            },
+        )?;
         let playback = self
             .playback_engine
             .start(&document, &position, Some(synthesis));
@@ -690,17 +724,23 @@ impl SqliteRuntime {
                 document_id: session.document_id.clone(),
             })?;
 
-        let synthesis = self.tts.synthesize(SynthesisRequest {
-            text: chunk.text.clone(),
-            voice: session
-                .voice
-                .clone()
-                .or(Some(self.config.default_voice.clone())),
-            language: session
-                .command_language
-                .clone()
-                .unwrap_or_else(|| self.config.default_language.clone()),
-        })?;
+        let doc_id = session.document_id.clone();
+        let synthesis = self.synthesize_cached(
+            &doc_id,
+            session.position.section_index,
+            session.position.chunk_index,
+            SynthesisRequest {
+                text: chunk.text.clone(),
+                voice: session
+                    .voice
+                    .clone()
+                    .or(Some(self.config.default_voice.clone())),
+                language: session
+                    .command_language
+                    .clone()
+                    .unwrap_or_else(|| self.config.default_language.clone()),
+            },
+        )?;
         let playback = self
             .playback_engine
             .start(&document, &session.position, Some(synthesis));
