@@ -545,7 +545,10 @@ impl BetaBackendClient {
         };
         drop(runtime);
 
-        self.push_log(format!("beta {request_type} {name} => {}", response.status));
+        // Only log commands and query errors — skip routine polling queries
+        if request_type == "command" || response.status != "ok" {
+            self.push_log(format!("beta {request_type} {name} => {}", response.status));
+        }
         ResponseEnvelope {
             status: response.status,
             message: response.message,
