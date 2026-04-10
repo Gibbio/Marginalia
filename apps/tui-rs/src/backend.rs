@@ -490,11 +490,17 @@ impl BetaBackendClient {
 
     fn get_app_snapshot(&mut self) -> Result<AppSnapshot, String> {
         let response = self.send_request("query", "get_app_snapshot", json!({}));
+        if response.status == "skipped" {
+            return Err("skipped".to_string());
+        }
         decode_payload(response.payload, "app")
     }
 
     fn get_session_snapshot(&mut self) -> Result<Option<SessionSnapshot>, String> {
         let response = self.send_request("query", "get_session_snapshot", json!({}));
+        if response.status == "skipped" {
+            return Err("skipped".to_string());
+        }
         match response.payload.get("session") {
             Some(Value::Null) | None => Ok(None),
             Some(_) => decode_payload(response.payload, "session").map(Some),
@@ -502,13 +508,18 @@ impl BetaBackendClient {
     }
 
     fn get_doctor_report(&mut self) -> Result<Value, String> {
-        Ok(self
-            .send_request("query", "get_doctor_report", json!({}))
-            .payload)
+        let response = self.send_request("query", "get_doctor_report", json!({}));
+        if response.status == "skipped" {
+            return Err("skipped".to_string());
+        }
+        Ok(response.payload)
     }
 
     fn list_documents(&mut self) -> Result<Vec<DocumentListItem>, String> {
         let response = self.send_request("query", "list_documents", json!({}));
+        if response.status == "skipped" {
+            return Err("skipped".to_string());
+        }
         let documents = response
             .payload
             .get("documents")
@@ -527,6 +538,9 @@ impl BetaBackendClient {
             None => json!({}),
         };
         let response = self.send_request("query", "get_document_view", payload);
+        if response.status == "skipped" {
+            return Err("skipped".to_string());
+        }
         match response.payload.get("document") {
             Some(Value::Null) | None => Ok(None),
             Some(_) => decode_payload(response.payload, "document").map(Some),
@@ -568,8 +582,8 @@ impl BetaBackendClient {
                 Err(_) => {
                     // Runtime busy (prefetch running) — skip this poll cycle
                     return ResponseEnvelope {
-                        status: "ok".to_string(),
-                        message: "skipped (runtime busy)".to_string(),
+                        status: "skipped".to_string(),
+                        message: String::new(),
                         payload: json!({}),
                         request_id: None,
                     };
