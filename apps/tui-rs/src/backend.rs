@@ -575,6 +575,31 @@ impl BetaBackendClient {
         self.async_result_rx = Some(rx);
     }
 
+    /// Spawn a fire-and-forget prefetch thread for the next chunk.
+    /// Runs independently — does not set async_result_rx, does not block anything.
+    fn spawn_prefetch(&self) {
+        let runtime = Arc::clone(&self.runtime);
+        std::thread::spawn(move || {
+            let mut rt = runtime.lock().expect("runtime lock poisoned");
+            rt.execute_frontend_command("prefetch_next", json!({}));
+        });
+    }
+
+    /// Commands that should trigger a prefetch after completion.
+    fn is_navigation_command(name: &str) -> bool {
+        matches!(
+            name,
+            "start_session"
+                | "next_chunk"
+                | "previous_chunk"
+                | "next_chapter"
+                | "previous_chapter"
+                | "restart_chapter"
+                | "repeat_chunk"
+                | "resume_session"
+        )
+    }
+
     /// Poll for the result of an async command. Returns `None` if still pending.
     fn poll_async_result(&mut self) -> Option<AsyncCommandResult> {
         let rx = self.async_result_rx.as_ref()?;
@@ -584,6 +609,12 @@ impl BetaBackendClient {
                     "beta command {} => {} (async complete)",
                     result.name, result.response.status
                 ));
+
+                // On successful navigation, prefetch next chunk in background
+                if result.response.status == "ok" && Self::is_navigation_command(&result.name) {
+                    self.spawn_prefetch();
+                }
+
                 self.async_result_rx = None;
                 Some(result)
             }

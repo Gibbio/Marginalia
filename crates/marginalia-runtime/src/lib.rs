@@ -757,6 +757,55 @@ impl SqliteRuntime {
         }
         Ok(())
     }
+
+    /// Pre-synthesize the next chunk into the TTS cache.
+    /// Called from a background thread after the current chunk starts playing.
+    pub fn prefetch_next(&mut self) {
+        let session = match self.session_repository.get_active_session() {
+            Some(s) => s,
+            None => return,
+        };
+        let document = match self.document_repository.get_document(&session.document_id) {
+            Some(d) => d,
+            None => return,
+        };
+
+        // Build flat position list and find current
+        let positions: Vec<(usize, usize)> = document
+            .sections
+            .iter()
+            .flat_map(|s| s.chunks.iter().map(move |c| (s.index, c.index)))
+            .collect();
+
+        let current = positions.iter().position(|(s, c)| {
+            *s == session.position.section_index && *c == session.position.chunk_index
+        });
+        let next_idx = match current {
+            Some(i) if i + 1 < positions.len() => i + 1,
+            _ => return,
+        };
+        let (next_section, next_chunk) = positions[next_idx];
+
+        let voice = session
+            .voice
+            .or(Some(self.config.default_voice.clone()));
+        let language = session
+            .command_language
+            .unwrap_or_else(|| self.config.default_language.clone());
+
+        if let Some(chunk) = document.get_chunk(next_section, next_chunk) {
+            let _ = self.synthesize_cached(
+                &document.document_id,
+                next_section,
+                next_chunk,
+                SynthesisRequest {
+                    text: chunk.text.clone(),
+                    voice,
+                    language,
+                },
+            );
+        }
+    }
 }
 
 #[cfg(test)]
