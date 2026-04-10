@@ -20,6 +20,7 @@ htmlcov/
 .marginalia/
 .whisper-cpp/
 /marginalia.toml
+apps/tui-rs/marginalia.toml
 tmp/
 
 # SQLite
