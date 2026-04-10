@@ -16,6 +16,6 @@ pub use events::{FrontendEvent, FrontendEventName};
 pub use gateway::FrontendGateway;
 pub use queries::FrontendQueryName;
 pub use snapshots::{
-    AppSnapshot, DocumentChunkView, DocumentListItem, DocumentSectionView, DocumentView,
-    NoteView, NotesSnapshot, SearchResultView, SearchResultsSnapshot, SessionSnapshot,
+    AppSnapshot, DocumentChunkView, DocumentListItem, DocumentSectionView, DocumentView, NoteView,
+    NotesSnapshot, SearchResultView, SearchResultsSnapshot, SessionSnapshot,
 };

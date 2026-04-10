@@ -1,14 +1,14 @@
 use crate::config::TuiConfig;
 use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::{RuntimeFrontend, SqliteRuntime};
-use marginalia_tts_kokoro::{
-    KokoroConfig, KokoroExternalPhonemizerConfig, KokoroSpeechSynthesizer,
-    KokoroSpeechSynthesizerConfig, KokoroTextProcessor,
-};
 #[cfg(feature = "vosk-stt")]
 use marginalia_stt_vosk::{VoskCommandRecognizer, VoskConfig};
 #[cfg(feature = "whisper-stt")]
 use marginalia_stt_whisper::{WhisperConfig, WhisperDictationTranscriber};
+use marginalia_tts_kokoro::{
+    KokoroConfig, KokoroExternalPhonemizerConfig, KokoroSpeechSynthesizer,
+    KokoroSpeechSynthesizerConfig, KokoroTextProcessor,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -245,11 +245,7 @@ impl BackendClient {
         }
     }
 
-    fn command_response(
-        &mut self,
-        name: &str,
-        payload: Value,
-    ) -> Result<ResponseEnvelope, String> {
+    fn command_response(&mut self, name: &str, payload: Value) -> Result<ResponseEnvelope, String> {
         let Self::Beta(client) = self;
         client.execute_command_response(name, payload)
     }
@@ -426,13 +422,11 @@ impl BetaBackendClient {
         let voice_cmd_rx = {
             let mut monitor = runtime.open_command_monitor();
             let (tx, rx) = std::sync::mpsc::channel::<String>();
-            std::thread::spawn(move || {
-                loop {
-                    let capture = monitor.capture_next_interrupt(Some(2.0));
-                    if let Some(cmd) = capture.recognized_command {
-                        if tx.send(cmd).is_err() {
-                            break;
-                        }
+            std::thread::spawn(move || loop {
+                let capture = monitor.capture_next_interrupt(Some(2.0));
+                if let Some(cmd) = capture.recognized_command {
+                    if tx.send(cmd).is_err() {
+                        break;
                     }
                 }
             });
@@ -441,7 +435,7 @@ impl BetaBackendClient {
 
         let mut client = Self {
             runtime: Arc::new(Mutex::new(
-                Box::new(runtime) as Box<dyn RuntimeFrontend + Send>,
+                Box::new(runtime) as Box<dyn RuntimeFrontend + Send>
             )),
             logs: VecDeque::with_capacity(256),
             sequence: 0,
@@ -477,7 +471,9 @@ impl BetaBackendClient {
     }
 
     fn get_doctor_report(&mut self) -> Result<Value, String> {
-        Ok(self.send_request("query", "get_doctor_report", json!({})).payload)
+        Ok(self
+            .send_request("query", "get_doctor_report", json!({}))
+            .payload)
     }
 
     fn list_documents(&mut self) -> Result<Vec<DocumentListItem>, String> {

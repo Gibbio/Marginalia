@@ -17,9 +17,16 @@ impl AppLogger {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("marginalia-tui.log"));
 
-        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
-            create_dir_all(parent)
-                .map_err(|err| format!("Unable to create TUI log directory '{}': {err}", parent.display()))?;
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Unable to create TUI log directory '{}': {err}",
+                    parent.display()
+                )
+            })?;
         }
 
         let file = OpenOptions::new()

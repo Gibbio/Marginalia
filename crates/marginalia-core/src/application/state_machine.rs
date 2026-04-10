@@ -98,7 +98,10 @@ fn is_transition_allowed(from: ReaderState, to: ReaderState) -> bool {
             ReaderState::ReadingRewrite | ReaderState::Paused | ReaderState::Error
         ),
         ReaderState::ReadingRewrite => {
-            matches!(to, ReaderState::Paused | ReaderState::Reading | ReaderState::Error)
+            matches!(
+                to,
+                ReaderState::Paused | ReaderState::Reading | ReaderState::Error
+            )
         }
         ReaderState::Error => matches!(to, ReaderState::Idle),
     }
@@ -111,9 +114,18 @@ mod tests {
 
     #[test]
     fn playback_state_projection_matches_reader_state() {
-        assert_eq!(playback_state_for(ReaderState::Idle), PlaybackState::Stopped);
-        assert_eq!(playback_state_for(ReaderState::Reading), PlaybackState::Playing);
-        assert_eq!(playback_state_for(ReaderState::Paused), PlaybackState::Paused);
+        assert_eq!(
+            playback_state_for(ReaderState::Idle),
+            PlaybackState::Stopped
+        );
+        assert_eq!(
+            playback_state_for(ReaderState::Reading),
+            PlaybackState::Playing
+        );
+        assert_eq!(
+            playback_state_for(ReaderState::Paused),
+            PlaybackState::Paused
+        );
     }
 
     #[test]

@@ -18,9 +18,9 @@ impl InMemoryDocumentRepository {
 }
 
 impl DocumentRepository for InMemoryDocumentRepository {
-
     fn save_document(&mut self, document: Document) -> Result<(), StorageError> {
-        self.documents.insert(document.document_id.clone(), document);
+        self.documents
+            .insert(document.document_id.clone(), document);
         Ok(())
     }
 
@@ -83,7 +83,6 @@ impl InMemorySessionRepository {
 }
 
 impl SessionRepository for InMemorySessionRepository {
-
     fn save_session(&mut self, session: ReadingSession) -> Result<(), StorageError> {
         self.sessions.insert(session.session_id.clone(), session);
         Ok(())
@@ -117,10 +116,10 @@ impl InMemoryNoteRepository {
 }
 
 impl NoteRepository for InMemoryNoteRepository {
-
     fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
         self.notes.push(note);
-        self.notes.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+        self.notes
+            .sort_by(|left, right| left.created_at.cmp(&right.created_at));
         Ok(())
     }
 
@@ -142,7 +141,8 @@ impl NoteRepository for InMemoryNoteRepository {
             .notes
             .iter()
             .filter(|note| {
-                query.document_id
+                query
+                    .document_id
                     .as_deref()
                     .map(|document_id| note.document_id == document_id)
                     .unwrap_or(true)
@@ -180,7 +180,6 @@ impl InMemoryRewriteDraftRepository {
 }
 
 impl RewriteDraftRepository for InMemoryRewriteDraftRepository {
-
     fn save_draft(&mut self, draft: RewriteDraft) -> Result<(), StorageError> {
         self.drafts.push(draft);
         Ok(())
@@ -197,9 +196,7 @@ impl RewriteDraftRepository for InMemoryRewriteDraftRepository {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        InMemoryDocumentRepository, InMemoryNoteRepository, InMemorySessionRepository,
-    };
+    use super::{InMemoryDocumentRepository, InMemoryNoteRepository, InMemorySessionRepository};
     use marginalia_core::domain::{
         Document, DocumentChunk, DocumentSection, ReadingPosition, ReadingSession, SearchQuery,
         VoiceNote,
@@ -210,23 +207,25 @@ mod tests {
     #[test]
     fn document_repository_searches_chunk_text() {
         let mut repository = InMemoryDocumentRepository::new();
-        repository.save_document(Document {
-            document_id: "doc-1".to_string(),
-            title: "Doc".to_string(),
-            source_path: PathBuf::from("/tmp/doc.md"),
-            sections: vec![DocumentSection {
-                index: 0,
-                title: "Intro".to_string(),
-                chunks: vec![DocumentChunk {
+        repository
+            .save_document(Document {
+                document_id: "doc-1".to_string(),
+                title: "Doc".to_string(),
+                source_path: PathBuf::from("/tmp/doc.md"),
+                sections: vec![DocumentSection {
                     index: 0,
-                    text: "Alpha beta gamma".to_string(),
-                    char_start: 0,
-                    char_end: 16,
+                    title: "Intro".to_string(),
+                    chunks: vec![DocumentChunk {
+                        index: 0,
+                        text: "Alpha beta gamma".to_string(),
+                        char_start: 0,
+                        char_end: 16,
+                    }],
+                    source_anchor: Some("section:0".to_string()),
                 }],
-                source_anchor: Some("section:0".to_string()),
-            }],
-            imported_at: chrono::Utc::now(),
-        }).unwrap();
+                imported_at: chrono::Utc::now(),
+            })
+            .unwrap();
 
         let results = repository.search_documents(&SearchQuery {
             text: "beta".to_string(),
@@ -250,17 +249,19 @@ mod tests {
     #[test]
     fn note_repository_searches_transcripts() {
         let mut repository = InMemoryNoteRepository::new();
-        repository.save_note(VoiceNote {
-            note_id: "note-1".to_string(),
-            session_id: "session-1".to_string(),
-            document_id: "doc-1".to_string(),
-            position: ReadingPosition::default(),
-            transcript: "Important passage".to_string(),
-            transcription_provider: "fake-dictation".to_string(),
-            language: "it".to_string(),
-            raw_audio_path: None,
-            created_at: chrono::Utc::now(),
-        }).unwrap();
+        repository
+            .save_note(VoiceNote {
+                note_id: "note-1".to_string(),
+                session_id: "session-1".to_string(),
+                document_id: "doc-1".to_string(),
+                position: ReadingPosition::default(),
+                transcript: "Important passage".to_string(),
+                transcription_provider: "fake-dictation".to_string(),
+                language: "it".to_string(),
+                raw_audio_path: None,
+                created_at: chrono::Utc::now(),
+            })
+            .unwrap();
 
         let results = repository.search_notes(&SearchQuery {
             text: "passage".to_string(),

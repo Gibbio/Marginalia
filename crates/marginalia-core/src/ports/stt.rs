@@ -42,10 +42,7 @@ pub struct SpeechInterruptCapture {
 }
 
 pub trait SpeechInterruptMonitor: Send {
-    fn capture_next_interrupt(
-        &mut self,
-        timeout_seconds: Option<f64>,
-    ) -> SpeechInterruptCapture;
+    fn capture_next_interrupt(&mut self, timeout_seconds: Option<f64>) -> SpeechInterruptCapture;
     fn close(&mut self);
 }
 

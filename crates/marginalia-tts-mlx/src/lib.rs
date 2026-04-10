@@ -43,8 +43,7 @@ impl MlxSpeechSynthesizer {
             .map_err(|e| format!("failed to load voice '{voice_name}': {e}"))?;
 
         let output_dir = output_dir.as_ref().to_path_buf();
-        fs::create_dir_all(&output_dir)
-            .map_err(|e| format!("failed to create output dir: {e}"))?;
+        fs::create_dir_all(&output_dir).map_err(|e| format!("failed to create output dir: {e}"))?;
 
         Ok(Self {
             model,
@@ -61,9 +60,16 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
             provider_name: "kokoro-mlx".to_string(),
             interface_kind: "tts".to_string(),
             supported_languages: vec![
-                "it".into(), "en".into(), "fr".into(), "de".into(),
-                "es".into(), "pt".into(), "ja".into(), "ko".into(),
-                "zh".into(), "hi".into(),
+                "it".into(),
+                "en".into(),
+                "fr".into(),
+                "de".into(),
+                "es".into(),
+                "pt".into(),
+                "ja".into(),
+                "ko".into(),
+                "zh".into(),
+                "hi".into(),
             ],
             supports_streaming: false,
             supports_partial_results: false,
@@ -164,7 +170,7 @@ fn is_clause_punct(c: char) -> bool {
         c,
         '.' | ',' | '!' | '?' | ':' | ';' | '…'
         | '。' | '、' | '！' | '？' | '；' | '：'  // CJK punctuation
-        | '¿' | '¡'                                // Spanish
+        | '¿' | '¡' // Spanish
     )
 }
 

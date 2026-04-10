@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CHUNK_TARGET_CHARS: usize = 300;
 
@@ -190,7 +190,7 @@ pub fn build_document_from_import(
     }
 }
 
-fn title_from_path(source_path: &PathBuf) -> String {
+fn title_from_path(source_path: &Path) -> String {
     let stem = source_path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -260,9 +260,7 @@ fn locate_paragraphs(section_text: &str) -> Vec<(String, usize, usize)> {
             continue;
         }
 
-        let relative = section_text[search_start..]
-            .find(stripped)
-            .unwrap_or(0);
+        let relative = section_text[search_start..].find(stripped).unwrap_or(0);
         let char_start = search_start + relative;
         let char_end = char_start + stripped.len();
         result.push((stripped.to_string(), char_start, char_end));
@@ -359,8 +357,8 @@ fn merge_fragments(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_document_from_import, Document, DocumentChunk, DocumentSection,
-        ImportedDocument, ImportedSection, DEFAULT_CHUNK_TARGET_CHARS,
+        build_document_from_import, Document, DocumentChunk, DocumentSection, ImportedDocument,
+        ImportedSection, DEFAULT_CHUNK_TARGET_CHARS,
     };
     use chrono::Utc;
     use std::path::PathBuf;
@@ -389,7 +387,10 @@ mod tests {
 
         assert_eq!(section.text(), "Alpha\n\nBeta");
         assert_eq!(section.chunk_count(), 2);
-        assert_eq!(section.get_chunk(1).map(|chunk| chunk.anchor()), Some("chunk:1".to_string()));
+        assert_eq!(
+            section.get_chunk(1).map(|chunk| chunk.anchor()),
+            Some("chunk:1".to_string())
+        );
     }
 
     #[test]
@@ -436,9 +437,7 @@ mod tests {
         assert_eq!(document.chapter_count(), 2);
         assert_eq!(document.total_chunk_count(), 3);
         assert_eq!(
-            document
-                .get_chunk(1, 1)
-                .map(|chunk| chunk.text.as_str()),
+            document.get_chunk(1, 1).map(|chunk| chunk.text.as_str()),
             Some("Gamma")
         );
     }
@@ -486,7 +485,13 @@ mod tests {
         assert_eq!(document.chapter_count(), 2);
         assert_eq!(document.sections[0].title, "Intro");
         assert_eq!(document.sections[1].title, "Section 2");
-        assert_eq!(document.sections[1].source_anchor.as_deref(), Some("section:1"));
-        assert_eq!(document.sections[0].chunks[0].text, "Alpha beta gamma. Delta epsilon zeta.");
+        assert_eq!(
+            document.sections[1].source_anchor.as_deref(),
+            Some("section:1")
+        );
+        assert_eq!(
+            document.sections[0].chunks[0].text,
+            "Alpha beta gamma. Delta epsilon zeta."
+        );
     }
 }

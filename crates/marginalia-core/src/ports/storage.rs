@@ -1,6 +1,4 @@
-use crate::domain::{
-    Document, ReadingSession, RewriteDraft, SearchQuery, SearchResult, VoiceNote,
-};
+use crate::domain::{Document, ReadingSession, RewriteDraft, SearchQuery, SearchResult, VoiceNote};
 use std::fmt::{Display, Formatter};
 
 // ---------------------------------------------------------------------------

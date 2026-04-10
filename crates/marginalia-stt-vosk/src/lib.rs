@@ -122,8 +122,12 @@ fn open_monitor(config: &VoskConfig) -> Result<VoskSpeechInterruptMonitor, Strin
     // Suppress Vosk/Kaldi log messages that would corrupt TUI output.
     vosk::set_log_level(vosk::LogLevel::Error);
 
-    let model = Model::new(config.model_path.to_string_lossy().as_ref())
-        .ok_or_else(|| format!("Failed to load Vosk model from {}", config.model_path.display()))?;
+    let model = Model::new(config.model_path.to_string_lossy().as_ref()).ok_or_else(|| {
+        format!(
+            "Failed to load Vosk model from {}",
+            config.model_path.display()
+        )
+    })?;
 
     let (stream, audio_rx, device_name, actual_rate) =
         setup_audio(config.sample_rate, config.input_device_name.as_deref())?;
@@ -207,13 +211,15 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
                 }
             } else if speech_detected_ms.is_some() {
                 let silence_start = *silence_started.get_or_insert(now);
-                if now.duration_since(silence_start).as_millis() as u64 >= self.silence_timeout_ms
-                {
+                if now.duration_since(silence_start).as_millis() as u64 >= self.silence_timeout_ms {
                     break;
                 }
             }
 
-            if matches!(recognizer.accept_waveform(&samples), Ok(DecodingState::Finalized)) {
+            if matches!(
+                recognizer.accept_waveform(&samples),
+                Ok(DecodingState::Finalized)
+            ) {
                 let text = extract_text(recognizer.result().single().map(|a| a.text));
                 if !text.is_empty() {
                     recognized = Some(text);
@@ -293,9 +299,7 @@ fn preferred_config(
     let supports_desired = device
         .supported_input_configs()
         .map_err(|e| format!("Cannot query device configs: {e}"))?
-        .any(|c| {
-            c.min_sample_rate().0 <= desired_rate && c.max_sample_rate().0 >= desired_rate
-        });
+        .any(|c| c.min_sample_rate().0 <= desired_rate && c.max_sample_rate().0 >= desired_rate);
 
     if supports_desired {
         return Ok((
@@ -384,11 +388,17 @@ fn extract_text(text: Option<&str>) -> String {
 }
 
 fn audio_peak(samples: &[i16]) -> i16 {
-    samples.iter().map(|s| s.unsigned_abs() as i16).max().unwrap_or(0)
+    samples
+        .iter()
+        .map(|s| s.unsigned_abs() as i16)
+        .max()
+        .unwrap_or(0)
 }
 
 fn elapsed_ms(started_at: Instant, now: Instant) -> u32 {
-    now.duration_since(started_at).as_millis().min(u32::MAX as u128) as u32
+    now.duration_since(started_at)
+        .as_millis()
+        .min(u32::MAX as u128) as u32
 }
 
 fn failed_capture(reason: String) -> SpeechInterruptCapture {

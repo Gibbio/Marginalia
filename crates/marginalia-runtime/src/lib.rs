@@ -5,19 +5,17 @@ use marginalia_core::application::{
     SessionQueryService,
 };
 use marginalia_core::domain::{
-    ReadingPosition, ReadingSession, ReaderState, VoiceNote, DEFAULT_CHUNK_TARGET_CHARS,
+    ReaderState, ReadingPosition, ReadingSession, VoiceNote, DEFAULT_CHUNK_TARGET_CHARS,
 };
 use marginalia_core::events::{DomainEvent, EventName};
 use marginalia_core::frontend::{
     AppSnapshot, DocumentChunkView, DocumentListItem, DocumentSectionView, DocumentView,
     SessionSnapshot,
 };
+use marginalia_core::ports::storage::{DocumentRepository, NoteRepository, SessionRepository};
 use marginalia_core::ports::{
-    CommandRecognizer, DictationTranscriber, PlaybackEngine, RewriteGenerator, SpeechInterruptMonitor,
-    SpeechSynthesizer, SynthesisError, SynthesisRequest, TopicSummarizer,
-};
-use marginalia_core::ports::storage::{
-    DocumentRepository, NoteRepository, SessionRepository,
+    CommandRecognizer, DictationTranscriber, PlaybackEngine, RewriteGenerator,
+    SpeechInterruptMonitor, SpeechSynthesizer, SynthesisError, SynthesisRequest, TopicSummarizer,
 };
 use marginalia_import_text::TextDocumentImporter;
 use marginalia_provider_fake::{
@@ -25,8 +23,8 @@ use marginalia_provider_fake::{
     FakeSpeechSynthesizer, FakeTopicSummarizer, RecordingEventPublisher,
 };
 use marginalia_storage_sqlite::{
-    SQLiteDatabase, SQLiteDocumentRepository, SQLiteNoteRepository,
-    SQLiteRewriteDraftRepository, SQLiteSessionRepository,
+    SQLiteDatabase, SQLiteDocumentRepository, SQLiteNoteRepository, SQLiteRewriteDraftRepository,
+    SQLiteSessionRepository,
 };
 use std::collections::HashMap;
 use std::error::Error;
@@ -69,7 +67,9 @@ pub enum RuntimeError {
 impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingActiveSession => write!(f, "No active session is available in the runtime."),
+            Self::MissingActiveSession => {
+                write!(f, "No active session is available in the runtime.")
+            }
             Self::MissingDocument { document_id } => {
                 write!(f, "Document {} was not found in the runtime.", document_id)
             }
@@ -126,7 +126,11 @@ where
     let active_session = session_repository.get_active_session();
     let target_document_id = document_id
         .map(ToString::to_string)
-        .or_else(|| active_session.as_ref().map(|session| session.document_id.clone()))
+        .or_else(|| {
+            active_session
+                .as_ref()
+                .map(|session| session.document_id.clone())
+        })
         .or_else(|| {
             document_repository
                 .list_documents()
@@ -255,17 +259,11 @@ impl SqliteRuntime {
         &self.config
     }
 
-    pub fn set_playback_engine(
-        &mut self,
-        playback_engine: impl PlaybackEngine + Send + 'static,
-    ) {
+    pub fn set_playback_engine(&mut self, playback_engine: impl PlaybackEngine + Send + 'static) {
         self.playback_engine = Box::new(playback_engine);
     }
 
-    pub fn set_speech_synthesizer(
-        &mut self,
-        synthesizer: impl SpeechSynthesizer + Send + 'static,
-    ) {
+    pub fn set_speech_synthesizer(&mut self, synthesizer: impl SpeechSynthesizer + Send + 'static) {
         self.tts = Box::new(synthesizer);
     }
 
@@ -326,7 +324,11 @@ impl SqliteRuntime {
         session.last_command_source = Some("runtime".to_string());
         session.voice = Some(self.config.default_voice.clone());
         session.tts_provider = Some(tts_provider);
-        session.command_stt_provider = Some(self.command_recognizer.describe_capabilities().provider_name);
+        session.command_stt_provider = Some(
+            self.command_recognizer
+                .describe_capabilities()
+                .provider_name,
+        );
         session.playback_provider = playback.provider_name.clone();
         session.command_listening_active = true;
         session.command_language = Some(self.config.default_language.clone());
@@ -520,8 +522,14 @@ impl SqliteRuntime {
     pub fn doctor_report(&self) -> serde_json::Value {
         let playback_name = self.playback_engine.describe_capabilities().provider_name;
         let tts_name = self.tts.describe_capabilities().provider_name;
-        let stt_name = self.command_recognizer.describe_capabilities().provider_name;
-        let dictation_name = self.dictation_transcriber.describe_capabilities().provider_name;
+        let stt_name = self
+            .command_recognizer
+            .describe_capabilities()
+            .provider_name;
+        let dictation_name = self
+            .dictation_transcriber
+            .describe_capabilities()
+            .provider_name;
 
         let mut checks = serde_json::json!({
             "playback": { "ready": true, "command": "beta-runtime" },
@@ -684,7 +692,10 @@ impl SqliteRuntime {
 
         let synthesis = self.tts.synthesize(SynthesisRequest {
             text: chunk.text.clone(),
-            voice: session.voice.clone().or(Some(self.config.default_voice.clone())),
+            voice: session
+                .voice
+                .clone()
+                .or(Some(self.config.default_voice.clone())),
             language: session
                 .command_language
                 .clone()
@@ -720,7 +731,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("marginalia-runtime-test-{}.{}", timestamp, extension))
+        std::env::temp_dir().join(format!(
+            "marginalia-runtime-test-{}.{}",
+            timestamp, extension
+        ))
     }
 
     #[test]
@@ -732,7 +746,10 @@ mod tests {
         let outcome = runtime.ingest_path(&path).unwrap();
         let snapshot = runtime.app_snapshot();
 
-        assert!(outcome.document.title.starts_with("Marginalia Runtime Test"));
+        assert!(outcome
+            .document
+            .title
+            .starts_with("Marginalia Runtime Test"));
         assert_eq!(snapshot.state, "idle");
         assert_eq!(snapshot.document_count, 1);
 
@@ -746,7 +763,9 @@ mod tests {
 
         let mut runtime = SqliteRuntime::open_in_memory().unwrap();
         let outcome = runtime.ingest_path(&path).unwrap();
-        let session = runtime.start_session(&outcome.document.document_id).unwrap();
+        let session = runtime
+            .start_session(&outcome.document.document_id)
+            .unwrap();
         let snapshot = runtime.session_snapshot().unwrap().unwrap();
 
         assert_eq!(session.document_id, outcome.document.document_id);
@@ -797,7 +816,9 @@ mod tests {
         })
         .unwrap();
         let outcome = runtime.ingest_path(&path).unwrap();
-        runtime.start_session(&outcome.document.document_id).unwrap();
+        runtime
+            .start_session(&outcome.document.document_id)
+            .unwrap();
 
         let before = runtime.session_snapshot().unwrap().unwrap();
         runtime.next_chunk().unwrap();
@@ -824,7 +845,9 @@ mod tests {
 
         let mut runtime = SqliteRuntime::open_in_memory().unwrap();
         let outcome = runtime.ingest_path(&path).unwrap();
-        runtime.start_session(&outcome.document.document_id).unwrap();
+        runtime
+            .start_session(&outcome.document.document_id)
+            .unwrap();
         let note = runtime.create_note("remember this").unwrap();
         let snapshot = runtime.session_snapshot().unwrap().unwrap();
 

@@ -70,8 +70,7 @@ impl PlaybackEngine for FakePlaybackEngine {
         self.snapshot.document_id = Some(document.document_id.clone());
         self.snapshot.anchor = Some(position.anchor());
         self.snapshot.progress_units = position.chunk_index;
-        self.snapshot.audio_reference =
-            synthesis.map(|synthesis| synthesis.audio_reference);
+        self.snapshot.audio_reference = synthesis.map(|synthesis| synthesis.audio_reference);
         self.snapshot.clone()
     }
 

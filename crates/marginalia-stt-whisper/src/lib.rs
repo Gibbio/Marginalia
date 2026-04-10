@@ -1,6 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use marginalia_core::ports::{
-    DictationSegment, DictationTranscript, DictationTranscriber, ProviderCapabilities,
+    DictationSegment, DictationTranscriber, DictationTranscript, ProviderCapabilities,
     ProviderExecutionMode,
 };
 use std::path::{Path, PathBuf};
@@ -107,10 +107,7 @@ impl WhisperDictationTranscriber {
             });
         }
         // whisper.cpp expects f32 samples normalised to [-1.0, 1.0]
-        let samples_f32: Vec<f32> = samples_i16
-            .iter()
-            .map(|&s| s as f32 / 32768.0)
-            .collect();
+        let samples_f32: Vec<f32> = samples_i16.iter().map(|&s| s as f32 / 32768.0).collect();
         self.run_inference(samples_f32)
     }
 

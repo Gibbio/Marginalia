@@ -1,6 +1,6 @@
 use marginalia_core::ports::{
-    ProviderCapabilities, ProviderExecutionMode, SpeechSynthesizer, SynthesisError, SynthesisRequest,
-    SynthesisResult,
+    ProviderCapabilities, ProviderExecutionMode, SpeechSynthesizer, SynthesisError,
+    SynthesisRequest, SynthesisResult,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -51,9 +51,8 @@ impl SpeechSynthesizer for FakeSpeechSynthesizer {
             .clone()
             .unwrap_or_else(|| self.default_voice.clone());
         let excerpt = request.text.chars().take(80).collect::<String>();
-        let audio_reference = write_temp_wav(&voice, &excerpt).unwrap_or_else(|| {
-            format!("memory://{}/{}", voice, excerpt.replace(' ', "_"))
-        });
+        let audio_reference = write_temp_wav(&voice, &excerpt)
+            .unwrap_or_else(|| format!("memory://{}/{}", voice, excerpt.replace(' ', "_")));
         let mut metadata = HashMap::new();
         metadata.insert("language".to_string(), request.language);
 
@@ -84,15 +83,13 @@ fn write_temp_wav(voice: &str, excerpt: &str) -> Option<String> {
 fn sanitize_path_fragment(input: &str) -> String {
     let rendered = input
         .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch
-            } else {
-                '_'
-            }
-        })
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect::<String>();
-    rendered.trim_matches('_').chars().take(24).collect::<String>()
+    rendered
+        .trim_matches('_')
+        .chars()
+        .take(24)
+        .collect::<String>()
 }
 
 fn write_silence_wav(path: &PathBuf, sample_count: usize) -> std::io::Result<()> {
@@ -131,11 +128,13 @@ mod tests {
     #[test]
     fn fake_synthesizer_returns_local_wav_reference() {
         let mut synthesizer = FakeSpeechSynthesizer::new();
-        let result = synthesizer.synthesize(SynthesisRequest {
-            text: "Alpha beta gamma".to_string(),
-            voice: None,
-            language: "it".to_string(),
-        }).unwrap();
+        let result = synthesizer
+            .synthesize(SynthesisRequest {
+                text: "Alpha beta gamma".to_string(),
+                voice: None,
+                language: "it".to_string(),
+            })
+            .unwrap();
 
         assert_eq!(result.provider_name, "fake-tts");
         assert_eq!(result.voice, "narrator");

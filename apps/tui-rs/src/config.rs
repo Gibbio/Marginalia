@@ -25,6 +25,7 @@ pub struct TuiConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(not(feature = "mlx-tts"), allow(dead_code))]
 pub struct MlxSection {
     /// HuggingFace model repo or local path. Default: `prince-canuma/Kokoro-82M`.
     #[serde(default = "default_mlx_model")]
@@ -43,8 +44,12 @@ impl Default for MlxSection {
     }
 }
 
-fn default_mlx_model() -> String { "prince-canuma/Kokoro-82M".to_string() }
-fn default_mlx_voice() -> String { "af_bella".to_string() }
+fn default_mlx_model() -> String {
+    "prince-canuma/Kokoro-82M".to_string()
+}
+fn default_mlx_voice() -> String {
+    "af_bella".to_string()
+}
 
 #[derive(Debug, Deserialize, Default)]
 pub struct KokoroSection {

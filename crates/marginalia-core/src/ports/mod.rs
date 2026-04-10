@@ -10,15 +10,15 @@ pub mod tts;
 
 pub use capabilities::{ProviderCapabilities, ProviderExecutionMode};
 pub use importing::{DocumentImportError, DocumentImporter};
-pub use storage::StorageError;
 pub use llm::{
     RewriteGenerator, RewriteInstruction, RewriteOutput, SummaryInstruction, SummaryOutput,
     TopicSummarizer,
 };
 pub use playback::{PlaybackEngine, PlaybackSnapshot};
 pub use runtime::{RuntimeCleanupReport, RuntimeSessionRecord, RuntimeSupervisor};
+pub use storage::StorageError;
 pub use stt::{
-    CommandRecognition, CommandRecognizer, DictationSegment, DictationTranscript,
-    DictationTranscriber, SpeechInterruptCapture, SpeechInterruptMonitor,
+    CommandRecognition, CommandRecognizer, DictationSegment, DictationTranscriber,
+    DictationTranscript, SpeechInterruptCapture, SpeechInterruptMonitor,
 };
 pub use tts::{SpeechSynthesizer, SynthesisError, SynthesisRequest, SynthesisResult};

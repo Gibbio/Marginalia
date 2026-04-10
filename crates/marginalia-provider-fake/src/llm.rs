@@ -38,7 +38,10 @@ impl RewriteGenerator for FakeRewriteGenerator {
             provider_name: "fake-rewrite".to_string(),
             rewritten_text: format!(
                 "[{} / {}] {} || notes: {}",
-                instruction.document_title, instruction.section_title, instruction.section_text, notes
+                instruction.document_title,
+                instruction.section_title,
+                instruction.section_text,
+                notes
             ),
             strategy: "deterministic-template".to_string(),
             note_count: instruction.note_texts.len(),

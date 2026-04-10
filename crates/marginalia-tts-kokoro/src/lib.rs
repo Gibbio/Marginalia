@@ -14,11 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const DEFAULT_MODEL_FILE_CANDIDATES: &[&str] = &[
-    "kokoro.onnx",
-    "model.onnx",
-    "kokoro-v1.0.onnx",
-];
+const DEFAULT_MODEL_FILE_CANDIDATES: &[&str] = &["kokoro.onnx", "model.onnx", "kokoro-v1.0.onnx"];
 const DEFAULT_CONFIG_FILE_CANDIDATES: &[&str] = &["config.json", "kokoro.config.json"];
 const DEFAULT_ONNX_RUNTIME_CANDIDATES: &[&str] = &[
     "libonnxruntime.so",
@@ -101,11 +97,7 @@ impl KokoroConfig {
 
     pub fn voice_file_candidates_for(&self, voice: &str) -> Vec<String> {
         let mut candidates = vec![format!("voices/{voice}.bin"), format!("{voice}.bin")];
-        candidates.extend(
-            LEGACY_VOICE_FILE_CANDIDATES
-                .iter()
-                .map(ToString::to_string),
-        );
+        candidates.extend(LEGACY_VOICE_FILE_CANDIDATES.iter().map(ToString::to_string));
         candidates
     }
 
@@ -144,7 +136,8 @@ impl KokoroConfig {
             missing.push(format!(
                 "missing voice asset for default voice {} ({})",
                 self.default_voice,
-                self.voice_file_candidates_for(&self.default_voice).join(", ")
+                self.voice_file_candidates_for(&self.default_voice)
+                    .join(", ")
             ));
         }
 
@@ -193,22 +186,24 @@ impl KokoroConfig {
             Ok(environment_builder) => {
                 environment_builder.commit();
                 match Session::builder() {
-                    Ok(mut session_builder) => match session_builder.commit_from_file(&model_path) {
-                        Ok(session) => KokoroOnnxProbeReport {
-                            runtime_library_path: Some(runtime_library_path),
-                            session_opened: true,
-                            input_count: session.inputs().len(),
-                            output_count: session.outputs().len(),
-                            error: None,
-                        },
-                        Err(error) => KokoroOnnxProbeReport {
-                            runtime_library_path: Some(runtime_library_path),
-                            session_opened: false,
-                            input_count: 0,
-                            output_count: 0,
-                            error: Some(error.to_string()),
-                        },
-                    },
+                    Ok(mut session_builder) => {
+                        match session_builder.commit_from_file(&model_path) {
+                            Ok(session) => KokoroOnnxProbeReport {
+                                runtime_library_path: Some(runtime_library_path),
+                                session_opened: true,
+                                input_count: session.inputs().len(),
+                                output_count: session.outputs().len(),
+                                error: None,
+                            },
+                            Err(error) => KokoroOnnxProbeReport {
+                                runtime_library_path: Some(runtime_library_path),
+                                session_opened: false,
+                                input_count: 0,
+                                output_count: 0,
+                                error: Some(error.to_string()),
+                            },
+                        }
+                    }
                     Err(error) => KokoroOnnxProbeReport {
                         runtime_library_path: Some(runtime_library_path),
                         session_opened: false,
@@ -236,15 +231,16 @@ impl KokoroConfig {
     }
 
     pub fn load_vocabulary(&self) -> Result<KokoroVocabulary, KokoroTokenizationError> {
-        let config_path = self
-            .resolve_config_path()
-            .ok_or_else(|| KokoroTokenizationError::MissingConfigAsset {
+        let config_path = self.resolve_config_path().ok_or_else(|| {
+            KokoroTokenizationError::MissingConfigAsset {
                 searched: self.config_file_candidates.clone(),
-            })?;
-        let raw = fs::read_to_string(&config_path).map_err(|error| KokoroTokenizationError::Io {
-            context: format!("failed to read config file {}", config_path.display()),
-            error,
+            }
         })?;
+        let raw =
+            fs::read_to_string(&config_path).map_err(|error| KokoroTokenizationError::Io {
+                context: format!("failed to read config file {}", config_path.display()),
+                error,
+            })?;
         let document: Value =
             serde_json::from_str(&raw).map_err(KokoroTokenizationError::ConfigParse)?;
         let vocab = document
@@ -286,12 +282,12 @@ impl KokoroConfig {
         token_count: usize,
     ) -> Result<KokoroVoiceStyle, KokoroInferenceError> {
         let voice = voice.unwrap_or(&self.default_voice);
-        let path = self
-            .resolve_voice_path_for(voice)
-            .ok_or_else(|| KokoroInferenceError::MissingVoiceAsset {
+        let path = self.resolve_voice_path_for(voice).ok_or_else(|| {
+            KokoroInferenceError::MissingVoiceAsset {
                 voice: voice.to_string(),
                 searched: self.voice_file_candidates_for(voice),
-            })?;
+            }
+        })?;
 
         let bytes = fs::read(&path).map_err(|error| KokoroInferenceError::Io {
             context: format!("failed to read voice file {}", path.display()),
@@ -506,9 +502,9 @@ impl KokoroTextProcessor {
                     phonemes: normalize_phoneme_text(phonemes),
                 })
             }
-            KokoroTextProcessorMode::ExternalCommand(command) => {
-                command.phonemize(text).map_err(KokoroTextProcessingError::ExternalCommand)
-            }
+            KokoroTextProcessorMode::ExternalCommand(command) => command
+                .phonemize(text)
+                .map_err(KokoroTextProcessingError::ExternalCommand),
         }
     }
 }
@@ -552,10 +548,7 @@ impl KokoroExternalPhonemizerConfig {
             if let Err(error) = stdin.write_all(text.as_bytes()).and_then(|_| stdin.flush()) {
                 if error.kind() != std::io::ErrorKind::BrokenPipe {
                     return Err(KokoroExternalPhonemizerError::Io {
-                        context: format!(
-                            "failed to write to external phonemizer {}",
-                            self.program
-                        ),
+                        context: format!("failed to write to external phonemizer {}", self.program),
                         error,
                     });
                 }
@@ -563,12 +556,13 @@ impl KokoroExternalPhonemizerConfig {
         }
         // stdin is dropped here, sending EOF to the child process.
 
-        let output = child
-            .wait_with_output()
-            .map_err(|error| KokoroExternalPhonemizerError::Io {
-                context: format!("failed to wait for external phonemizer {}", self.program),
-                error,
-            })?;
+        let output =
+            child
+                .wait_with_output()
+                .map_err(|error| KokoroExternalPhonemizerError::Io {
+                    context: format!("failed to wait for external phonemizer {}", self.program),
+                    error,
+                })?;
 
         if !output.status.success() {
             return Err(KokoroExternalPhonemizerError::ProcessFailed {
@@ -613,9 +607,15 @@ impl Error for KokoroTextProcessingError {}
 
 #[derive(Debug)]
 pub enum KokoroExternalPhonemizerError {
-    Io { context: String, error: std::io::Error },
+    Io {
+        context: String,
+        error: std::io::Error,
+    },
     Utf8(std::string::FromUtf8Error),
-    ProcessFailed { status: Option<i32>, stderr: String },
+    ProcessFailed {
+        status: Option<i32>,
+        stderr: String,
+    },
     EmptyOutput,
 }
 
@@ -736,13 +736,18 @@ impl KokoroSpeechSynthesizer {
 
 #[derive(Debug)]
 pub enum KokoroTokenizationError {
-    MissingConfigAsset { searched: Vec<String> },
+    MissingConfigAsset {
+        searched: Vec<String>,
+    },
     InvalidConfig(String),
     UnknownSymbols {
         normalized_phonemes: String,
         unknown_symbols: Vec<String>,
     },
-    Io { context: String, error: std::io::Error },
+    Io {
+        context: String,
+        error: std::io::Error,
+    },
     ConfigParse(serde_json::Error),
 }
 
@@ -755,7 +760,11 @@ impl Display for KokoroTokenizationError {
             Self::InvalidConfig(message) => f.write_str(message),
             Self::UnknownSymbols {
                 unknown_symbols, ..
-            } => write!(f, "unsupported phoneme symbols: {}", unknown_symbols.join(", ")),
+            } => write!(
+                f,
+                "unsupported phoneme symbols: {}",
+                unknown_symbols.join(", ")
+            ),
             Self::Io { context, error } => write!(f, "{context}: {error}"),
             Self::ConfigParse(error) => Display::fmt(error, f),
         }
@@ -766,16 +775,17 @@ impl Error for KokoroTokenizationError {}
 
 impl KokoroOnnxModel {
     pub fn load(config: KokoroConfig) -> Result<Self, KokoroInferenceError> {
-        let model_path = config
-            .resolve_model_path()
-            .ok_or_else(|| KokoroInferenceError::MissingModelAsset {
-                searched: config.model_file_candidates.clone(),
-            })?;
-        let runtime_library_path = config
-            .resolve_onnx_runtime_library_path()
-            .ok_or_else(|| KokoroInferenceError::MissingRuntimeLibrary {
+        let model_path =
+            config
+                .resolve_model_path()
+                .ok_or_else(|| KokoroInferenceError::MissingModelAsset {
+                    searched: config.model_file_candidates.clone(),
+                })?;
+        let runtime_library_path = config.resolve_onnx_runtime_library_path().ok_or_else(|| {
+            KokoroInferenceError::MissingRuntimeLibrary {
                 searched: config.onnx_runtime_candidates.clone(),
-            })?;
+            }
+        })?;
 
         ort::init_from(&runtime_library_path)
             .map_err(KokoroInferenceError::Ort)?
@@ -789,14 +799,14 @@ impl KokoroOnnxModel {
         // ORT silently falls back to CPU if the EP is not available in the loaded library.
         #[cfg(feature = "coreml")]
         let mut builder = builder
-            .with_execution_providers([
-                ort::execution_providers::CoreMLExecutionProvider::default().build(),
-            ])
+            .with_execution_providers([ort::execution_providers::CoreMLExecutionProvider::default(
+            )
+            .build()])
             .map_err(|e| KokoroInferenceError::Ort(e.into()))?;
         #[cfg(feature = "cuda")]
         let mut builder = builder
             .with_execution_providers([
-                ort::execution_providers::CUDAExecutionProvider::default().build(),
+                ort::execution_providers::CUDAExecutionProvider::default().build()
             ])
             .map_err(|e| KokoroInferenceError::Ort(e.into()))?;
 
@@ -931,12 +941,14 @@ impl SpeechSynthesizer for KokoroSpeechSynthesizer {
             )
         })?;
         let output_path = next_audio_output_path(&self.runtime.output_dir, &selected_voice);
-        write_wav_f32(&output_path, inference.sample_rate_hz, &inference.audio).map_err(|error| {
-            SynthesisError::new(
-                self.provider_name.clone(),
-                format!("failed to write wav {}: {error}", output_path.display()),
-            )
-        })?;
+        write_wav_f32(&output_path, inference.sample_rate_hz, &inference.audio).map_err(
+            |error| {
+                SynthesisError::new(
+                    self.provider_name.clone(),
+                    format!("failed to write wav {}: {error}", output_path.display()),
+                )
+            },
+        )?;
 
         let mut metadata = HashMap::new();
         metadata.insert("language".to_string(), request.language);
@@ -964,14 +976,24 @@ impl SpeechSynthesizer for KokoroSpeechSynthesizer {
 
 #[derive(Debug)]
 pub enum KokoroInferenceError {
-    MissingModelAsset { searched: Vec<String> },
-    MissingVoiceAsset { voice: String, searched: Vec<String> },
-    MissingRuntimeLibrary { searched: Vec<String> },
+    MissingModelAsset {
+        searched: Vec<String>,
+    },
+    MissingVoiceAsset {
+        voice: String,
+        searched: Vec<String>,
+    },
+    MissingRuntimeLibrary {
+        searched: Vec<String>,
+    },
     InvalidVoiceData(String),
     InvalidTokens(String),
     InvalidSpeed(String),
     Tokenization(KokoroTokenizationError),
-    Io { context: String, error: std::io::Error },
+    Io {
+        context: String,
+        error: std::io::Error,
+    },
     Ort(ort::Error),
 }
 
@@ -1018,22 +1040,13 @@ fn extract_explicit_phonemes(text: &str) -> Option<(&'static str, &str)> {
 
 fn next_audio_output_path(output_dir: &Path, voice: &str) -> PathBuf {
     let id = AUDIO_OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    output_dir.join(format!(
-        "kokoro-{id}-{}.wav",
-        sanitize_path_fragment(voice)
-    ))
+    output_dir.join(format!("kokoro-{id}-{}.wav", sanitize_path_fragment(voice)))
 }
 
 fn sanitize_path_fragment(input: &str) -> String {
     let rendered = input
         .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch
-            } else {
-                '_'
-            }
-        })
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect::<String>();
     let trimmed = rendered.trim_matches('_');
     if trimmed.is_empty() {
@@ -1135,7 +1148,11 @@ mod tests {
         fs::create_dir_all(root.join("voices")).unwrap();
         fs::write(root.join("kokoro.onnx"), b"onnx").unwrap();
         fs::write(root.join("config.json"), sample_config_json()).unwrap();
-        fs::write(root.join("voices").join("af.bin"), vec![0_u8; STYLE_VECTOR_WIDTH * 8]).unwrap();
+        fs::write(
+            root.join("voices").join("af.bin"),
+            vec![0_u8; STYLE_VECTOR_WIDTH * 8],
+        )
+        .unwrap();
 
         let report = KokoroConfig::from_assets_root(&root).readiness_report();
 
@@ -1252,7 +1269,9 @@ mod tests {
         let error = config.tokenize_phonemes("h λ").unwrap_err();
 
         match error {
-            KokoroTokenizationError::UnknownSymbols { unknown_symbols, .. } => {
+            KokoroTokenizationError::UnknownSymbols {
+                unknown_symbols, ..
+            } => {
                 assert_eq!(unknown_symbols, vec!["λ".to_string()]);
             }
             other => panic!("unexpected error: {other}"),
@@ -1327,10 +1346,7 @@ mod tests {
             KokoroConfig::from_assets_root(&root),
             KokoroExternalPhonemizerConfig {
                 program: "/bin/sh".to_string(),
-                args: vec![
-                    "-c".to_string(),
-                    "echo boom >&2; exit 4".to_string(),
-                ],
+                args: vec!["-c".to_string(), "echo boom >&2; exit 4".to_string()],
             },
         );
         let error = processor.prepare_text("ignored plain text").unwrap_err();

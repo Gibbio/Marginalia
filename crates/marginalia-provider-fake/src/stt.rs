@@ -1,6 +1,6 @@
 use marginalia_core::ports::{
-    CommandRecognition, CommandRecognizer, DictationSegment, DictationTranscript,
-    DictationTranscriber, ProviderCapabilities, ProviderExecutionMode, SpeechInterruptCapture,
+    CommandRecognition, CommandRecognizer, DictationSegment, DictationTranscriber,
+    DictationTranscript, ProviderCapabilities, ProviderExecutionMode, SpeechInterruptCapture,
     SpeechInterruptMonitor,
 };
 use std::collections::VecDeque;
@@ -20,37 +20,30 @@ impl FakeInterruptMonitor {
 
 impl SpeechInterruptMonitor for FakeInterruptMonitor {
     fn capture_next_interrupt(&mut self, _timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
-        self.captures.pop_front().unwrap_or_else(|| SpeechInterruptCapture {
-            provider_name: "fake-command-stt".to_string(),
-            speech_detected: false,
-            capture_ended_ms: 0,
-            speech_detected_ms: None,
-            capture_started_ms: Some(0),
-            recognized_command: None,
-            raw_text: None,
-            timed_out: true,
-            input_device_index: None,
-            input_device_name: None,
-            sample_rate: None,
-        })
+        self.captures
+            .pop_front()
+            .unwrap_or_else(|| SpeechInterruptCapture {
+                provider_name: "fake-command-stt".to_string(),
+                speech_detected: false,
+                capture_ended_ms: 0,
+                speech_detected_ms: None,
+                capture_started_ms: Some(0),
+                recognized_command: None,
+                raw_text: None,
+                timed_out: true,
+                input_device_index: None,
+                input_device_name: None,
+                sample_rate: None,
+            })
     }
 
     fn close(&mut self) {}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FakeCommandRecognizer {
     commands: VecDeque<CommandRecognition>,
     interrupts: Vec<SpeechInterruptCapture>,
-}
-
-impl Default for FakeCommandRecognizer {
-    fn default() -> Self {
-        Self {
-            commands: VecDeque::new(),
-            interrupts: Vec::new(),
-        }
-    }
 }
 
 impl FakeCommandRecognizer {
@@ -174,8 +167,8 @@ mod tests {
 
     #[test]
     fn fake_command_recognizer_can_capture_interrupts() {
-        let mut recognizer = FakeCommandRecognizer::default().with_interrupts(vec![
-            SpeechInterruptCapture {
+        let mut recognizer =
+            FakeCommandRecognizer::default().with_interrupts(vec![SpeechInterruptCapture {
                 provider_name: "fake-command-stt".to_string(),
                 speech_detected: true,
                 capture_ended_ms: 250,
@@ -187,8 +180,7 @@ mod tests {
                 input_device_index: None,
                 input_device_name: None,
                 sample_rate: None,
-            },
-        ]);
+            }]);
 
         let capture = recognizer.capture_interrupt(Some(1.0));
         assert_eq!(capture.recognized_command.as_deref(), Some("stop"));
