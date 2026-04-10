@@ -64,6 +64,29 @@ MLX deps come from:
 
 Navigation commands (next/back/repeat etc.) run TTS async to avoid UI freeze.
 
+Synthesized chunks are cached in-memory by (document_id, section, chunk, voice).
+WAV files persist on disk in `.marginalia-tts-cache/`. Revisiting a chunk is instant.
+
+## Phonemizer — misaki reference
+
+The phonemizer in `marginalia-tts-mlx` replicates the behavior of
+[misaki](https://github.com/hexgrad/misaki) (`misaki/espeak.py`), the official
+G2P engine for Kokoro, written by the model author (hexgrad).
+
+How it works:
+1. **Normalize** text: `() [] {}` → commas, dashes → commas, smart quotes → ASCII
+2. **Split** on clause punctuation (`. , ! ? : ;` and CJK equivalents)
+3. **Phonemize** each clause via `espeak-ng --ipa`
+4. **Re-insert** punctuation between phoneme clauses
+5. **Clean** IPA output: remove tie chars (`^`), combining diacritics (U+0329, U+032A)
+
+This is language-agnostic — works for any language espeak-ng supports.
+Adding a new language requires zero source changes, just a new voice in the toml.
+
+**Reference source**: `hexgrad/misaki/misaki/espeak.py` — `EspeakG2P.__call__`
+and `EspeakFallback.__call__`. When in doubt about phonemizer behavior, check
+misaki first. It is the canonical reference for how Kokoro expects phonemes.
+
 ## Build
 
 ```bash
@@ -82,7 +105,8 @@ Building marginalia-tts-mlx requires Xcode + Metal Toolchain on macOS.
 - Audio: 24kHz sample rate (Kokoro), 22050Hz (Piper)
 - Config: TOML (`apps/tui-rs/marginalia.toml`)
 - Default voice: `af_bella` (English), `if_sara` / `im_nicola` (Italian)
-- espeak-ng is used as external phonemizer for Italian text → IPA conversion
+- espeak-ng is used as external phonemizer (all languages, clause-by-clause)
+- Phonemizer rules follow misaki (hexgrad/misaki) — the Kokoro reference G2P
 
 ## What NOT to do
 
@@ -91,3 +115,5 @@ Building marginalia-tts-mlx requires Xcode + Metal Toolchain on macOS.
 - Don't use mlx-rs from crates.io (v0.25.3 bundles MLX C++ 0.25, too slow)
 - Don't make TTS calls synchronous in the UI thread
 - Don't add unnecessary abstractions — three similar lines > premature abstraction
+- Don't invent phonemizer rules — check misaki (hexgrad/misaki) first
+- Don't call espeak-ng on full text (strips punctuation) — call per clause
