@@ -13,7 +13,7 @@ use vosk::{DecodingState, Model, Recognizer};
 /// `cpal::Stream` is `!Send` on macOS due to an internal `PhantomData<*mut ()>`
 /// marker, but the stream is only held as a drop guard — we never move it
 /// across threads or access its internals after construction.
-struct SendStream(cpal::Stream);
+struct SendStream(#[allow(dead_code)] cpal::Stream);
 
 // SAFETY: The wrapped stream is created and dropped on the same thread that
 // owns the VoskSpeechInterruptMonitor. It is stored solely to keep the
