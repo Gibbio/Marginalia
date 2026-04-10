@@ -801,17 +801,11 @@ impl SqliteRuntime {
         );
         if let Some(cached) = self.tts_cache.get(&cache_key) {
             if std::path::Path::new(&cached.audio_reference).exists() {
-                eprintln!("prefetch: chunk {}:{} already cached", next_section, next_chunk);
                 return;
             }
         }
 
         if let Some(chunk) = document.get_chunk(next_section, next_chunk) {
-            eprintln!(
-                "prefetch: synthesizing chunk {}:{} ({} chars)",
-                next_section, next_chunk, chunk.text.len()
-            );
-            let t = std::time::Instant::now();
             let _ = self.synthesize_cached(
                 &document.document_id,
                 next_section,
@@ -822,7 +816,6 @@ impl SqliteRuntime {
                     language,
                 },
             );
-            eprintln!("prefetch: chunk {}:{} done in {:?}", next_section, next_chunk, t.elapsed());
         }
     }
 }

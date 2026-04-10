@@ -577,14 +577,8 @@ impl BetaBackendClient {
         let (tx, rx) = mpsc::channel();
         let cmd_name = name.clone();
         std::thread::spawn(move || {
-            let t = std::time::Instant::now();
             let mut rt = runtime.lock().expect("runtime lock poisoned");
-            let wait_ms = t.elapsed().as_millis();
             let response = rt.execute_frontend_command(&name, payload);
-            let exec_ms = t.elapsed().as_millis() - wait_ms;
-            if wait_ms > 50 {
-                eprintln!("async {}: lock wait {}ms, exec {}ms", name, wait_ms, exec_ms);
-            }
             let _ = tx.send(AsyncCommandResult {
                 name,
                 response: ResponseEnvelope {
