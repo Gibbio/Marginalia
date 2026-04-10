@@ -132,7 +132,9 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
 /// clause in a single espeak-ng call, and re-insert the punctuation.
 /// Works for any language espeak-ng supports — no language-specific code.
 fn phonemize(text: &str, language: &str) -> Result<String, String> {
-    // Split into clauses: "Ciao, come stai? Bene!" → [("Ciao", ","), (" come stai", "?"), (" Bene", "!")]
+    // Normalize brackets/dashes to comma pauses before phonemization
+    let text = normalize_pauses(text);
+
     let mut result = String::new();
     let mut clause_start = 0;
 
@@ -163,6 +165,19 @@ fn phonemize(text: &str, language: &str) -> Result<String, String> {
     }
 
     Ok(result)
+}
+
+/// Replace brackets, dashes, and other pause-inducing characters with commas.
+/// Kokoro doesn't understand parentheses but does pause on commas.
+fn normalize_pauses(text: &str) -> String {
+    text.replace('(', ", ")
+        .replace(')', ", ")
+        .replace('[', ", ")
+        .replace(']', ", ")
+        .replace(" — ", ", ")
+        .replace(" – ", ", ")
+        .replace("--", ", ")
+        .replace("  ", " ")
 }
 
 fn is_clause_punct(c: char) -> bool {
