@@ -177,13 +177,24 @@ impl App {
         let Some(document_id) = self.pending_play.take() else {
             return;
         };
-        self.push_message("Starting playback...".to_string());
-        match self.backend.start_session(&document_id) {
-            Ok(message) => {
-                self.push_message(message);
-                let _ = self.refresh();
+        if self.backend.is_busy() {
+            // Re-queue — a previous async command is still running.
+            self.pending_play = Some(document_id);
+            return;
+        }
+        self.push_message("Starting playback (synthesizing first chunk...)".to_string());
+        self.backend.start_session_async(&document_id);
+    }
+
+    pub fn poll_async_command(&mut self) {
+        if let Some(result) = self.backend.poll_async_result() {
+            match result {
+                Ok(message) => {
+                    self.push_message(message);
+                    let _ = self.refresh();
+                }
+                Err(message) => self.push_message(format!("error: {message}")),
             }
-            Err(message) => self.push_message(format!("error: {message}")),
         }
     }
 
@@ -465,9 +476,13 @@ impl App {
                 self.refresh()?;
                 "Refreshed snapshots.".to_string()
             }
-            "play" => self
-                .backend
-                .start_session(argument)?,
+            "play" => {
+                if self.backend.is_busy() {
+                    return Err("A command is already running, please wait.".to_string());
+                }
+                self.backend.start_session_async(argument);
+                "Starting playback (synthesizing first chunk...)".to_string()
+            }
             "ingest" => {
                 if argument.is_empty() {
                     return Err("Usage: /ingest <path>".to_string());
@@ -534,6 +549,10 @@ impl App {
         &mut self,
         command: impl FnOnce(&mut BackendClient) -> Result<String, String>,
     ) {
+        if self.backend.is_busy() {
+            self.push_message("Busy — please wait for the current command to finish.".to_string());
+            return;
+        }
         match command(&mut self.backend) {
             Ok(message) => {
                 self.push_message(message);

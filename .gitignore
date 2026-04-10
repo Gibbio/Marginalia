@@ -41,3 +41,26 @@ tmp/
 
 # Devcontainer cache
 .devcontainer/.cache/
+
+# Benchmark artifacts (large binaries, venvs, cloned repos)
+benchmark/macos-apple-silicon/rust/target/
+benchmark/macos-apple-silicon/rust-voice/target/
+benchmark/macos-apple-silicon/rust-mlx/target/
+benchmark/macos-apple-silicon/kokoro-mlx-rs/
+benchmark/macos-apple-silicon/voice-fork/
+benchmark/macos-apple-silicon/voice-patch/
+.bench-venv/
+
+# Separate repos cloned inside workspace
+voice-mlx/
+
+# Downloaded Piper models
+models/tts/piper/*.onnx
+models/tts/piper/*.json
+
+# Log files
+*.log
+
+# SQLite WAL/SHM
+*.db-shm
+*.db-wal

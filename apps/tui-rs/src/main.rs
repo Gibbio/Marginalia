@@ -140,6 +140,7 @@ fn run_tui(
             .map_err(|err| log_error(logger, format!("Unable to draw terminal frame: {err}")))?;
 
         app.flush_pending_play();
+        app.poll_async_command();
 
         if let Some(cmd) = app.poll_voice_command() {
             logger.info(format!("voice-command received: {cmd}"));
@@ -452,7 +453,7 @@ fn section_heading_with_indent(
     let separator_width = width
         .saturating_sub(title.chars().count() as u16)
         .saturating_sub(indent.chars().count() as u16)
-        .saturating_sub(1) as usize;
+        .saturating_sub(2) as usize;
 
     Line::from(vec![
         Span::raw(indent.to_string()),

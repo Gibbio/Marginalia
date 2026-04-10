@@ -28,6 +28,13 @@ pub struct KokoroSection {
     /// Directory where synthesised WAV files are cached.
     /// Default: `<database_dir>/.marginalia-tts-cache/`.
     pub tts_cache_dir: Option<PathBuf>,
+    /// External phonemizer program (e.g. `espeak-ng`).
+    /// When set, plain text is piped through this command for G2P conversion.
+    pub phonemizer_program: Option<String>,
+    /// Arguments for the phonemizer program.
+    /// Default for espeak-ng: `["-v", "it", "--ipa", "-q"]`.
+    #[serde(default)]
+    pub phonemizer_args: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]

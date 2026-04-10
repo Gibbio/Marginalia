@@ -22,12 +22,12 @@ directory of your choice and point `MARGINALIA_KOKORO_ASSETS` at it.
 ## Downloading the model and voices
 
 The Kokoro-82M ONNX model and config are published on HuggingFace
-at `hexgrad/Kokoro-82M`. Download with the HuggingFace CLI:
+at `onnx-community/Kokoro-82M-ONNX`. Download with the HuggingFace CLI:
 
 ```bash
 pip install huggingface_hub
-huggingface-cli download hexgrad/Kokoro-82M \
-    kokoro.onnx config.json \
+huggingface-cli download onnx-community/Kokoro-82M-ONNX \
+    onnx/model.onnx config.json \
     --local-dir .kokoro-assets
 ```
 
@@ -35,17 +35,17 @@ Voice embeddings live in the `voices/` subdirectory of the same repo.
 Download the voices you need (default is `af`):
 
 ```bash
-huggingface-cli download hexgrad/Kokoro-82M \
+huggingface-cli download onnx-community/Kokoro-82M-ONNX \
     voices/af.bin \
     --local-dir .kokoro-assets
 ```
 
 ## Downloading ONNX Runtime
 
-The runtime library must match the version of the `ort` crate in use.
-Check `Cargo.lock` for the `ort` version, then download the
-corresponding release from the ONNX Runtime GitHub releases page
-(`microsoft/onnxruntime`).
+The runtime library must match the version expected by the `ort` crate.
+The crate uses `api-24`, which requires **ONNX Runtime 1.24+**.
+Download the matching release from the ONNX Runtime GitHub releases
+(`microsoft/onnxruntime`), or run `make bootstrap-ort`.
 
 Place the shared library under `lib/` inside your assets directory:
 

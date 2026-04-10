@@ -1,0 +1,16 @@
+[package]
+name = "marginalia-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Simple CLI to test Marginalia core: ingest and read documents"
+
+[features]
+default = []
+coreml = ["marginalia-tts-kokoro/coreml"]
+cuda   = ["marginalia-tts-kokoro/cuda"]
+
+[dependencies]
+marginalia-core = { path = "../../crates/marginalia-core" }
+marginalia-import-text = { path = "../../crates/marginalia-import-text" }
+marginalia-runtime = { path = "../../crates/marginalia-runtime" }
+marginalia-tts-kokoro = { path = "../../crates/marginalia-tts-kokoro" }
