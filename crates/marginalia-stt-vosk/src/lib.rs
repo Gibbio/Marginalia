@@ -23,8 +23,9 @@ unsafe impl Send for SendStream {}
 const PROVIDER_NAME: &str = "vosk-command-stt";
 const DEFAULT_SAMPLE_RATE: u32 = 16_000;
 const DEFAULT_TIMEOUT_SECONDS: f64 = 4.0;
-const DEFAULT_SILENCE_TIMEOUT_SECONDS: f64 = 0.8;
-const DEFAULT_SPEECH_THRESHOLD: i16 = 900;
+const DEFAULT_SILENCE_TIMEOUT_SECONDS: f64 = 1.2;
+const DEFAULT_SPEECH_THRESHOLD: i16 = 3000;
+const DEFAULT_MIN_SPEECH_DURATION_MS: u64 = 300;
 const AUDIO_RECV_TIMEOUT_MS: u64 = 250;
 
 // ---------------------------------------------------------------------------
@@ -184,6 +185,7 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
         let mut capture_started_ms: Option<u32> = None;
         let mut silence_started: Option<Instant> = None;
         let mut recognized: Option<String> = None;
+        let mut speech_duration_ms: u64 = 0;
 
         loop {
             if Instant::now() >= deadline {
@@ -209,6 +211,7 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
                     speech_detected_ms = Some(now_ms);
                     capture_started_ms = Some(now_ms);
                 }
+                speech_duration_ms += AUDIO_RECV_TIMEOUT_MS;
             } else if speech_detected_ms.is_some() {
                 let silence_start = *silence_started.get_or_insert(now);
                 if now.duration_since(silence_start).as_millis() as u64 >= self.silence_timeout_ms {
@@ -221,15 +224,16 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
                 Ok(DecodingState::Finalized)
             ) {
                 let text = extract_text(recognizer.result().single().map(|a| a.text));
-                if !text.is_empty() {
+                // Only accept if there was sustained speech, not a brief noise spike
+                if !text.is_empty() && speech_duration_ms >= DEFAULT_MIN_SPEECH_DURATION_MS {
                     recognized = Some(text);
                     break;
                 }
             }
         }
 
-        // Flush final result if recognition loop ended without a clean result.
-        if recognized.is_none() {
+        // Flush final result — only accept if sustained speech was detected.
+        if recognized.is_none() && speech_duration_ms >= DEFAULT_MIN_SPEECH_DURATION_MS {
             let text = extract_text(recognizer.final_result().single().map(|a| a.text));
             if !text.is_empty() {
                 recognized = Some(text);
