@@ -453,11 +453,22 @@ impl BetaBackendClient {
         let voice_cmd_rx = {
             let mut monitor = runtime.open_command_monitor();
             let (tx, rx) = std::sync::mpsc::channel::<String>();
-            std::thread::spawn(move || loop {
-                let capture = monitor.capture_next_interrupt(Some(2.0));
-                if let Some(cmd) = capture.recognized_command {
-                    if tx.send(cmd).is_err() {
-                        break;
+            std::thread::spawn(move || {
+                loop {
+                    let capture = monitor.capture_next_interrupt(Some(2.0));
+                    // Log errors from the monitor (e.g. audio stream failures)
+                    if let Some(raw) = &capture.raw_text {
+                        if raw.starts_with("error:") {
+                            eprintln!("[voice-monitor] {raw}");
+                            // Don't spin on repeated errors — back off
+                            std::thread::sleep(std::time::Duration::from_secs(5));
+                            continue;
+                        }
+                    }
+                    if let Some(cmd) = capture.recognized_command {
+                        if tx.send(cmd).is_err() {
+                            break;
+                        }
                     }
                 }
             });

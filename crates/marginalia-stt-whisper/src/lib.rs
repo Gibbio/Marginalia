@@ -343,7 +343,10 @@ impl CommandRecognizer for WhisperCommandRecognizer {
 
     fn capture_interrupt(&mut self, _timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
         let started = Instant::now();
-        let text = self.transcribe_short().unwrap_or_default();
+        let (text, raw_error) = match self.transcribe_short() {
+            Ok(t) => (t, None),
+            Err(e) => (String::new(), Some(format!("error: {e}"))),
+        };
         let command = self.match_command(&text);
         let elapsed_ms = started.elapsed().as_millis().min(u32::MAX as u128) as u32;
 
@@ -353,7 +356,7 @@ impl CommandRecognizer for WhisperCommandRecognizer {
             capture_ended_ms: elapsed_ms,
             speech_detected_ms: if text.is_empty() { None } else { Some(0) },
             capture_started_ms: Some(0),
-            raw_text: Some(text),
+            raw_text: raw_error.clone().or(Some(text)),
             recognized_command: command,
             timed_out: false,
             input_device_index: None,
