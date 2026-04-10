@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Benchmark Kokoro TTS via kokoro-onnx (Python ONNX Runtime) on Apple Silicon."""
 
+import os
 import sys
 import time
 
@@ -23,7 +24,9 @@ def run_benchmark():
 
     print("\n  Loading Kokoro model (kokoro-onnx)...")
     t0 = time.time()
-    kokoro = Kokoro("/tmp/kokoro-v1.0.onnx", "/tmp/voices-v1.0.bin")
+    model_path = os.environ.get("KOKORO_ONNX_MODEL", "/tmp/kokoro-v1.0.onnx")
+    voices_path = os.environ.get("KOKORO_ONNX_VOICES", "/tmp/voices-v1.0.bin")
+    kokoro = Kokoro(model_path, voices_path)
     load_ms = (time.time() - t0) * 1000
     print(f"  Model loaded in {load_ms:.0f}ms\n")
 
