@@ -2,9 +2,9 @@ KOKORO_ASSETS_DIR  ?= models/tts/kokoro
 VOSK_MODEL_URL     ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
 VOSK_MODEL_NAME    ?= vosk-model-small-it-0.22
 MODELS_DIR         ?= models/stt
-VOSK_LIB_VERSION   ?= 0.3.45
+VOSK_LIB_VERSION   ?= 0.3.42
 VOSK_LIB_DIR       ?= models/stt/vosk
-ORT_VERSION        ?= 1.20.1
+ORT_VERSION        ?= 1.24.4
 WHISPER_MODEL_DIR  ?= models/stt/whisper
 WHISPER_MODEL_NAME ?= ggml-base.bin
 WHISPER_MODEL_URL  ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(WHISPER_MODEL_NAME)
@@ -27,7 +27,7 @@ bootstrap-beta: bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib bootstrap-whi
 	@echo ""
 	@echo "Beta providers ready. Run 'make beta-doctor' to verify."
 
-KOKORO_HF_REPO ?= hexgrad/Kokoro-82M
+KOKORO_HF_REPO ?= onnx-community/Kokoro-82M-ONNX
 # Voices to download when using curl fallback (space-separated, without extension).
 KOKORO_VOICES  ?= af af_bella af_sarah am_adam am_michael bf_emma bm_george
 
@@ -36,32 +36,43 @@ KOKORO_VOICES  ?= af af_bella af_sarah am_adam am_michael bf_emma bm_george
 bootstrap-kokoro: bootstrap-ort
 	@echo "Downloading Kokoro ONNX model assets ($(KOKORO_HF_REPO))..."
 	@mkdir -p $(KOKORO_ASSETS_DIR)/voices
-	@if command -v huggingface-cli >/dev/null 2>&1; then \
-		$(MAKE) _kokoro-hf-cli; \
+	@if command -v hf >/dev/null 2>&1; then \
+		$(MAKE) _kokoro-hf-cli HF_CLI=hf; \
+	elif command -v huggingface-cli >/dev/null 2>&1; then \
+		$(MAKE) _kokoro-hf-cli HF_CLI=huggingface-cli; \
 	else \
-		echo "huggingface-cli not found, falling back to curl..."; \
+		echo "hf/huggingface-cli not found, falling back to curl..."; \
 		$(MAKE) _kokoro-curl; \
 	fi
 	@echo ""
 	@echo "Kokoro assets ready at $(KOKORO_ASSETS_DIR)/. Run 'make beta-doctor' to verify."
 
+HF_CLI ?= hf
 _kokoro-hf-cli:
-	huggingface-cli download $(KOKORO_HF_REPO) kokoro.onnx config.json \
+	$(HF_CLI) download $(KOKORO_HF_REPO) onnx/model_q8f16.onnx \
 		--local-dir $(KOKORO_ASSETS_DIR)
-	huggingface-cli download $(KOKORO_HF_REPO) \
+	$(HF_CLI) download hexgrad/Kokoro-82M config.json \
+		--local-dir $(KOKORO_ASSETS_DIR)
+	$(HF_CLI) download $(KOKORO_HF_REPO) \
 		--include "voices/*" --local-dir $(KOKORO_ASSETS_DIR)
 
 _kokoro-curl:
 	@HF="https://huggingface.co/$(KOKORO_HF_REPO)/resolve/main"; \
-	for FILE in kokoro.onnx config.json; do \
-		DEST="$(KOKORO_ASSETS_DIR)/$$FILE"; \
-		if [ -f "$$DEST" ]; then \
-			echo "  $$FILE already present, skipping."; \
-		else \
-			echo "  Downloading $$FILE..."; \
-			curl -fL --progress-bar -o "$$DEST" "$$HF/$$FILE" || { echo "Failed: $$FILE"; exit 1; }; \
-		fi; \
-	done; \
+	DEST="$(KOKORO_ASSETS_DIR)/model.onnx"; \
+	if [ -f "$$DEST" ]; then \
+		echo "  model.onnx already present, skipping."; \
+	else \
+		echo "  Downloading onnx/model_q8f16.onnx..."; \
+		curl -fL --progress-bar -o "$$DEST" "$$HF/onnx/model_q8f16.onnx" || { echo "Failed: model.onnx"; exit 1; }; \
+	fi; \
+	DEST="$(KOKORO_ASSETS_DIR)/config.json"; \
+	if [ -f "$$DEST" ]; then \
+		echo "  config.json already present, skipping."; \
+	else \
+		echo "  Downloading config.json (from hexgrad/Kokoro-82M)..."; \
+		curl -fL --progress-bar -o "$$DEST" "https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/config.json" \
+			|| { echo "Failed: config.json"; exit 1; }; \
+	fi; \
 	for VOICE in $(KOKORO_VOICES); do \
 		DEST="$(KOKORO_ASSETS_DIR)/voices/$$VOICE.bin"; \
 		if [ -f "$$DEST" ]; then \
@@ -133,7 +144,7 @@ bootstrap-vosk-lib:
 	@mkdir -p $(VOSK_LIB_DIR)
 	@OS=$$(uname -s); ARCH=$$(uname -m); \
 	if [ "$$OS" = "Darwin" ]; then \
-		URL="https://github.com/alphacep/vosk-api/releases/download/v$(VOSK_LIB_VERSION)/vosk-osx-universal-$(VOSK_LIB_VERSION).zip"; \
+		URL="https://github.com/alphacep/vosk-api/releases/download/v$(VOSK_LIB_VERSION)/vosk-osx-$(VOSK_LIB_VERSION).zip"; \
 		LIB="libvosk.dylib"; \
 	elif [ "$$OS" = "Linux" ]; then \
 		if [ "$$ARCH" = "aarch64" ] || [ "$$ARCH" = "arm64" ]; then \
@@ -201,8 +212,10 @@ tui-rs:
 	else \
 		echo "  stt:       fake  (run 'make bootstrap-vosk-lib bootstrap-vosk' to enable)"; \
 	fi; \
-	if [ -d "$$KOKORO_DIR" ]; then \
-		echo "  tts:       kokoro  ($$KOKORO_DIR)"; \
+	if [ "$$(uname -s)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
+		echo "  tts:       kokoro-mlx  (MLX Metal GPU — auto-download from HuggingFace)"; \
+	elif [ -d "$$KOKORO_DIR" ]; then \
+		echo "  tts:       kokoro-onnx  ($$KOKORO_DIR)"; \
 	else \
 		echo "  tts:       fake  (run 'make bootstrap-kokoro' to enable)"; \
 	fi; \
@@ -222,20 +235,22 @@ tui-rs:
 		if [ "$$OS" = "Darwin" ]; then _add whisper-stt-metal; echo "  accel:     whisper → Metal"; \
 		else _add whisper-stt; fi; \
 	fi; \
-	if [ -d "$$KOKORO_DIR" ]; then \
-		if [ "$$OS" = "Darwin" ]; then _add kokoro-coreml; echo "  accel:     kokoro → CoreML"; fi; \
+	if [ "$$OS" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
+		_add mlx-tts; \
+		echo "  tts:       kokoro-mlx  (MLX Metal GPU)"; \
 	fi; \
 	VOSK_PATH=$(VOSK_LIB_DIR) \
+	LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$LIBRARY_PATH \
 	LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$LD_LIBRARY_PATH \
 	DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$DYLD_LIBRARY_PATH \
-	cargo run --manifest-path apps/tui-rs/Cargo.toml \
+	cargo run --release --manifest-path apps/tui-rs/Cargo.toml \
 		$$([ -n "$$FEATURES" ] && echo "--features $$FEATURES")
 
 beta-test:
 	cargo test
 
 beta-doctor:
-	cargo run -p marginalia-devtools -- kokoro-doctor --assets-root $(KOKORO_ASSETS_DIR)
+	cargo run -p marginalia-devtools -- kokoro-doctor $(KOKORO_ASSETS_DIR)
 
 # ---------------------------------------------------------------------------
 # Clean

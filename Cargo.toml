@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "apps/cli-rs",
     "apps/tui-rs",
     "crates/marginalia-core",
     "crates/marginalia-devtools",
@@ -11,13 +12,17 @@ members = [
     "crates/marginalia-stt-vosk",
     "crates/marginalia-stt-whisper",
     "crates/marginalia-tts-kokoro",
+    "crates/marginalia-tts-mlx",
 ]
 # marginalia-stt-vosk requires libvosk native library at link time.
 # marginalia-stt-whisper requires whisper.cpp C++ compilation (cmake + clang/gcc).
-# Both are excluded from default members so `cargo build/test` works without native deps.
+# marginalia-tts-mlx requires Xcode + Metal Toolchain (macOS Apple Silicon only).
+# All three are excluded from default members so `cargo build/test` works without native deps.
 # Build explicitly: cargo build -p marginalia-stt-vosk (needs libvosk)
 #                   cargo build -p marginalia-stt-whisper (needs cmake + C++ compiler)
+#                   cargo build -p marginalia-tts-mlx (needs Xcode + macOS Apple Silicon)
 default-members = [
+    "apps/cli-rs",
     "apps/tui-rs",
     "crates/marginalia-core",
     "crates/marginalia-devtools",
@@ -29,3 +34,12 @@ default-members = [
     "crates/marginalia-tts-kokoro",
 ]
 resolver = "2"
+
+# Patches for marginalia-tts-mlx (macOS Apple Silicon only)
+[patch.crates-io]
+mlx-rs = { git = "https://github.com/oxideai/mlx-rs.git" }
+mlx-macros = { git = "https://github.com/oxideai/mlx-rs.git" }
+mlx-sys = { git = "https://github.com/oxideai/mlx-rs.git" }
+voice-nn = { git = "https://github.com/Gibbio/voice-mlx.git" }
+voice-dsp = { git = "https://github.com/Gibbio/voice-mlx.git" }
+voice-tts = { git = "https://github.com/Gibbio/voice-mlx.git" }

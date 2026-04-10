@@ -547,7 +547,7 @@ impl KokoroExternalPhonemizerConfig {
                 error,
             })?;
 
-        if let Some(stdin) = child.stdin.as_mut() {
+        if let Some(mut stdin) = child.stdin.take() {
             use std::io::Write;
             if let Err(error) = stdin.write_all(text.as_bytes()).and_then(|_| stdin.flush()) {
                 if error.kind() != std::io::ErrorKind::BrokenPipe {
@@ -561,6 +561,7 @@ impl KokoroExternalPhonemizerConfig {
                 }
             }
         }
+        // stdin is dropped here, sending EOF to the child process.
 
         let output = child
             .wait_with_output()
@@ -719,6 +720,12 @@ impl KokoroSpeechSynthesizer {
         }
     }
 
+    /// Pre-load the ONNX model so the first `synthesize` call doesn't block.
+    pub fn warm_up(&mut self) -> Result<(), KokoroInferenceError> {
+        self.ensure_model()?;
+        Ok(())
+    }
+
     fn ensure_model(&mut self) -> Result<&mut KokoroOnnxModel, KokoroInferenceError> {
         if self.model.is_none() {
             self.model = Some(KokoroOnnxModel::load(self.config.clone())?);
@@ -774,7 +781,10 @@ impl KokoroOnnxModel {
             .map_err(KokoroInferenceError::Ort)?
             .commit();
 
-        let mut builder = Session::builder().map_err(KokoroInferenceError::Ort)?;
+        let mut builder = Session::builder()
+            .map_err(KokoroInferenceError::Ort)?
+            .with_intra_threads(0) // 0 = let ORT use all available cores
+            .map_err(|e| KokoroInferenceError::Ort(e.into()))?;
         // Register hardware execution providers when compiled with the relevant feature.
         // ORT silently falls back to CPU if the EP is not available in the loaded library.
         #[cfg(feature = "coreml")]

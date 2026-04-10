@@ -11,6 +11,8 @@ database_path = ".marginalia/beta.sqlite3"
 [kokoro]
 assets_root = "models/tts/kokoro"
 # tts_cache_dir = ".marginalia/tts-cache"   # default: <database_dir>/.marginalia-tts-cache
+phonemizer_program = "espeak-ng"
+phonemizer_args = ["-v", "it", "--ipa", "-q"]
 
 # ---------------------------------------------------------------------------
 # Command STT — Vosk (riconoscimento comandi vocali)

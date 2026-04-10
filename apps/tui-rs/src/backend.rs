@@ -1,7 +1,10 @@
 use crate::config::TuiConfig;
 use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::{RuntimeFrontend, SqliteRuntime};
-use marginalia_tts_kokoro::{KokoroConfig, KokoroSpeechSynthesizer, KokoroSpeechSynthesizerConfig};
+use marginalia_tts_kokoro::{
+    KokoroConfig, KokoroExternalPhonemizerConfig, KokoroSpeechSynthesizer,
+    KokoroSpeechSynthesizerConfig, KokoroTextProcessor,
+};
 #[cfg(feature = "vosk-stt")]
 use marginalia_stt_vosk::{VoskCommandRecognizer, VoskConfig};
 #[cfg(feature = "whisper-stt")]
@@ -10,6 +13,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct BackendLogEntry {
@@ -158,8 +163,26 @@ impl BackendClient {
         })
     }
 
-    pub fn start_session(&mut self, target: &str) -> Result<String, String> {
-        self.command_message("start_session", json!({"target": target}))
+    /// Dispatch start_session to a background thread. Returns immediately.
+    pub fn start_session_async(&mut self, target: &str) {
+        let Self::Beta(client) = self;
+        client.send_command_async("start_session".to_string(), json!({"target": target}));
+    }
+
+    /// Poll for the result of an async command.
+    pub fn poll_async_result(&mut self) -> Option<Result<String, String>> {
+        let Self::Beta(client) = self;
+        let result = client.poll_async_result()?;
+        if result.response.status == "ok" {
+            Some(Ok(result.response.message))
+        } else {
+            Some(Err(result.response.message))
+        }
+    }
+
+    pub fn is_busy(&self) -> bool {
+        let Self::Beta(client) = self;
+        client.is_busy()
     }
 
     pub fn pause_session(&mut self) -> Result<String, String> {
@@ -232,10 +255,17 @@ impl BackendClient {
 }
 
 pub(crate) struct BetaBackendClient {
-    runtime: Box<dyn RuntimeFrontend + Send>,
+    runtime: Arc<Mutex<Box<dyn RuntimeFrontend + Send>>>,
     logs: VecDeque<BackendLogEntry>,
     sequence: u64,
-    voice_cmd_rx: Option<std::sync::mpsc::Receiver<String>>,
+    voice_cmd_rx: Option<mpsc::Receiver<String>>,
+    /// Receiver for the result of a command running on a background thread.
+    async_result_rx: Option<mpsc::Receiver<AsyncCommandResult>>,
+}
+
+struct AsyncCommandResult {
+    name: String,
+    response: ResponseEnvelope,
 }
 
 impl BetaBackendClient {
@@ -272,10 +302,33 @@ impl BetaBackendClient {
                         .join(".marginalia-tts-cache")
                 });
                 let synth_config = KokoroSpeechSynthesizerConfig::new(&tts_dir);
-                runtime.set_speech_synthesizer(KokoroSpeechSynthesizer::new(
-                    kokoro_config,
-                    synth_config,
-                ));
+                let synthesizer = if let Some(program) = &config.kokoro.phonemizer_program {
+                    let args = if config.kokoro.phonemizer_args.is_empty() {
+                        vec![
+                            "-v".to_string(),
+                            "it".to_string(),
+                            "--ipa".to_string(),
+                            "-q".to_string(),
+                        ]
+                    } else {
+                        config.kokoro.phonemizer_args.clone()
+                    };
+                    let text_processor = KokoroTextProcessor::with_external_command(
+                        kokoro_config.clone(),
+                        KokoroExternalPhonemizerConfig {
+                            program: program.clone(),
+                            args,
+                        },
+                    );
+                    KokoroSpeechSynthesizer::with_text_processor(
+                        kokoro_config,
+                        synth_config,
+                        text_processor,
+                    )
+                } else {
+                    KokoroSpeechSynthesizer::new(kokoro_config, synth_config)
+                };
+                runtime.set_speech_synthesizer(synthesizer);
                 runtime.set_provider_doctor_blob(
                     "kokoro",
                     json!({ "ready": true, "assets_root": assets_root.display().to_string() }),
@@ -290,6 +343,28 @@ impl BetaBackendClient {
                         "missing": readiness.missing,
                     }),
                 );
+            }
+        }
+
+        // TTS: MLX (macOS Apple Silicon) — overrides Kokoro ONNX if available
+        #[cfg(feature = "mlx-tts")]
+        {
+            let tts_cache = db_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(".marginalia-tts-cache");
+            match marginalia_tts_mlx::MlxSpeechSynthesizer::new(
+                "prince-canuma/Kokoro-82M",
+                "af_bella",
+                &tts_cache,
+            ) {
+                Ok(synth) => {
+                    runtime.set_speech_synthesizer(synth);
+                    tts_label = "kokoro-mlx";
+                }
+                Err(e) => {
+                    eprintln!("MLX TTS init failed, keeping {tts_label}: {e}");
+                }
             }
         }
 
@@ -354,10 +429,13 @@ impl BetaBackendClient {
         };
 
         let mut client = Self {
-            runtime: Box::new(runtime) as Box<dyn RuntimeFrontend + Send>,
+            runtime: Arc::new(Mutex::new(
+                Box::new(runtime) as Box<dyn RuntimeFrontend + Send>,
+            )),
             logs: VecDeque::with_capacity(256),
             sequence: 0,
             voice_cmd_rx,
+            async_result_rx: None,
         };
         client.push_log(format!(
             "beta-runtime ready db={} playback={} tts={} stt={} dictation={}",
@@ -444,15 +522,17 @@ impl BetaBackendClient {
         });
     }
     fn send_request(&mut self, request_type: &str, name: &str, payload: Value) -> ResponseEnvelope {
+        let mut runtime = self.runtime.lock().expect("runtime lock poisoned");
         let response = match request_type {
-            "query" => self.runtime.execute_frontend_query(name, payload),
-            "command" => self.runtime.execute_frontend_command(name, payload),
+            "query" => runtime.execute_frontend_query(name, payload),
+            "command" => runtime.execute_frontend_command(name, payload),
             other => marginalia_runtime::RuntimeFrontendResponse {
                 status: "error".to_string(),
                 message: format!("Unsupported beta request type: {other}"),
                 payload: json!({}),
             },
         };
+        drop(runtime);
 
         self.push_log(format!("beta {request_type} {name} => {}", response.status));
         ResponseEnvelope {
@@ -461,6 +541,52 @@ impl BetaBackendClient {
             payload: response.payload,
             request_id: None,
         }
+    }
+
+    /// Dispatch a command to a background thread. Returns immediately.
+    fn send_command_async(&mut self, name: String, payload: Value) {
+        let runtime = Arc::clone(&self.runtime);
+        let (tx, rx) = mpsc::channel();
+        let cmd_name = name.clone();
+        std::thread::spawn(move || {
+            let mut rt = runtime.lock().expect("runtime lock poisoned");
+            let response = rt.execute_frontend_command(&name, payload);
+            let _ = tx.send(AsyncCommandResult {
+                name,
+                response: ResponseEnvelope {
+                    status: response.status,
+                    message: response.message,
+                    payload: response.payload,
+                    request_id: None,
+                },
+            });
+        });
+        self.push_log(format!("beta command {cmd_name} => dispatched (async)"));
+        self.async_result_rx = Some(rx);
+    }
+
+    /// Poll for the result of an async command. Returns `None` if still pending.
+    fn poll_async_result(&mut self) -> Option<AsyncCommandResult> {
+        let rx = self.async_result_rx.as_ref()?;
+        match rx.try_recv() {
+            Ok(result) => {
+                self.push_log(format!(
+                    "beta command {} => {} (async complete)",
+                    result.name, result.response.status
+                ));
+                self.async_result_rx = None;
+                Some(result)
+            }
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.async_result_rx = None;
+                None
+            }
+        }
+    }
+
+    fn is_busy(&self) -> bool {
+        self.async_result_rx.is_some()
     }
 }
 

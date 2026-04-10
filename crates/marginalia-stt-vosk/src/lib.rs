@@ -8,6 +8,18 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::{Duration, Instant};
 use vosk::{DecodingState, Model, Recognizer};
 
+/// Wrapper to make `cpal::Stream` `Send`.
+///
+/// `cpal::Stream` is `!Send` on macOS due to an internal `PhantomData<*mut ()>`
+/// marker, but the stream is only held as a drop guard — we never move it
+/// across threads or access its internals after construction.
+struct SendStream(cpal::Stream);
+
+// SAFETY: The wrapped stream is created and dropped on the same thread that
+// owns the VoskSpeechInterruptMonitor. It is stored solely to keep the
+// audio callback alive; no cross-thread access occurs.
+unsafe impl Send for SendStream {}
+
 const PROVIDER_NAME: &str = "vosk-command-stt";
 const DEFAULT_SAMPLE_RATE: u32 = 16_000;
 const DEFAULT_TIMEOUT_SECONDS: f64 = 4.0;
@@ -107,6 +119,9 @@ impl CommandRecognizer for VoskCommandRecognizer {
 // ---------------------------------------------------------------------------
 
 fn open_monitor(config: &VoskConfig) -> Result<VoskSpeechInterruptMonitor, String> {
+    // Suppress Vosk/Kaldi log messages that would corrupt TUI output.
+    vosk::set_log_level(vosk::LogLevel::Error);
+
     let model = Model::new(config.model_path.to_string_lossy().as_ref())
         .ok_or_else(|| format!("Failed to load Vosk model from {}", config.model_path.display()))?;
 
@@ -122,7 +137,7 @@ fn open_monitor(config: &VoskConfig) -> Result<VoskSpeechInterruptMonitor, Strin
         speech_threshold: config.speech_threshold,
         audio_rx,
         device_name,
-        _stream: stream,
+        _stream: SendStream(stream),
     })
 }
 
@@ -139,7 +154,7 @@ pub struct VoskSpeechInterruptMonitor {
     speech_threshold: i16,
     audio_rx: Receiver<Vec<i16>>,
     device_name: String,
-    _stream: cpal::Stream,
+    _stream: SendStream,
 }
 
 impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {

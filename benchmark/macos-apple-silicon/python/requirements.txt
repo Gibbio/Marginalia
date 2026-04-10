@@ -1,0 +1,6 @@
+# MLX benchmark
+mlx-audio
+
+# PyTorch + MPS benchmark
+torch
+kokoro
