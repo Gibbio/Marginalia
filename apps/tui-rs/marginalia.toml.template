@@ -8,12 +8,11 @@ database_path = ".marginalia/beta.sqlite3"
 # ── TTS ───────────────────────────────────────────────────────
 __TTS_SECTION__
 
-# ── STT — Vosk (riconoscimento comandi vocali) ───────────────
-# Abilitare dopo: make bootstrap-vosk bootstrap-vosk-lib
+# ── Comandi vocali ────────────────────────────────────────────
+# Scegli UNO tra Vosk (veloce, meno preciso) e Whisper (preciso, ~2s latenza).
+# Commenta la sezione che non usi.
 __VOSK_SECTION__
 
-# ── STT — Whisper (dettatura note) ───────────────────────────
-# Abilitare dopo: make bootstrap-whisper
 __WHISPER_SECTION__
 
 # ── Playback ──────────────────────────────────────────────────
