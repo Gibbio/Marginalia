@@ -117,6 +117,11 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
     }
 }
 
+/// Phonemize text word-by-word, preserving punctuation for Kokoro prosody.
+///
+/// espeak-ng strips punctuation from IPA output. Kokoro needs `,` `.` `?` `!`
+/// etc. in the phoneme stream to produce natural pauses and intonation.
+/// We split text into words, phonemize each, and re-insert trailing punctuation.
 fn phonemize(text: &str, language: &str) -> Result<String, String> {
     let voice_flag = match language {
         "it" => "it",
@@ -128,8 +133,43 @@ fn phonemize(text: &str, language: &str) -> Result<String, String> {
         _ => "en",
     };
 
+    let mut result = String::new();
+
+    for token in text.split_whitespace() {
+        // Separate trailing punctuation: "silenziosa," → ("silenziosa", ",")
+        let (word, punct) = split_trailing_punct(token);
+
+        if !word.is_empty() {
+            let phonemes = espeak_word(word, voice_flag)?;
+            if !result.is_empty() && !phonemes.is_empty() {
+                result.push(' ');
+            }
+            result.push_str(&phonemes);
+        }
+
+        // Re-insert punctuation after phonemes
+        if !punct.is_empty() {
+            result.push_str(punct);
+        }
+    }
+
+    Ok(result)
+}
+
+fn split_trailing_punct(token: &str) -> (&str, &str) {
+    let end = token
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| matches!(c, '.' | ',' | '!' | '?' | ':' | ';' | '"' | '\'' | ')' | '—' | '…'))
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(token.len());
+    (&token[..end], &token[end..])
+}
+
+fn espeak_word(word: &str, voice: &str) -> Result<String, String> {
     let mut child = Command::new("espeak-ng")
-        .args(["-v", voice_flag, "--ipa", "-q"])
+        .args(["-v", voice, "--ipa", "-q"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -140,8 +180,8 @@ fn phonemize(text: &str, language: &str) -> Result<String, String> {
         .stdin
         .take()
         .unwrap()
-        .write_all(text.as_bytes())
-        .map_err(|e| format!("espeak-ng write failed: {e}"))?;
+        .write_all(word.as_bytes())
+        .map_err(|e| format!("espeak-ng write: {e}"))?;
 
     let output = child
         .wait_with_output()
