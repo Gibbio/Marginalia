@@ -85,6 +85,35 @@ With an empty command bar:
 | `Ctrl-P` / `Ctrl-N` | Command history |
 | `Ctrl-C` (x2) | Quit |
 
+## Voice commands (STT)
+
+Two backends available for voice commands:
+
+| Backend | Latency | Accuracy | Config |
+|---|---|---|---|
+| **Vosk** | Instant | Good (with tuning) | `[vosk]` section |
+| **Whisper** | ~2s | Excellent | `[whisper]` + `use_for_commands = true` |
+
+**Vosk** has adaptive noise floor: it continuously measures ambient noise
+and auto-adjusts the speech detection threshold. If the AC turns on or a
+window opens, the threshold rises within ~3 seconds. No manual tuning
+needed — works in quiet rooms and noisy cafes alike.
+
+Fine-tuning (optional):
+```toml
+[vosk]
+speech_threshold = 3000   # minimum floor (0-32767), raise if too sensitive
+silence_timeout = 1.2     # seconds of silence before finalizing
+min_speech_ms = 300       # ignore noise spikes shorter than this
+```
+
+**Whisper** is more accurate (full speech recognition, then command matching)
+but has ~2s latency per command cycle. Enable with:
+```toml
+[whisper]
+use_for_commands = true
+```
+
 ## Build features
 
 | Feature | What it enables |
