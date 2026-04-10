@@ -184,7 +184,7 @@ fn normalize_pauses(text: &str) -> String {
         .replace(" — ", ", ")
         .replace(" – ", ", ")
         .replace("--", ", ")
-        .replace("\",", ";")       // closing quote + comma → semicolon (longer pause)
+        .replace("\",", "…")       // closing quote + comma → ellipsis (longer pause)
         .replace('"', ", ")        // other quotes → comma pause
         .replace('\u{201C}', ", ") // left double quote "
         .replace('\u{201D}', ", ") // right double quote "
