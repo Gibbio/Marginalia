@@ -597,7 +597,6 @@ impl BetaBackendClient {
     /// Waits 300ms before locking so the UI can refresh the document view first.
     fn spawn_prefetch(&mut self) {
         let runtime = Arc::clone(&self.runtime);
-        self.push_log("prefetch: spawning (300ms delay)".to_string());
         std::thread::spawn(move || {
             // Let the UI refresh at least one cycle before we grab the lock
             std::thread::sleep(std::time::Duration::from_millis(300));
