@@ -212,15 +212,27 @@ impl App {
     }
 
     pub fn refresh(&mut self) -> Result<(), String> {
-        self.app_snapshot = Some(self.backend.get_app_snapshot()?);
-        self.session_snapshot = self.backend.get_session_snapshot()?;
-        self.library_documents = self.backend.list_documents()?;
-        self.document_view = self
+        // Each query may be skipped (runtime busy with prefetch) — keep previous data.
+        if let Ok(snapshot) = self.backend.get_app_snapshot() {
+            self.app_snapshot = Some(snapshot);
+        }
+        if let Ok(snapshot) = self.backend.get_session_snapshot() {
+            self.session_snapshot = snapshot;
+        }
+        if let Ok(docs) = self.backend.list_documents() {
+            self.library_documents = docs;
+        }
+        if let Ok(view) = self
             .backend
-            .get_document_view(self.selected_document_id.as_deref())?;
+            .get_document_view(self.selected_document_id.as_deref())
+        {
+            self.document_view = view;
+        }
         if self.document_view.is_none() {
             self.selected_document_id = None;
-            self.document_view = self.backend.get_document_view(None)?;
+            if let Ok(view) = self.backend.get_document_view(None) {
+                self.document_view = view;
+            }
         }
         self.last_refresh = Instant::now();
         self.poll_backend_logs();
