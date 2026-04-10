@@ -600,15 +600,17 @@ impl BetaBackendClient {
     }
 
     /// Spawn a fire-and-forget prefetch thread for the next chunk.
-    /// Runs independently — does not set async_result_rx, does not block anything.
+    /// Waits 300ms before locking so the UI can refresh the document view first.
     fn spawn_prefetch(&mut self) {
         let runtime = Arc::clone(&self.runtime);
-        self.push_log("prefetch: spawning".to_string());
+        self.push_log("prefetch: spawning (300ms delay)".to_string());
         std::thread::spawn(move || {
+            // Let the UI refresh at least one cycle before we grab the lock
+            std::thread::sleep(std::time::Duration::from_millis(300));
             let mut rt = match runtime.try_lock() {
                 Ok(guard) => guard,
                 Err(_) => {
-                    // Runtime still locked (previous command not fully done) — skip
+                    // Runtime still locked — skip
                     return;
                 }
             };
