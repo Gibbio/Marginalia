@@ -256,6 +256,10 @@ impl SqliteRuntime {
             "next_chapter" => {
                 simple_command_response(self.next_chapter(), "Moved to next chapter.")
             }
+            "prefetch_next" => {
+                self.prefetch_next();
+                ok_response("Prefetch done.", json!({}))
+            }
             "create_note" => {
                 let text = payload
                     .get("text")
