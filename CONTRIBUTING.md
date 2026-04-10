@@ -1,22 +1,44 @@
 # Contributing
 
-Marginalia is being built as a long-lived product foundation. Contributions
-should improve clarity, maintainability, and architectural coherence rather than
-maximize short-term feature count.
+## Setup
 
-Before opening a pull request:
+```bash
+# Clone
+git clone https://github.com/Gibbio/Marginalia.git
+cd Marginalia
 
-1. Read `docs/contributing/development-setup.md`.
-2. Read `docs/contributing/workflow.md`.
-3. Check whether the change should update an ADR in `docs/adr/`.
-4. Run `make lint`, `make test`, and `make smoke`.
+# Build and test
+cargo build --release
+cargo test
 
-Expected contribution characteristics:
+# Run TUI (auto-detects platform)
+make tui-rs
+```
 
-- small, coherent changesets
-- tests for behavior that is actually implemented
-- documentation updates for architecture or workflow changes
-- no direct coupling from the core to concrete editors, remote APIs, or UI code
+### macOS Apple Silicon
 
-If the change alters repository-level architecture, update the relevant ADR or
-add a new one.
+MLX TTS requires Xcode with Metal Toolchain:
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -downloadComponent MetalToolchain
+```
+
+### Model assets
+
+```bash
+make bootstrap-beta    # download all models
+make beta-doctor       # verify setup
+```
+
+## Structure
+
+See `CLAUDE.md` for full architecture documentation.
+
+## Conventions
+
+- Rust, edition 2021
+- `cargo fmt` and `cargo clippy` before committing
+- Italian is the primary content language
+- Don't add Python to the main codebase (benchmark/ is the exception)
+- Keep TTS calls async in UI code

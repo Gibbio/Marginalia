@@ -1,27 +1,14 @@
 [project]
 name = "Marginalia"
-primary_language = "python"
-entrypoint = "marginalia"
+primary_language = "rust"
 
 [paths]
-cli = "apps/cli/src"
-core = "packages/core/src"
-adapters = "packages/adapters/src"
-infra = "packages/infra/src"
-docs = "docs"
-tests = "tests"
+core = "crates/marginalia-core/src"
+runtime = "crates/marginalia-runtime/src"
+tui = "apps/tui-rs/src"
+cli = "apps/cli-rs/src"
 
 [commands]
-bootstrap = "make bootstrap"
-format = "make format"
-lint = "make lint"
-test = "make test"
-smoke = "make smoke"
-run_cli_help = "make run-cli-help"
-
-[guardrails]
-require_adr_for_architecture_change = true
-allow_fake_providers = true
-forbid_editor_coupling = true
-forbid_network_architecture = true
-forbid_ui_domain_coupling = true
+build = "cargo build --release"
+test = "cargo test"
+run = "make tui-rs"
