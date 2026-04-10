@@ -150,6 +150,9 @@ pub struct WhisperSection {
     /// More accurate than Vosk but higher latency (~2s vs instant).
     #[serde(default)]
     pub use_for_commands: bool,
+    /// Voice commands to recognize. Default: pausa, avanti, indietro, stop, ripeti, riprendi.
+    #[serde(default)]
+    pub commands: Vec<String>,
     /// Minimum RMS amplitude (0-32767) to consider as speech. Default: 500.
     /// Lower = more sensitive to quiet speech. Higher = ignores background noise.
     pub speech_threshold: Option<i16>,
