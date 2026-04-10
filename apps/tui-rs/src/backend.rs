@@ -393,8 +393,14 @@ impl BetaBackendClient {
                 config.vosk.commands.clone()
             };
             let mut vosk_config = VoskConfig::new(&model_path, commands);
-            if let Some(v) = config.vosk.speech_threshold {
-                vosk_config.speech_threshold = v;
+            match &config.vosk.speech_threshold {
+                crate::config::SpeechThreshold::Auto => {
+                    // Use a low base threshold — the adaptive noise floor handles the rest
+                    vosk_config.speech_threshold = 500;
+                }
+                crate::config::SpeechThreshold::Fixed(v) => {
+                    vosk_config.speech_threshold = *v;
+                }
             }
             if let Some(v) = config.vosk.silence_timeout {
                 vosk_config.silence_timeout_seconds = v;

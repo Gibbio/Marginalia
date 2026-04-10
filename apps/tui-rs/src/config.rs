@@ -67,6 +67,58 @@ pub struct KokoroSection {
     pub phonemizer_args: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub enum SpeechThreshold {
+    Auto,
+    Fixed(i16),
+}
+
+impl Default for SpeechThreshold {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+fn default_vosk_threshold() -> SpeechThreshold {
+    SpeechThreshold::Auto
+}
+
+impl<'de> Deserialize<'de> for SpeechThreshold {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de;
+        struct Visitor;
+        impl de::Visitor<'_> for Visitor {
+            type Value = SpeechThreshold;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, r#""auto" or a number 0-32767"#)
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<SpeechThreshold, E> {
+                if v.eq_ignore_ascii_case("auto") {
+                    Ok(SpeechThreshold::Auto)
+                } else {
+                    Err(E::custom(format!(
+                        "expected \"auto\" or a number, got \"{v}\""
+                    )))
+                }
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<SpeechThreshold, E> {
+                Ok(SpeechThreshold::Fixed(v as i16))
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<SpeechThreshold, E> {
+                Ok(SpeechThreshold::Fixed(v as i16))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[allow(dead_code)] // fields are read only when vosk-stt feature is enabled
 pub struct VoskSection {
@@ -75,9 +127,11 @@ pub struct VoskSection {
     /// Voice commands recognised by Vosk. Defaults to `["pausa", "avanti", "indietro", "stop"]`.
     #[serde(default)]
     pub commands: Vec<String>,
-    /// Minimum audio peak (0-32767) to consider as speech. Higher = less sensitive.
-    /// Default: 3000. MacBook mic ambient noise is ~500-2000.
-    pub speech_threshold: Option<i16>,
+    /// Minimum audio peak to consider as speech.
+    /// "auto" = adaptive noise floor (continuously adjusts to ambient noise).
+    /// Or a fixed number 0-32767 (higher = less sensitive). Default: "auto".
+    #[serde(default = "default_vosk_threshold")]
+    pub speech_threshold: SpeechThreshold,
     /// Seconds of silence after speech before finalizing. Default: 1.2.
     pub silence_timeout: Option<f64>,
     /// Minimum milliseconds of sustained speech to accept a result. Default: 300.
