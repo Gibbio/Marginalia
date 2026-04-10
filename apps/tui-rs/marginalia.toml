@@ -31,6 +31,14 @@ model_path = "models/stt/whisper/ggml-base.bin"
 language = "it"
 
 # ---------------------------------------------------------------------------
+# TTS — MLX (macOS Apple Silicon, auto-enabled)
+# ---------------------------------------------------------------------------
+# Model downloads automatically from HuggingFace on first use.
+[mlx]
+# model = "prince-canuma/Kokoro-82M"
+# voice = "af_bella"
+
+# ---------------------------------------------------------------------------
 # Playback
 # ---------------------------------------------------------------------------
 [playback]

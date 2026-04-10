@@ -495,12 +495,12 @@ impl App {
                 response.message
             }
             "pause" => self.backend.pause_session()?,
-            "resume" => self.backend.resume_session()?,
+            "resume" => { self.backend.resume_session(); "Resuming...".to_string() }
             "stop" => self.backend.stop_session()?,
-            "repeat" => self.backend.repeat_chunk()?,
-            "restart" => self.backend.restart_chapter()?,
-            "back" => self.backend.previous_chunk()?,
-            "next" => self.backend.next_chapter()?,
+            "repeat" => { self.backend.repeat_chunk(); "Repeating chunk...".to_string() }
+            "restart" => { self.backend.restart_chapter(); "Restarting chapter...".to_string() }
+            "back" => { self.backend.previous_chunk(); "Previous chunk...".to_string() }
+            "next" => { self.backend.next_chapter(); "Next chapter...".to_string() }
             "note" => {
                 if argument.is_empty() {
                     return Err("Usage: /note <text>".to_string());
@@ -562,6 +562,16 @@ impl App {
         }
     }
 
+    /// Fire-and-forget shortcut for commands that run async (TTS synthesis).
+    fn run_async_shortcut(&mut self, label: &str, command: impl FnOnce(&mut BackendClient)) {
+        if self.backend.is_busy() {
+            self.push_message("Busy — please wait for the current command to finish.".to_string());
+            return;
+        }
+        command(&mut self.backend);
+        self.push_message(format!("{label}..."));
+    }
+
     pub fn animation_tick(&self) -> usize {
         (self.launched_at.elapsed().as_millis() / 90) as usize
     }
@@ -576,19 +586,19 @@ impl App {
     }
 
     pub fn navigate_previous_chunk(&mut self) {
-        self.run_shortcut_command(BackendClient::previous_chunk);
+        self.run_async_shortcut("Previous chunk", BackendClient::previous_chunk);
     }
 
     pub fn navigate_next_chunk(&mut self) {
-        self.run_shortcut_command(BackendClient::next_chunk);
+        self.run_async_shortcut("Next chunk", BackendClient::next_chunk);
     }
 
     pub fn navigate_previous_chapter(&mut self) {
-        self.run_shortcut_command(BackendClient::previous_chapter);
+        self.run_async_shortcut("Previous chapter", BackendClient::previous_chapter);
     }
 
     pub fn navigate_next_chapter(&mut self) {
-        self.run_shortcut_command(BackendClient::next_chapter);
+        self.run_async_shortcut("Next chapter", BackendClient::next_chapter);
     }
 
     pub fn poll_voice_command(&mut self) -> Option<String> {
@@ -610,8 +620,8 @@ impl App {
             "avanti" | "next" => self.navigate_next_chunk(),
             "indietro" | "back" => self.navigate_previous_chunk(),
             "stop" => self.run_shortcut_command(BackendClient::stop_session),
-            "ripeti" | "repeat" => self.run_shortcut_command(BackendClient::repeat_chunk),
-            "riprendi" | "resume" => self.run_shortcut_command(BackendClient::resume_session),
+            "ripeti" | "repeat" => self.run_async_shortcut("Repeat", BackendClient::repeat_chunk),
+            "riprendi" | "resume" => self.run_async_shortcut("Resume", BackendClient::resume_session),
             _ => {}
         }
     }
