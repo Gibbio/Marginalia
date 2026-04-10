@@ -2,10 +2,6 @@ Marginalia license selection is pending.
 
 This repository intentionally does not declare a final open source or proprietary
 license yet. Before external distribution or contribution intake, replace this
-file with the selected license text and update:
-
-- `README.md`
-- `pyproject.toml`
-- any GitHub repository metadata
+file with the selected license text.
 
 Until a final license is chosen, treat all rights as reserved by default.
