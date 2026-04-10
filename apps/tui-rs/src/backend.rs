@@ -390,7 +390,16 @@ impl BetaBackendClient {
             } else {
                 config.vosk.commands
             };
-            let vosk_config = VoskConfig::new(&model_path, commands);
+            let mut vosk_config = VoskConfig::new(&model_path, commands);
+            if let Some(v) = config.vosk.speech_threshold {
+                vosk_config.speech_threshold = v;
+            }
+            if let Some(v) = config.vosk.silence_timeout {
+                vosk_config.silence_timeout_seconds = v;
+            }
+            if let Some(v) = config.vosk.min_speech_ms {
+                vosk_config.min_speech_duration_ms = v;
+            }
             runtime.set_command_recognizer(VoskCommandRecognizer::new(vosk_config));
             runtime.set_provider_doctor_blob(
                 "vosk",

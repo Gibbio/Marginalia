@@ -75,6 +75,14 @@ pub struct VoskSection {
     /// Voice commands recognised by Vosk. Defaults to `["pausa", "avanti", "indietro", "stop"]`.
     #[serde(default)]
     pub commands: Vec<String>,
+    /// Minimum audio peak (0-32767) to consider as speech. Higher = less sensitive.
+    /// Default: 3000. MacBook mic ambient noise is ~500-2000.
+    pub speech_threshold: Option<i16>,
+    /// Seconds of silence after speech before finalizing. Default: 1.2.
+    pub silence_timeout: Option<f64>,
+    /// Minimum milliseconds of sustained speech to accept a result. Default: 300.
+    /// Filters out brief noise spikes that Vosk would force-match to a command.
+    pub min_speech_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Default)]
