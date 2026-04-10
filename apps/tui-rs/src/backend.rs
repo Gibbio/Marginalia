@@ -390,7 +390,7 @@ impl BetaBackendClient {
                     "stop".to_string(),
                 ]
             } else {
-                config.vosk.commands
+                config.vosk.commands.clone()
             };
             let mut vosk_config = VoskConfig::new(&model_path, commands);
             if let Some(v) = config.vosk.speech_threshold {
