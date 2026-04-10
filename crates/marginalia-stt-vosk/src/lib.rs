@@ -27,8 +27,8 @@ const DEFAULT_SILENCE_TIMEOUT_SECONDS: f64 = 1.2;
 const DEFAULT_SPEECH_THRESHOLD: i16 = 3000;
 const DEFAULT_MIN_SPEECH_DURATION_MS: u64 = 300;
 const AUDIO_RECV_TIMEOUT_MS: u64 = 250;
-/// Milliseconds of ambient noise sampling at the start of each capture cycle.
-const NOISE_CALIBRATION_MS: u64 = 500;
+/// Speech threshold = max(configured, noise_floor * NOISE_MULTIPLIER).
+const NOISE_MULTIPLIER: f32 = 3.0;
 
 // ---------------------------------------------------------------------------
 // Config
@@ -145,6 +145,7 @@ fn open_monitor(config: &VoskConfig) -> Result<VoskSpeechInterruptMonitor, Strin
         silence_timeout_ms: (config.silence_timeout_seconds * 1000.0) as u64,
         speech_threshold: config.speech_threshold,
         min_speech_duration_ms: config.min_speech_duration_ms,
+        noise_floor: 0.0,
         audio_rx,
         device_name,
         _stream: SendStream(stream),
@@ -163,6 +164,10 @@ pub struct VoskSpeechInterruptMonitor {
     silence_timeout_ms: u64,
     speech_threshold: i16,
     min_speech_duration_ms: u64,
+    /// Running average of ambient noise peaks. Updated every capture cycle
+    /// from silent chunks. Persists across calls so it adapts continuously
+    /// to changing environments (window opened, AC, etc.).
+    noise_floor: f32,
     audio_rx: Receiver<Vec<i16>>,
     device_name: String,
     _stream: SendStream,
@@ -185,27 +190,6 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
 
         // Discard stale audio accumulated while the recognizer was being set up.
         while self.audio_rx.try_recv().is_ok() {}
-
-        // Adaptive noise floor: measure ambient noise for the first ~500ms,
-        // then set threshold to max(configured, noise_floor * 3).
-        let mut noise_samples: Vec<i16> = Vec::new();
-        let noise_calibration_end = Instant::now() + Duration::from_millis(NOISE_CALIBRATION_MS);
-        while Instant::now() < noise_calibration_end {
-            if let Ok(samples) = self
-                .audio_rx
-                .recv_timeout(Duration::from_millis(AUDIO_RECV_TIMEOUT_MS))
-            {
-                noise_samples.push(audio_peak(&samples));
-                // Feed to recognizer so it doesn't lag behind
-                let _ = recognizer.accept_waveform(&samples);
-            }
-        }
-        let noise_floor = if noise_samples.is_empty() {
-            0
-        } else {
-            noise_samples.iter().copied().sum::<i16>() / noise_samples.len() as i16
-        };
-        let adaptive_threshold = self.speech_threshold.max(noise_floor.saturating_mul(3));
 
         let started_at = Instant::now();
         let mut speech_detected_ms: Option<u32> = None;
@@ -232,6 +216,12 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
             let now_ms = elapsed_ms(started_at, now);
             let peak = audio_peak(&samples);
 
+            // Adaptive threshold: max(configured, noise_floor * 3).
+            // noise_floor updates continuously during silence (see else branch).
+            let adaptive_threshold = self
+                .speech_threshold
+                .max((self.noise_floor * NOISE_MULTIPLIER) as i16);
+
             if peak >= adaptive_threshold {
                 silence_started = None;
                 if speech_detected_ms.is_none() {
@@ -239,10 +229,17 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
                     capture_started_ms = Some(now_ms);
                 }
                 speech_duration_ms += AUDIO_RECV_TIMEOUT_MS;
-            } else if speech_detected_ms.is_some() {
-                let silence_start = *silence_started.get_or_insert(now);
-                if now.duration_since(silence_start).as_millis() as u64 >= self.silence_timeout_ms {
-                    break;
+            } else {
+                // Silence — update noise floor (EMA, alpha=0.1 → adapts over ~10 chunks ≈ 2.5s)
+                self.noise_floor = self.noise_floor * 0.9 + peak as f32 * 0.1;
+
+                if speech_detected_ms.is_some() {
+                    let silence_start = *silence_started.get_or_insert(now);
+                    if now.duration_since(silence_start).as_millis() as u64
+                        >= self.silence_timeout_ms
+                    {
+                        break;
+                    }
                 }
             }
 
