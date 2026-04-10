@@ -383,11 +383,6 @@ impl SqliteRuntime {
             ]),
         );
 
-        // Prefetch next chunk while the first one plays
-        let voice = Some(self.config.default_voice.clone());
-        let language = self.config.default_language.clone();
-        self.prefetch_next_chunk(&document, &session, &voice, &language);
-
         Ok(session)
     }
 
@@ -730,23 +725,20 @@ impl SqliteRuntime {
             })?;
 
         let doc_id = session.document_id.clone();
-        let voice = session
-            .voice
-            .clone()
-            .or(Some(self.config.default_voice.clone()));
-        let language = session
-            .command_language
-            .clone()
-            .unwrap_or_else(|| self.config.default_language.clone());
-
         let synthesis = self.synthesize_cached(
             &doc_id,
             session.position.section_index,
             session.position.chunk_index,
             SynthesisRequest {
                 text: chunk.text.clone(),
-                voice: voice.clone(),
-                language: language.clone(),
+                voice: session
+                    .voice
+                    .clone()
+                    .or(Some(self.config.default_voice.clone())),
+                language: session
+                    .command_language
+                    .clone()
+                    .unwrap_or_else(|| self.config.default_language.clone()),
             },
         )?;
         let playback = self
@@ -760,70 +752,10 @@ impl SqliteRuntime {
         session.playback_process_id = playback.process_id;
         session.runtime_status = Some("active".to_string());
         session.touch();
-        if let Err(e) = self.session_repository.save_session(session.clone()) {
+        if let Err(e) = self.session_repository.save_session(session) {
             eprintln!("WARNING: failed to save session: {e}");
         }
-
-        // Prefetch: synthesize next chunk into cache while current one plays.
-        // This runs in the same async thread — the UI is not blocked.
-        self.prefetch_next_chunk(&document, &session, &voice, &language);
-
         Ok(())
-    }
-
-    /// Pre-synthesize the next chunk so it's ready when the user advances.
-    fn prefetch_next_chunk(
-        &mut self,
-        document: &marginalia_core::domain::Document,
-        session: &ReadingSession,
-        voice: &Option<String>,
-        language: &str,
-    ) {
-        // Find next chunk position
-        let mut positions = Vec::new();
-        for section in &document.sections {
-            for chunk in &section.chunks {
-                positions.push((section.index, chunk.index));
-            }
-        }
-        let current = positions
-            .iter()
-            .position(|(s, c)| {
-                *s == session.position.section_index && *c == session.position.chunk_index
-            });
-        let next_idx = match current {
-            Some(i) if i + 1 < positions.len() => i + 1,
-            _ => return, // no next chunk
-        };
-        let (next_section, next_chunk) = positions[next_idx];
-
-        // Already cached?
-        let cache_key = format!(
-            "{}:{}:{}:{}",
-            session.document_id,
-            next_section,
-            next_chunk,
-            voice.as_deref().unwrap_or("")
-        );
-        if let Some(cached) = self.tts_cache.get(&cache_key) {
-            if std::path::Path::new(&cached.audio_reference).exists() {
-                return; // already prefetched
-            }
-        }
-
-        // Synthesize next chunk
-        if let Some(chunk) = document.get_chunk(next_section, next_chunk) {
-            let _ = self.synthesize_cached(
-                &session.document_id,
-                next_section,
-                next_chunk,
-                SynthesisRequest {
-                    text: chunk.text.clone(),
-                    voice: voice.clone(),
-                    language: language.to_string(),
-                },
-            );
-        }
     }
 }
 
