@@ -18,6 +18,8 @@ pub struct TuiConfig {
     #[cfg_attr(not(feature = "whisper-stt"), allow(dead_code))]
     pub whisper: WhisperSection,
     #[serde(default)]
+    pub voice_commands: VoiceCommandsSection,
+    #[serde(default)]
     pub playback: PlaybackSection,
     #[serde(default)]
     #[cfg_attr(not(feature = "mlx-tts"), allow(dead_code))]
@@ -124,9 +126,6 @@ impl<'de> Deserialize<'de> for SpeechThreshold {
 pub struct VoskSection {
     /// Path to the Vosk acoustic model directory.
     pub model_path: Option<PathBuf>,
-    /// Voice commands recognised by Vosk. Defaults to `["pausa", "avanti", "indietro", "stop"]`.
-    #[serde(default)]
-    pub commands: Vec<String>,
     /// Minimum audio peak to consider as speech.
     /// "auto" = adaptive noise floor (continuously adjusts to ambient noise).
     /// Or a fixed number 0-32767 (higher = less sensitive). Default: "auto".
@@ -150,9 +149,6 @@ pub struct WhisperSection {
     /// More accurate than Vosk but higher latency (~2s vs instant).
     #[serde(default)]
     pub use_for_commands: bool,
-    /// Voice commands to recognize. Default: pausa, avanti, indietro, stop, ripeti, riprendi.
-    #[serde(default)]
-    pub commands: Vec<String>,
     /// Minimum RMS amplitude (0-32767) to consider as speech. Default: 500.
     /// Lower = more sensitive to quiet speech. Higher = ignores background noise.
     pub speech_threshold: Option<i16>,
@@ -160,6 +156,97 @@ pub struct WhisperSection {
     pub max_record_seconds: Option<f64>,
     /// Seconds of silence after speech before finalizing. Default: 1.0.
     pub silence_timeout: Option<f64>,
+}
+
+/// Maps actions to trigger words. The STT backend listens for all words;
+/// when one is recognized, the corresponding action is executed.
+/// Users can add synonyms in any language.
+#[derive(Debug, Deserialize)]
+pub struct VoiceCommandsSection {
+    /// Words that pause playback. Default: ["pausa", "pause"]
+    #[serde(default = "default_pause")]
+    pub pause: Vec<String>,
+    /// Words that advance to next chunk. Default: ["avanti", "next"]
+    #[serde(default = "default_next")]
+    pub next: Vec<String>,
+    /// Words that go back one chunk. Default: ["indietro", "back"]
+    #[serde(default = "default_back")]
+    pub back: Vec<String>,
+    /// Words that stop the session. Default: ["stop"]
+    #[serde(default = "default_stop")]
+    pub stop: Vec<String>,
+    /// Words that repeat current chunk. Default: ["ripeti", "repeat"]
+    #[serde(default = "default_repeat")]
+    pub repeat: Vec<String>,
+    /// Words that resume playback. Default: ["riprendi", "resume"]
+    #[serde(default = "default_resume")]
+    pub resume: Vec<String>,
+}
+
+impl Default for VoiceCommandsSection {
+    fn default() -> Self {
+        Self {
+            pause: default_pause(),
+            next: default_next(),
+            back: default_back(),
+            stop: default_stop(),
+            repeat: default_repeat(),
+            resume: default_resume(),
+        }
+    }
+}
+
+impl VoiceCommandsSection {
+    /// Flat list of all trigger words (for the STT backend).
+    pub fn all_words(&self) -> Vec<String> {
+        let mut words = Vec::new();
+        words.extend(self.pause.clone());
+        words.extend(self.next.clone());
+        words.extend(self.back.clone());
+        words.extend(self.stop.clone());
+        words.extend(self.repeat.clone());
+        words.extend(self.resume.clone());
+        words
+    }
+
+    /// Map a recognized word back to an action name.
+    pub fn resolve_action(&self, word: &str) -> Option<&'static str> {
+        let w = word.to_lowercase();
+        if self.pause.iter().any(|t| w.contains(&t.to_lowercase())) {
+            Some("pause")
+        } else if self.next.iter().any(|t| w.contains(&t.to_lowercase())) {
+            Some("next")
+        } else if self.back.iter().any(|t| w.contains(&t.to_lowercase())) {
+            Some("back")
+        } else if self.stop.iter().any(|t| w.contains(&t.to_lowercase())) {
+            Some("stop")
+        } else if self.repeat.iter().any(|t| w.contains(&t.to_lowercase())) {
+            Some("repeat")
+        } else if self.resume.iter().any(|t| w.contains(&t.to_lowercase())) {
+            Some("resume")
+        } else {
+            None
+        }
+    }
+}
+
+fn default_pause() -> Vec<String> {
+    vec!["pausa".into(), "pause".into()]
+}
+fn default_next() -> Vec<String> {
+    vec!["avanti".into(), "next".into()]
+}
+fn default_back() -> Vec<String> {
+    vec!["indietro".into(), "back".into()]
+}
+fn default_stop() -> Vec<String> {
+    vec!["stop".into()]
+}
+fn default_repeat() -> Vec<String> {
+    vec!["ripeti".into(), "repeat".into()]
+}
+fn default_resume() -> Vec<String> {
+    vec!["riprendi".into(), "resume".into()]
 }
 
 #[derive(Debug, Deserialize, Default)]

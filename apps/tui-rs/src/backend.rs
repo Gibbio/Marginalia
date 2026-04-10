@@ -382,16 +382,7 @@ impl BetaBackendClient {
         let mut stt_label = "fake";
         #[cfg(feature = "vosk-stt")]
         if let Some(model_path) = config.vosk.model_path {
-            let commands = if config.vosk.commands.is_empty() {
-                vec![
-                    "pausa".to_string(),
-                    "avanti".to_string(),
-                    "indietro".to_string(),
-                    "stop".to_string(),
-                ]
-            } else {
-                config.vosk.commands.clone()
-            };
+            let commands = config.voice_commands.all_words();
             let mut vosk_config = VoskConfig::new(&model_path, commands);
             match &config.vosk.speech_threshold {
                 crate::config::SpeechThreshold::Auto => {
@@ -437,18 +428,7 @@ impl BetaBackendClient {
 
             // Optionally use Whisper for voice commands (more accurate than Vosk)
             if config.whisper.use_for_commands {
-                let cmd_commands = if !config.whisper.commands.is_empty() {
-                    config.whisper.commands.clone()
-                } else {
-                    vec![
-                        "pausa".into(),
-                        "avanti".into(),
-                        "indietro".into(),
-                        "stop".into(),
-                        "ripeti".into(),
-                        "riprendi".into(),
-                    ]
-                };
+                let cmd_commands = config.voice_commands.all_words();
                 runtime.set_command_recognizer(WhisperCommandRecognizer::new(
                     whisper_config.clone(),
                     cmd_commands,
