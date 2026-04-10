@@ -309,6 +309,7 @@ impl WhisperDictationTranscriber {
 const CMD_PROVIDER_NAME: &str = "whisper-command-stt";
 const CMD_MAX_DURATION_SECONDS: f64 = 4.0;
 const CMD_SILENCE_TIMEOUT_SECONDS: f64 = 1.0;
+const AUDIO_RECV_TIMEOUT_MS: u64 = 250;
 
 /// Whisper-based command recognizer. Transcribes speech then fuzzy-matches
 /// against a list of known commands. More accurate than grammar-based
@@ -405,23 +406,253 @@ impl CommandRecognizer for WhisperCommandRecognizer {
     }
 
     fn open_interrupt_monitor(&mut self) -> Box<dyn SpeechInterruptMonitor> {
-        Box::new(WhisperInterruptMonitor {
-            config: self.config.clone(),
-            commands: self.commands.clone(),
-        })
+        match WhisperInterruptMonitor::new(self.config.clone(), self.commands.clone()) {
+            Ok(monitor) => Box::new(monitor),
+            Err(e) => {
+                eprintln!("[whisper-stt] Failed to open monitor: {e}");
+                Box::new(ErrorWhisperMonitor(e))
+            }
+        }
     }
 }
 
+/// Wrapper to make `cpal::Stream` `Send` (same as marginalia-stt-vosk).
+struct SendStream(#[allow(dead_code)] cpal::Stream);
+unsafe impl Send for SendStream {}
+
+/// Persistent monitor that keeps the microphone open and the Whisper model loaded.
+/// No more mic icon flickering — the audio stream stays open for the entire session.
 struct WhisperInterruptMonitor {
     config: WhisperConfig,
     commands: Vec<String>,
+    audio_rx: mpsc::Receiver<Vec<i16>>,
+    _stream: SendStream,
+    actual_sample_rate: u32,
+    whisper_ctx: WhisperContext,
+}
+
+impl WhisperInterruptMonitor {
+    fn new(config: WhisperConfig, commands: Vec<String>) -> Result<Self, String> {
+        suppress_whisper_logs();
+
+        // Open persistent audio stream
+        let host = cpal::default_host();
+        let device = host
+            .default_input_device()
+            .ok_or_else(|| "No default input device".to_string())?;
+        let default_config = device
+            .default_input_config()
+            .map_err(|e| format!("No default input config: {e}"))?;
+        let channels = default_config.channels() as usize;
+        let actual_sample_rate = default_config.sample_rate().0;
+        let stream_config = cpal::StreamConfig {
+            channels: default_config.channels(),
+            sample_rate: default_config.sample_rate(),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        let (tx, rx) = mpsc::sync_channel::<Vec<i16>>(256);
+        let stream = device
+            .build_input_stream(
+                &stream_config,
+                move |data: &[f32], _| {
+                    let samples: Vec<i16> = data
+                        .chunks(channels)
+                        .map(|frame| (frame[0] * 32767.0).clamp(-32768.0, 32767.0) as i16)
+                        .collect();
+                    let _ = tx.try_send(samples);
+                },
+                |err| eprintln!("[whisper-monitor] audio error: {err}"),
+                None,
+            )
+            .map_err(|e| format!("Cannot build input stream: {e}"))?;
+        stream
+            .play()
+            .map_err(|e| format!("Cannot start audio stream: {e}"))?;
+
+        // Pre-load Whisper model (once, not every cycle)
+        let model_path = config
+            .model_path
+            .to_str()
+            .ok_or_else(|| "Whisper model path is not valid UTF-8".to_string())?;
+        let whisper_ctx =
+            WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
+                .map_err(|e| format!("Cannot load Whisper model: {e}"))?;
+
+        Ok(Self {
+            config,
+            commands,
+            audio_rx: rx,
+            _stream: SendStream(stream),
+            actual_sample_rate,
+            whisper_ctx,
+        })
+    }
+
+    fn capture_audio(&self) -> Vec<i16> {
+        let max_duration = Duration::from_secs_f64(CMD_MAX_DURATION_SECONDS);
+        let silence_duration =
+            (self.actual_sample_rate as f64 * CMD_SILENCE_TIMEOUT_SECONDS) as usize;
+        let min_samples = self.actual_sample_rate as usize / 2;
+        let threshold = self.config.speech_threshold;
+        let started = Instant::now();
+        let mut all_samples: Vec<i16> = Vec::new();
+        let mut silence_count: usize = 0;
+
+        // Drain stale audio
+        while self.audio_rx.try_recv().is_ok() {}
+
+        loop {
+            if started.elapsed() > max_duration {
+                break;
+            }
+            match self
+                .audio_rx
+                .recv_timeout(Duration::from_millis(AUDIO_RECV_TIMEOUT_MS))
+            {
+                Ok(chunk) => {
+                    let rms = rms_i16(&chunk);
+                    if rms >= threshold {
+                        silence_count = 0;
+                    } else {
+                        silence_count += chunk.len();
+                    }
+                    all_samples.extend_from_slice(&chunk);
+                    if silence_count >= silence_duration && all_samples.len() >= min_samples {
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    silence_count += (200.0 * self.actual_sample_rate as f64 / 1000.0) as usize;
+                    if silence_count >= silence_duration && !all_samples.is_empty() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        // Resample to 16kHz if needed
+        let target_rate = self.config.sample_rate;
+        if self.actual_sample_rate != target_rate && !all_samples.is_empty() {
+            let ratio = target_rate as f64 / self.actual_sample_rate as f64;
+            let new_len = (all_samples.len() as f64 * ratio) as usize;
+            let mut resampled = Vec::with_capacity(new_len);
+            for i in 0..new_len {
+                let src = (i as f64 / ratio) as usize;
+                resampled.push(all_samples[src.min(all_samples.len() - 1)]);
+            }
+            return resampled;
+        }
+        all_samples
+    }
 }
 
 impl SpeechInterruptMonitor for WhisperInterruptMonitor {
     fn capture_next_interrupt(&mut self, _timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
-        let mut recognizer =
-            WhisperCommandRecognizer::new(self.config.clone(), self.commands.clone());
-        recognizer.capture_interrupt(None)
+        let started = Instant::now();
+        let samples = self.capture_audio();
+
+        if samples.is_empty() {
+            return SpeechInterruptCapture {
+                provider_name: CMD_PROVIDER_NAME.to_string(),
+                speech_detected: false,
+                capture_ended_ms: 0,
+                speech_detected_ms: None,
+                capture_started_ms: Some(0),
+                raw_text: None,
+                recognized_command: None,
+                timed_out: true,
+                input_device_index: None,
+                input_device_name: None,
+                sample_rate: Some(self.config.sample_rate),
+            };
+        }
+
+        // Run inference on pre-loaded model
+        let samples_f32: Vec<f32> = samples.iter().map(|&s| s as f32 / 32768.0).collect();
+        let mut state = match self.whisper_ctx.create_state() {
+            Ok(s) => s,
+            Err(e) => {
+                return SpeechInterruptCapture {
+                    provider_name: CMD_PROVIDER_NAME.to_string(),
+                    speech_detected: false,
+                    capture_ended_ms: 0,
+                    speech_detected_ms: None,
+                    capture_started_ms: Some(0),
+                    raw_text: Some(format!("error: {e}")),
+                    recognized_command: None,
+                    timed_out: false,
+                    input_device_index: None,
+                    input_device_name: None,
+                    sample_rate: Some(self.config.sample_rate),
+                };
+            }
+        };
+
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_language(Some(&self.config.language));
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+
+        let text = if state.full(params, &samples_f32).is_ok() {
+            let n = state.full_n_segments().unwrap_or(0);
+            (0..n)
+                .filter_map(|i| state.full_get_segment_text(i).ok())
+                .collect::<Vec<_>>()
+                .join(" ")
+                .trim()
+                .to_lowercase()
+        } else {
+            String::new()
+        };
+
+        let command = self
+            .commands
+            .iter()
+            .find(|cmd| text.contains(&cmd.to_lowercase()))
+            .cloned();
+
+        let elapsed_ms = started.elapsed().as_millis().min(u32::MAX as u128) as u32;
+
+        SpeechInterruptCapture {
+            provider_name: CMD_PROVIDER_NAME.to_string(),
+            speech_detected: !text.is_empty(),
+            capture_ended_ms: elapsed_ms,
+            speech_detected_ms: if text.is_empty() { None } else { Some(0) },
+            capture_started_ms: Some(0),
+            raw_text: Some(text),
+            recognized_command: command,
+            timed_out: false,
+            input_device_index: None,
+            input_device_name: None,
+            sample_rate: Some(self.config.sample_rate),
+        }
+    }
+
+    fn close(&mut self) {}
+}
+
+struct ErrorWhisperMonitor(String);
+
+impl SpeechInterruptMonitor for ErrorWhisperMonitor {
+    fn capture_next_interrupt(&mut self, _timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
+        std::thread::sleep(Duration::from_secs(5));
+        SpeechInterruptCapture {
+            provider_name: CMD_PROVIDER_NAME.to_string(),
+            speech_detected: false,
+            capture_ended_ms: 0,
+            speech_detected_ms: None,
+            capture_started_ms: None,
+            raw_text: Some(format!("error: {}", self.0)),
+            recognized_command: None,
+            timed_out: true,
+            input_device_index: None,
+            input_device_name: None,
+            sample_rate: None,
+        }
     }
 
     fn close(&mut self) {}
