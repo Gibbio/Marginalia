@@ -62,10 +62,28 @@ MLX deps come from:
 - `Gibbio/voice-mlx` (GitHub) — forked voice-tts/voice-nn/voice-dsp with patched decoder
 - `oxideai/mlx-rs` (GitHub, git HEAD) — Rust MLX bindings (must use git, not crates.io v0.25.3 which bundles old MLX C++)
 
-Navigation commands (next/back/repeat etc.) run TTS async to avoid UI freeze.
+### Async navigation + cache + prefetch
 
-Synthesized chunks are cached in-memory by (document_id, section, chunk, voice).
-WAV files persist on disk in `.marginalia-tts-cache/`. Revisiting a chunk is instant.
+Three mechanisms work together to minimize latency:
+
+1. **Async commands**: navigation commands (next/back/repeat etc.) run in a
+   background thread so the UI never freezes during TTS synthesis.
+
+2. **TTS cache**: synthesized chunks are cached by (document_id, section, chunk,
+   voice). WAV files persist on disk in `.marginalia-tts-cache/`. Revisiting a
+   chunk is instant.
+
+3. **Background prefetch**: after a navigation command completes, a **separate**
+   fire-and-forget thread pre-synthesizes the next chunk into the cache. The
+   prefetch thread acquires the runtime lock only after the command thread
+   releases it, so the UI stays responsive and playback starts immediately.
+
+Result: first chunk ~1s, all subsequent chunks instant in sequential reading.
+
+**IMPORTANT**: prefetch must NEVER run in the same thread as the current command.
+A previous attempt did this and froze the UI for ~2s (current chunk + prefetch).
+The fix was to spawn a separate `std::thread` from `poll_async_result` after
+the command succeeds, not from `replay_session_at_position`.
 
 ## Phonemizer — misaki reference
 
