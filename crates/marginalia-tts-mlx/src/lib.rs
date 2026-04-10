@@ -198,17 +198,17 @@ fn is_clause_punct(c: char) -> bool {
         c,
         '.' | ',' | '!' | '?' | ':' | ';' | '…'
         | '。' | '、' | '！' | '？' | '；' | '：'  // CJK
-        | '¿' | '¡'                                // Spanish
+        | '¿' | '¡' // Spanish
     )
 }
 
 /// Clean espeak IPA output to match Kokoro's expected phoneme format.
 /// Based on misaki's post-processing rules.
 fn clean_ipa(ipa: &str) -> String {
-    ipa.replace('^', "")             // tie character
-        .replace('\u{0329}', "")     // combining vertical line below
-        .replace('\u{032A}', "")     // combining bridge below
-        .replace('-', "")            // hyphens in IPA
+    ipa.replace('^', "") // tie character
+        .replace('\u{0329}', "") // combining vertical line below
+        .replace('\u{032A}', "") // combining bridge below
+        .replace('-', "") // hyphens in IPA
 }
 
 fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {

@@ -786,9 +786,7 @@ impl SqliteRuntime {
         };
         let (next_section, next_chunk) = positions[next_idx];
 
-        let voice = session
-            .voice
-            .or(Some(self.config.default_voice.clone()));
+        let voice = session.voice.or(Some(self.config.default_voice.clone()));
         let language = session
             .command_language
             .unwrap_or_else(|| self.config.default_language.clone());
