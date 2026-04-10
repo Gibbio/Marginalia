@@ -210,7 +210,7 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 		TTS_SECTION='# Nessun TTS configurato. Esegui: make bootstrap-kokoro'; \
 	fi; \
 	if [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then \
-		VOSK_SECTION='[vosk]\nmodel_path = "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)"\ncommands = ["pausa", "avanti", "indietro", "stop"]'; \
+		VOSK_SECTION='[vosk]\nmodel_path = "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)"\ncommands = ["pausa", "avanti", "indietro", "stop"]\n# speech_threshold = 3000  # 0-32767, higher = less sensitive (default: 3000)\n# silence_timeout = 1.2    # seconds of silence before finalizing (default: 1.2)\n# min_speech_ms = 300      # minimum speech duration to accept (default: 300)'; \
 	else \
 		VOSK_SECTION='# [vosk]  — non installato. Esegui: make bootstrap-vosk bootstrap-vosk-lib'; \
 	fi; \
