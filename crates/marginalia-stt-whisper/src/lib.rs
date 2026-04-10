@@ -125,9 +125,17 @@ impl WhisperDictationTranscriber {
                 .ok_or_else(|| "No default input device".to_string())?,
         };
 
+        // Use the device's default config (macOS typically provides f32)
+        // and convert to mono i16.
+        let default_config = device
+            .default_input_config()
+            .map_err(|e| format!("No default input config: {e}"))?;
+        let channels = default_config.channels() as usize;
+        let actual_rate = default_config.sample_rate().0;
+
         let stream_config = cpal::StreamConfig {
-            channels: 1,
-            sample_rate: cpal::SampleRate(self.config.sample_rate),
+            channels: default_config.channels(),
+            sample_rate: default_config.sample_rate(),
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -135,8 +143,13 @@ impl WhisperDictationTranscriber {
         let stream = device
             .build_input_stream(
                 &stream_config,
-                move |data: &[i16], _| {
-                    let _ = tx.try_send(data.to_vec());
+                move |data: &[f32], _| {
+                    // Downmix to mono and convert f32 → i16
+                    let samples: Vec<i16> = data
+                        .chunks(channels)
+                        .map(|frame| (frame[0] * 32767.0).clamp(-32768.0, 32767.0) as i16)
+                        .collect();
+                    let _ = tx.try_send(samples);
                 },
                 |err| eprintln!("[whisper-stt] cpal stream error: {err}"),
                 None,
@@ -147,13 +160,12 @@ impl WhisperDictationTranscriber {
             .play()
             .map_err(|e| format!("Cannot start audio stream: {e}"))?;
 
-        let max_samples =
-            (self.config.sample_rate as f64 * self.config.max_duration_seconds) as usize;
-        let silence_samples =
-            (self.config.sample_rate as f64 * self.config.silence_timeout_seconds) as usize;
-        // Require at least 0.5 s of audio before cutting on silence
-        let min_samples = self.config.sample_rate as usize / 2;
+        // Use actual device rate for duration calculations
+        let max_samples = (actual_rate as f64 * self.config.max_duration_seconds) as usize;
+        let silence_samples = (actual_rate as f64 * self.config.silence_timeout_seconds) as usize;
+        let min_samples = actual_rate as usize / 2;
         let threshold = self.config.speech_threshold;
+        let target_rate = self.config.sample_rate;
 
         let mut all_samples: Vec<i16> = Vec::with_capacity(max_samples);
         let mut silence_count: usize = 0;
@@ -180,7 +192,7 @@ impl WhisperDictationTranscriber {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     // Approximate silence advancement when no chunk arrives
-                    let approx = (200.0 * self.config.sample_rate as f64 / 1000.0) as usize;
+                    let approx = (200.0 * actual_rate as f64 / 1000.0) as usize;
                     silence_count += approx;
                     if silence_count >= silence_samples && !all_samples.is_empty() {
                         break;
@@ -191,6 +203,19 @@ impl WhisperDictationTranscriber {
         }
 
         drop(stream);
+
+        // Resample to target rate (16kHz) if device rate differs
+        if actual_rate != target_rate && !all_samples.is_empty() {
+            let ratio = target_rate as f64 / actual_rate as f64;
+            let new_len = (all_samples.len() as f64 * ratio) as usize;
+            let mut resampled = Vec::with_capacity(new_len);
+            for i in 0..new_len {
+                let src = (i as f64 / ratio) as usize;
+                resampled.push(all_samples[src.min(all_samples.len() - 1)]);
+            }
+            return Ok(resampled);
+        }
+
         Ok(all_samples)
     }
 
