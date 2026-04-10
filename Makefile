@@ -194,51 +194,57 @@ bootstrap-whisper:
 #   - tts=kokoro   if $(KOKORO_ASSETS_DIR)/ exists
 #   - dictation=whisper if $(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME) exists
 # Run 'make bootstrap-beta' first to install providers.
-tui-rs:
-	@VOSK_LIB=$$(ls $(VOSK_LIB_DIR)/libvosk.* 2>/dev/null | head -1); \
-	VOSK_MODEL=$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME); \
-	KOKORO_DIR=$(KOKORO_ASSETS_DIR); \
+TUI_TOML     := apps/tui-rs/marginalia.toml
+TUI_TEMPLATE := apps/tui-rs/marginalia.toml.template
+
+# Generate marginalia.toml from template based on platform and available providers.
+$(TUI_TOML): $(TUI_TEMPLATE)
+	@OS=$$(uname -s); ARCH=$$(uname -m); \
+	PLATFORM="$$OS $$ARCH"; \
+	DATE=$$(date "+%Y-%m-%d %H:%M"); \
+	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
+		TTS_SECTION='# Kokoro via MLX Metal GPU (auto-download da HuggingFace)\n[mlx]\nvoice = "if_sara"    # Italian female (or: im_nicola, af_bella, am_adam)'; \
+	elif [ -d "$(KOKORO_ASSETS_DIR)" ]; then \
+		TTS_SECTION='# Kokoro via ONNX Runtime CPU\n[kokoro]\nassets_root = "$(KOKORO_ASSETS_DIR)"\nphonemizer_program = "espeak-ng"\nphonemizer_args = ["-v", "it", "--ipa", "-q"]'; \
+	else \
+		TTS_SECTION='# Nessun TTS configurato. Esegui: make bootstrap-kokoro'; \
+	fi; \
+	if [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then \
+		VOSK_SECTION='[vosk]\nmodel_path = "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)"\ncommands = ["pausa", "avanti", "indietro", "stop"]'; \
+	else \
+		VOSK_SECTION='# [vosk]  — non installato. Esegui: make bootstrap-vosk bootstrap-vosk-lib'; \
+	fi; \
+	if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
+		WHISPER_SECTION='[whisper]\nmodel_path = "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)"\nlanguage = "it"'; \
+	else \
+		WHISPER_SECTION='# [whisper]  — non installato. Esegui: make bootstrap-whisper'; \
+	fi; \
+	sed -e "s|__PLATFORM__|$$PLATFORM|" \
+	    -e "s|__DATE__|$$DATE|" \
+	    -e "s|__TTS_SECTION__|$$TTS_SECTION|" \
+	    -e "s|__VOSK_SECTION__|$$VOSK_SECTION|" \
+	    -e "s|__WHISPER_SECTION__|$$WHISPER_SECTION|" \
+	    $(TUI_TEMPLATE) > $(TUI_TOML); \
+	echo "Generated $(TUI_TOML) for $$PLATFORM"
+
+tui-rs: $(TUI_TOML)
+	@OS=$$(uname -s); ARCH=$$(uname -m); \
+	VOSK_LIB=$$(ls $(VOSK_LIB_DIR)/libvosk.* 2>/dev/null | head -1); \
 	WHISPER_MODEL=$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME); \
-	echo ""; \
-	echo "=== marginalia-tui — provider check ==="; \
-	if [ -n "$$VOSK_LIB" ]; then \
-		echo "  stt:       vosk  ($$VOSK_LIB)"; \
-		if [ -d "$$VOSK_MODEL" ]; then \
-			echo "  stt model: $$VOSK_MODEL"; \
-		else \
-			echo "  stt model: MISSING ($$VOSK_MODEL) — stt → fake"; \
-			VOSK_LIB=""; \
-		fi; \
-	else \
-		echo "  stt:       fake  (run 'make bootstrap-vosk-lib bootstrap-vosk' to enable)"; \
-	fi; \
-	if [ "$$(uname -s)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
-		echo "  tts:       kokoro-mlx  (MLX Metal GPU — auto-download from HuggingFace)"; \
-	elif [ -d "$$KOKORO_DIR" ]; then \
-		echo "  tts:       kokoro-onnx  ($$KOKORO_DIR)"; \
-	else \
-		echo "  tts:       fake  (run 'make bootstrap-kokoro' to enable)"; \
-	fi; \
-	if [ -f "$$WHISPER_MODEL" ]; then \
-		echo "  dictation: whisper  ($$WHISPER_MODEL)"; \
-	else \
-		echo "  dictation: fake  (run 'make bootstrap-whisper' to enable)"; \
-		WHISPER_MODEL=""; \
-	fi; \
-	echo "======================================="; \
-	echo ""; \
-	OS=$$(uname -s); \
 	FEATURES=""; \
 	_add() { if [ -z "$$FEATURES" ]; then FEATURES="$$1"; else FEATURES="$$FEATURES,$$1"; fi; }; \
-	if [ -n "$$VOSK_LIB" ]; then _add vosk-stt; fi; \
-	if [ -n "$$WHISPER_MODEL" ]; then \
-		if [ "$$OS" = "Darwin" ]; then _add whisper-stt-metal; echo "  accel:     whisper → Metal"; \
-		else _add whisper-stt; fi; \
+	if [ -n "$$VOSK_LIB" ] && [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then _add vosk-stt; fi; \
+	if [ -f "$$WHISPER_MODEL" ]; then \
+		if [ "$$OS" = "Darwin" ]; then _add whisper-stt-metal; else _add whisper-stt; fi; \
 	fi; \
-	if [ "$$OS" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
-		_add mlx-tts; \
-		echo "  tts:       kokoro-mlx  (MLX Metal GPU)"; \
-	fi; \
+	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then _add mlx-tts; fi; \
+	echo ""; \
+	echo "=== marginalia-tui ==="; \
+	echo "  platform: $$OS $$ARCH"; \
+	echo "  config:   $(TUI_TOML)"; \
+	echo "  features: $${FEATURES:-none}"; \
+	echo "========================"; \
+	echo ""; \
 	VOSK_PATH=$(VOSK_LIB_DIR) \
 	LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$LIBRARY_PATH \
 	LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$LD_LIBRARY_PATH \

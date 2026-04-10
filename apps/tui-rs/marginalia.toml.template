@@ -1,0 +1,21 @@
+# Marginalia — configurazione locale
+# Generato da: make tui-rs
+# Piattaforma:  __PLATFORM__
+# Data:         __DATE__
+
+database_path = ".marginalia/beta.sqlite3"
+
+# ── TTS ───────────────────────────────────────────────────────
+__TTS_SECTION__
+
+# ── STT — Vosk (riconoscimento comandi vocali) ───────────────
+# Abilitare dopo: make bootstrap-vosk bootstrap-vosk-lib
+__VOSK_SECTION__
+
+# ── STT — Whisper (dettatura note) ───────────────────────────
+# Abilitare dopo: make bootstrap-whisper
+__WHISPER_SECTION__
+
+# ── Playback ──────────────────────────────────────────────────
+[playback]
+# fake = true   # decommenta per ambienti headless/CI
