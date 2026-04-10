@@ -96,6 +96,13 @@ pub struct WhisperSection {
     /// More accurate than Vosk but higher latency (~2s vs instant).
     #[serde(default)]
     pub use_for_commands: bool,
+    /// Minimum RMS amplitude (0-32767) to consider as speech. Default: 500.
+    /// Lower = more sensitive to quiet speech. Higher = ignores background noise.
+    pub speech_threshold: Option<i16>,
+    /// Max seconds to record before forcing inference. Default: 4.
+    pub max_record_seconds: Option<f64>,
+    /// Seconds of silence after speech before finalizing. Default: 1.0.
+    pub silence_timeout: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Default)]

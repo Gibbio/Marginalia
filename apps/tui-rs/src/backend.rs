@@ -419,6 +419,15 @@ impl BetaBackendClient {
             if let Some(language) = config.whisper.language.clone() {
                 whisper_config.language = language;
             }
+            if let Some(v) = config.whisper.speech_threshold {
+                whisper_config.speech_threshold = v;
+            }
+            if let Some(v) = config.whisper.max_record_seconds {
+                whisper_config.max_duration_seconds = v;
+            }
+            if let Some(v) = config.whisper.silence_timeout {
+                whisper_config.silence_timeout_seconds = v;
+            }
 
             // Optionally use Whisper for voice commands (more accurate than Vosk)
             if config.whisper.use_for_commands {
