@@ -529,7 +529,25 @@ impl BetaBackendClient {
         });
     }
     fn send_request(&mut self, request_type: &str, name: &str, payload: Value) -> ResponseEnvelope {
-        let mut runtime = self.runtime.lock().expect("runtime lock poisoned");
+        // For queries: use try_lock to avoid blocking the UI while prefetch
+        // holds the runtime lock. If busy, return a skip response.
+        let mut runtime = if request_type == "query" {
+            match self.runtime.try_lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    // Runtime busy (prefetch running) — skip this poll cycle
+                    return ResponseEnvelope {
+                        status: "ok".to_string(),
+                        message: "skipped (runtime busy)".to_string(),
+                        payload: json!({}),
+                        request_id: None,
+                    };
+                }
+            }
+        } else {
+            self.runtime.lock().expect("runtime lock poisoned")
+        };
+
         let response = match request_type {
             "query" => runtime.execute_frontend_query(name, payload),
             "command" => runtime.execute_frontend_command(name, payload),
