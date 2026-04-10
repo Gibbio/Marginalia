@@ -27,6 +27,8 @@ const DEFAULT_SILENCE_TIMEOUT_SECONDS: f64 = 1.2;
 const DEFAULT_SPEECH_THRESHOLD: i16 = 3000;
 const DEFAULT_MIN_SPEECH_DURATION_MS: u64 = 300;
 const AUDIO_RECV_TIMEOUT_MS: u64 = 250;
+/// Milliseconds of ambient noise sampling at the start of each capture cycle.
+const NOISE_CALIBRATION_MS: u64 = 500;
 
 // ---------------------------------------------------------------------------
 // Config
@@ -184,6 +186,27 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
         // Discard stale audio accumulated while the recognizer was being set up.
         while self.audio_rx.try_recv().is_ok() {}
 
+        // Adaptive noise floor: measure ambient noise for the first ~500ms,
+        // then set threshold to max(configured, noise_floor * 3).
+        let mut noise_samples: Vec<i16> = Vec::new();
+        let noise_calibration_end = Instant::now() + Duration::from_millis(NOISE_CALIBRATION_MS);
+        while Instant::now() < noise_calibration_end {
+            if let Ok(samples) = self
+                .audio_rx
+                .recv_timeout(Duration::from_millis(AUDIO_RECV_TIMEOUT_MS))
+            {
+                noise_samples.push(audio_peak(&samples));
+                // Feed to recognizer so it doesn't lag behind
+                let _ = recognizer.accept_waveform(&samples);
+            }
+        }
+        let noise_floor = if noise_samples.is_empty() {
+            0
+        } else {
+            noise_samples.iter().copied().sum::<i16>() / noise_samples.len() as i16
+        };
+        let adaptive_threshold = self.speech_threshold.max(noise_floor.saturating_mul(3));
+
         let started_at = Instant::now();
         let mut speech_detected_ms: Option<u32> = None;
         let mut capture_started_ms: Option<u32> = None;
@@ -209,7 +232,7 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
             let now_ms = elapsed_ms(started_at, now);
             let peak = audio_peak(&samples);
 
-            if peak >= self.speech_threshold {
+            if peak >= adaptive_threshold {
                 silence_started = None;
                 if speech_detected_ms.is_none() {
                     speech_detected_ms = Some(now_ms);
