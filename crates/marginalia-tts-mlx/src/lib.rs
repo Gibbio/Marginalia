@@ -160,7 +160,12 @@ fn phonemize(text: &str, language: &str) -> Result<String, String> {
 }
 
 fn is_clause_punct(c: char) -> bool {
-    matches!(c, '.' | ',' | '!' | '?' | ':' | ';' | '…')
+    matches!(
+        c,
+        '.' | ',' | '!' | '?' | ':' | ';' | '…'
+        | '。' | '、' | '！' | '？' | '；' | '：'  // CJK punctuation
+        | '¿' | '¡'                                // Spanish
+    )
 }
 
 fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
