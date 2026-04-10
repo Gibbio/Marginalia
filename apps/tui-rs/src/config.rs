@@ -19,7 +19,32 @@ pub struct TuiConfig {
     pub whisper: WhisperSection,
     #[serde(default)]
     pub playback: PlaybackSection,
+    #[serde(default)]
+    #[cfg_attr(not(feature = "mlx-tts"), allow(dead_code))]
+    pub mlx: MlxSection,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct MlxSection {
+    /// HuggingFace model repo or local path. Default: `prince-canuma/Kokoro-82M`.
+    #[serde(default = "default_mlx_model")]
+    pub model: String,
+    /// Voice preset name. Default: `af_bella`.
+    #[serde(default = "default_mlx_voice")]
+    pub voice: String,
+}
+
+impl Default for MlxSection {
+    fn default() -> Self {
+        Self {
+            model: default_mlx_model(),
+            voice: default_mlx_voice(),
+        }
+    }
+}
+
+fn default_mlx_model() -> String { "prince-canuma/Kokoro-82M".to_string() }
+fn default_mlx_voice() -> String { "af_bella".to_string() }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct KokoroSection {

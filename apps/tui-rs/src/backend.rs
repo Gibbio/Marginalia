@@ -165,8 +165,14 @@ impl BackendClient {
 
     /// Dispatch start_session to a background thread. Returns immediately.
     pub fn start_session_async(&mut self, target: &str) {
+        self.send_async("start_session", json!({"target": target}));
+    }
+
+    /// Dispatch any command to a background thread. Returns immediately.
+    /// Used for commands that trigger TTS synthesis to avoid UI freeze.
+    fn send_async(&mut self, name: &str, payload: Value) {
         let Self::Beta(client) = self;
-        client.send_command_async("start_session".to_string(), json!({"target": target}));
+        client.send_command_async(name.to_string(), payload);
     }
 
     /// Poll for the result of an async command.
@@ -189,36 +195,36 @@ impl BackendClient {
         self.command_message("pause_session", json!({}))
     }
 
-    pub fn resume_session(&mut self) -> Result<String, String> {
-        self.command_message("resume_session", json!({}))
+    pub fn resume_session(&mut self) {
+        self.send_async("resume_session", json!({}));
     }
 
     pub fn stop_session(&mut self) -> Result<String, String> {
         self.command_message("stop_session", json!({}))
     }
 
-    pub fn repeat_chunk(&mut self) -> Result<String, String> {
-        self.command_message("repeat_chunk", json!({}))
+    pub fn repeat_chunk(&mut self) {
+        self.send_async("repeat_chunk", json!({}));
     }
 
-    pub fn restart_chapter(&mut self) -> Result<String, String> {
-        self.command_message("restart_chapter", json!({}))
+    pub fn restart_chapter(&mut self) {
+        self.send_async("restart_chapter", json!({}));
     }
 
-    pub fn previous_chunk(&mut self) -> Result<String, String> {
-        self.command_message("previous_chunk", json!({}))
+    pub fn previous_chunk(&mut self) {
+        self.send_async("previous_chunk", json!({}));
     }
 
-    pub fn next_chunk(&mut self) -> Result<String, String> {
-        self.command_message("next_chunk", json!({}))
+    pub fn next_chunk(&mut self) {
+        self.send_async("next_chunk", json!({}));
     }
 
-    pub fn previous_chapter(&mut self) -> Result<String, String> {
-        self.command_message("previous_chapter", json!({}))
+    pub fn previous_chapter(&mut self) {
+        self.send_async("previous_chapter", json!({}));
     }
 
-    pub fn next_chapter(&mut self) -> Result<String, String> {
-        self.command_message("next_chapter", json!({}))
+    pub fn next_chapter(&mut self) {
+        self.send_async("next_chapter", json!({}));
     }
 
     pub fn create_note(&mut self, text: &str) -> Result<String, String> {
@@ -354,8 +360,8 @@ impl BetaBackendClient {
                 .unwrap_or_else(|| Path::new("."))
                 .join(".marginalia-tts-cache");
             match marginalia_tts_mlx::MlxSpeechSynthesizer::new(
-                "prince-canuma/Kokoro-82M",
-                "af_bella",
+                &config.mlx.model,
+                &config.mlx.voice,
                 &tts_cache,
             ) {
                 Ok(synth) => {
