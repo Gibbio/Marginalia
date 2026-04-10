@@ -6,8 +6,20 @@ use marginalia_core::ports::{
 };
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::sync::Once;
 use std::time::{Duration, Instant};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+static WHISPER_LOG_INIT: Once = Once::new();
+
+/// Suppress whisper.cpp/ggml log output that would corrupt the TUI.
+fn suppress_whisper_logs() {
+    WHISPER_LOG_INIT.call_once(|| {
+        // Redirect whisper/ggml logs to Rust's log framework instead of stderr.
+        // With no log subscriber configured, these are silently discarded.
+        whisper_rs::install_logging_hooks();
+    });
+}
 
 const PROVIDER_NAME: &str = "whisper-dictation-stt";
 const DEFAULT_SAMPLE_RATE: u32 = 16_000;
@@ -220,6 +232,8 @@ impl WhisperDictationTranscriber {
     }
 
     pub(crate) fn run_inference(&self, samples: Vec<f32>) -> Result<DictationTranscript, String> {
+        suppress_whisper_logs();
+
         let model_path = self
             .config
             .model_path
