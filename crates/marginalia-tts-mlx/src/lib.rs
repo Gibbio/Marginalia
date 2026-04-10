@@ -167,16 +167,29 @@ fn phonemize(text: &str, language: &str) -> Result<String, String> {
     Ok(result)
 }
 
-/// Replace brackets, dashes, and other pause-inducing characters with commas.
-/// Kokoro doesn't understand parentheses but does pause on commas.
+/// Normalize text before phonemization.
+///
+/// Based on misaki's EspeakG2P preprocessing (the official Kokoro G2P):
+/// - Parentheses/brackets → commas (Kokoro pauses on commas)
+/// - Dashes → commas
+/// - Curly quotes normalized
+/// - Multiple spaces collapsed
 fn normalize_pauses(text: &str) -> String {
     text.replace('(', ", ")
         .replace(')', ", ")
         .replace('[', ", ")
         .replace(']', ", ")
+        .replace('{', ", ")
+        .replace('}', ", ")
         .replace(" — ", ", ")
         .replace(" – ", ", ")
         .replace("--", ", ")
+        .replace('\u{2018}', "'") // left single quote
+        .replace('\u{2019}', "'") // right single quote
+        .replace('\u{201C}', "\"") // left double quote
+        .replace('\u{201D}', "\"") // right double quote
+        .replace('\u{00AB}', "\"") // «
+        .replace('\u{00BB}', "\"") // »
         .replace("  ", " ")
 }
 
@@ -184,9 +197,18 @@ fn is_clause_punct(c: char) -> bool {
     matches!(
         c,
         '.' | ',' | '!' | '?' | ':' | ';' | '…'
-        | '。' | '、' | '！' | '？' | '；' | '：'  // CJK punctuation
-        | '¿' | '¡' // Spanish
+        | '。' | '、' | '！' | '？' | '；' | '：'  // CJK
+        | '¿' | '¡'                                // Spanish
     )
+}
+
+/// Clean espeak IPA output to match Kokoro's expected phoneme format.
+/// Based on misaki's post-processing rules.
+fn clean_ipa(ipa: &str) -> String {
+    ipa.replace('^', "")             // tie character
+        .replace('\u{0329}', "")     // combining vertical line below
+        .replace('\u{032A}', "")     // combining bridge below
+        .replace('-', "")            // hyphens in IPA
 }
 
 fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
@@ -209,9 +231,10 @@ fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
         .wait_with_output()
         .map_err(|e| format!("espeak-ng failed: {e}"))?;
 
-    Ok(String::from_utf8_lossy(&output.stdout)
+    let raw = String::from_utf8_lossy(&output.stdout)
         .trim()
-        .replace('\n', " "))
+        .replace('\n', " ");
+    Ok(clean_ipa(&raw))
 }
 
 fn write_wav_16(path: &Path, sample_rate: u32, samples: &[f32]) -> std::io::Result<()> {
