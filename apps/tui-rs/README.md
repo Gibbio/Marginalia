@@ -11,6 +11,10 @@ make tui-rs
 On macOS Apple Silicon this auto-enables Kokoro MLX (Metal GPU, ~1s per chunk).
 On other platforms it falls back to Kokoro ONNX or fake TTS.
 
+Already-synthesized chunks are cached — revisiting a chunk is instant.
+Text is phonemized clause-by-clause via espeak-ng, following the
+[misaki](https://github.com/hexgrad/misaki) reference G2P for Kokoro.
+
 ## Configuration
 
 Edit `apps/tui-rs/marginalia.toml`:
