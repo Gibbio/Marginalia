@@ -9,11 +9,19 @@ database_path = ".marginalia/beta.sqlite3"
 __TTS_SECTION__
 
 # ── Comandi vocali ────────────────────────────────────────────
-# Scegli UNO tra Vosk (veloce, meno preciso) e Whisper (preciso, ~2s latenza).
-# Commenta la sezione che non usi.
-__VOSK_SECTION__
+# Mappa azione → parole trigger. Aggiungi sinonimi in qualsiasi lingua.
+[voice_commands]
+pause = ["pausa", "pause"]
+next = ["avanti", "next"]
+back = ["indietro", "back"]
+stop = ["stop", "basta"]
+repeat = ["ripeti", "repeat"]
+resume = ["riprendi", "resume", "continua"]
 
+# ── STT — scegli UNO tra Whisper e Vosk ──────────────────────
 __WHISPER_SECTION__
+
+__VOSK_SECTION__
 
 # ── Playback ──────────────────────────────────────────────────
 [playback]
