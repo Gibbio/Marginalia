@@ -117,59 +117,55 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
     }
 }
 
-/// Phonemize text word-by-word, preserving punctuation for Kokoro prosody.
+/// Phonemize text by clause, preserving punctuation for Kokoro prosody.
 ///
 /// espeak-ng strips punctuation from IPA output. Kokoro needs `,` `.` `?` `!`
-/// etc. in the phoneme stream to produce natural pauses and intonation.
-/// We split text into words, phonemize each, and re-insert trailing punctuation.
+/// in the phoneme stream for natural pauses and intonation.
+///
+/// Strategy: split text on clause boundaries (punctuation), phonemize each
+/// clause in a single espeak-ng call, and re-insert the punctuation.
+/// Works for any language espeak-ng supports — no language-specific code.
 fn phonemize(text: &str, language: &str) -> Result<String, String> {
-    let voice_flag = match language {
-        "it" => "it",
-        "en" => "en",
-        "fr" => "fr",
-        "de" => "de",
-        "es" => "es",
-        "pt" => "pt",
-        _ => "en",
-    };
-
+    // Split into clauses: "Ciao, come stai? Bene!" → [("Ciao", ","), (" come stai", "?"), (" Bene", "!")]
     let mut result = String::new();
+    let mut clause_start = 0;
 
-    for token in text.split_whitespace() {
-        // Separate trailing punctuation: "silenziosa," → ("silenziosa", ",")
-        let (word, punct) = split_trailing_punct(token);
-
-        if !word.is_empty() {
-            let phonemes = espeak_word(word, voice_flag)?;
-            if !result.is_empty() && !phonemes.is_empty() {
-                result.push(' ');
+    for (i, ch) in text.char_indices() {
+        if is_clause_punct(ch) {
+            let clause = &text[clause_start..i];
+            let clean = clause.trim();
+            if !clean.is_empty() {
+                let phonemes = espeak_ipa(clean, language)?;
+                if !result.is_empty() && !phonemes.is_empty() {
+                    result.push(' ');
+                }
+                result.push_str(&phonemes);
             }
-            result.push_str(&phonemes);
+            result.push(ch);
+            clause_start = i + ch.len_utf8();
         }
+    }
 
-        // Re-insert punctuation after phonemes
-        if !punct.is_empty() {
-            result.push_str(punct);
+    // Remaining text after last punctuation
+    let tail = text[clause_start..].trim();
+    if !tail.is_empty() {
+        let phonemes = espeak_ipa(tail, language)?;
+        if !result.is_empty() && !phonemes.is_empty() {
+            result.push(' ');
         }
+        result.push_str(&phonemes);
     }
 
     Ok(result)
 }
 
-fn split_trailing_punct(token: &str) -> (&str, &str) {
-    let end = token
-        .char_indices()
-        .rev()
-        .take_while(|(_, c)| matches!(c, '.' | ',' | '!' | '?' | ':' | ';' | '"' | '\'' | ')' | '—' | '…'))
-        .last()
-        .map(|(i, _)| i)
-        .unwrap_or(token.len());
-    (&token[..end], &token[end..])
+fn is_clause_punct(c: char) -> bool {
+    matches!(c, '.' | ',' | '!' | '?' | ':' | ';' | '…')
 }
 
-fn espeak_word(word: &str, voice: &str) -> Result<String, String> {
+fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
     let mut child = Command::new("espeak-ng")
-        .args(["-v", voice, "--ipa", "-q"])
+        .args(["-v", language, "--ipa", "-q"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -180,7 +176,7 @@ fn espeak_word(word: &str, voice: &str) -> Result<String, String> {
         .stdin
         .take()
         .unwrap()
-        .write_all(word.as_bytes())
+        .write_all(text.as_bytes())
         .map_err(|e| format!("espeak-ng write: {e}"))?;
 
     let output = child
