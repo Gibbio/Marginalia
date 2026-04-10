@@ -94,6 +94,7 @@ pub const COMMANDS: [CommandSpec; 12] = [
 pub struct App {
     backend: BackendClient,
     logger: AppLogger,
+    voice_commands: crate::config::VoiceCommandsSection,
     pub input: String,
     pub should_quit: bool,
     pub app_snapshot: Option<AppSnapshot>,
@@ -115,10 +116,15 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(backend: BackendClient, logger: AppLogger) -> Result<Self, String> {
+    pub fn new(
+        backend: BackendClient,
+        logger: AppLogger,
+        voice_commands: crate::config::VoiceCommandsSection,
+    ) -> Result<Self, String> {
         let mut app = Self {
             backend,
             logger,
+            voice_commands,
             input: String::new(),
             should_quit: false,
             app_snapshot: None,
@@ -645,15 +651,13 @@ impl App {
         if !listening {
             return;
         }
-        match cmd {
-            "pausa" | "pause" => self.run_shortcut_command(BackendClient::pause_session),
-            "avanti" | "next" => self.navigate_next_chunk(),
-            "indietro" | "back" => self.navigate_previous_chunk(),
-            "stop" => self.run_shortcut_command(BackendClient::stop_session),
-            "ripeti" | "repeat" => self.run_async_shortcut("Repeat", BackendClient::repeat_chunk),
-            "riprendi" | "resume" => {
-                self.run_async_shortcut("Resume", BackendClient::resume_session)
-            }
+        match self.voice_commands.resolve_action(cmd) {
+            Some("pause") => self.run_shortcut_command(BackendClient::pause_session),
+            Some("next") => self.navigate_next_chunk(),
+            Some("back") => self.navigate_previous_chunk(),
+            Some("stop") => self.run_shortcut_command(BackendClient::stop_session),
+            Some("repeat") => self.run_async_shortcut("Repeat", BackendClient::repeat_chunk),
+            Some("resume") => self.run_async_shortcut("Resume", BackendClient::resume_session),
             _ => {}
         }
     }

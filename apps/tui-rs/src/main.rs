@@ -90,7 +90,8 @@ fn wait_for_app(
             "Loading {} snapshots...",
             backend.mode_label()
         )));
-        let mut app = match App::new(backend, worker_logger.clone()) {
+        let voice_commands = config::TuiConfig::load().voice_commands;
+        let mut app = match App::new(backend, worker_logger.clone(), voice_commands) {
             Ok(app) => app,
             Err(message) => {
                 let _ = tx.send(StartupEvent::Failed(message));
