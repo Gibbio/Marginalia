@@ -1,14 +1,15 @@
-# Python
-__pycache__/
-*.py[cod]
-*.so
-.Python
+# Build
+target/
 build/
 dist/
-target/
+
+# Python (benchmark scripts only — no Python in main codebase)
+__pycache__/
+*.py[cod]
 *.egg-info/
-.eggs/
 .venv/
+.venv-kokoro/
+.bench-venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -17,10 +18,18 @@ htmlcov/
 
 # Local state
 .marginalia/
-.venv-kokoro/
 .whisper-cpp/
+/marginalia.toml
+tmp/
 
-# Downloaded model assets (large binary files — use make bootstrap-beta to install)
+# SQLite
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Downloaded model assets (large binaries — use make bootstrap-beta to install)
 models/stt/vosk/vosk-model-*/
 models/stt/vosk/libvosk.*
 models/stt/whisper/*.bin
@@ -28,11 +37,22 @@ models/tts/kokoro/*.onnx
 models/tts/kokoro/config.json
 models/tts/kokoro/voices/
 models/tts/kokoro/lib/
-/marginalia.toml
-tmp/
-*.sqlite
-*.sqlite3
-*.db
+models/tts/piper/*.onnx
+models/tts/piper/*.json
+
+# Benchmark artifacts
+benchmark/macos-apple-silicon/rust/target/
+benchmark/macos-apple-silicon/rust-voice/target/
+benchmark/macos-apple-silicon/rust-mlx/target/
+benchmark/macos-apple-silicon/kokoro-mlx-rs/
+benchmark/macos-apple-silicon/voice-fork/
+benchmark/macos-apple-silicon/voice-patch/
+
+# Cloned repos inside workspace
+voice-mlx/
+
+# Log files
+*.log
 
 # Editors and OS
 .DS_Store
@@ -41,26 +61,3 @@ tmp/
 
 # Devcontainer cache
 .devcontainer/.cache/
-
-# Benchmark artifacts (large binaries, venvs, cloned repos)
-benchmark/macos-apple-silicon/rust/target/
-benchmark/macos-apple-silicon/rust-voice/target/
-benchmark/macos-apple-silicon/rust-mlx/target/
-benchmark/macos-apple-silicon/kokoro-mlx-rs/
-benchmark/macos-apple-silicon/voice-fork/
-benchmark/macos-apple-silicon/voice-patch/
-.bench-venv/
-
-# Separate repos cloned inside workspace
-voice-mlx/
-
-# Downloaded Piper models
-models/tts/piper/*.onnx
-models/tts/piper/*.json
-
-# Log files
-*.log
-
-# SQLite WAL/SHM
-*.db-shm
-*.db-wal
