@@ -209,15 +209,15 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	else \
 		TTS_SECTION='# Nessun TTS configurato. Esegui: make bootstrap-kokoro'; \
 	fi; \
-	if [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then \
-		VOSK_SECTION='[vosk]\nmodel_path = "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)"\ncommands = ["pausa", "avanti", "indietro", "stop"]\n# speech_threshold = 3000  # 0-32767, higher = less sensitive (default: 3000)\n# silence_timeout = 1.2    # seconds of silence before finalizing (default: 1.2)\n# min_speech_ms = 300      # minimum speech duration to accept (default: 300)'; \
-	else \
-		VOSK_SECTION='# [vosk]  — non installato. Esegui: make bootstrap-vosk bootstrap-vosk-lib'; \
-	fi; \
 	if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
-		WHISPER_SECTION='[whisper]\nmodel_path = "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)"\nlanguage = "it"\n# use_for_commands = true  # use Whisper for voice commands (more accurate, ~2s latency)\n# speech_threshold = 500   # 0-32767, lower = more sensitive (default: 500)\n# max_record_seconds = 4   # max recording before inference (default: 4)\n# silence_timeout = 1.0    # seconds of silence before finalizing (default: 1.0)'; \
+		WHISPER_SECTION='# Whisper: preciso, ~2s latenza (consigliato)\n[whisper]\nmodel_path = "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)"\nlanguage = "it"\nuse_for_commands = true\nspeech_threshold = 300\nsilence_timeout = 0.8'; \
 	else \
-		WHISPER_SECTION='# [whisper]  — non installato. Esegui: make bootstrap-whisper'; \
+		WHISPER_SECTION='# [whisper] — non installato. Esegui: make bootstrap-whisper'; \
+	fi; \
+	if [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then \
+		VOSK_SECTION='# Vosk: veloce, risposta istantanea, adattamento automatico al rumore\n# Decommentare per usare al posto di Whisper.\n# [vosk]\n# model_path = "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)"\n# speech_threshold = "auto"\n# silence_timeout = 1.2\n# min_speech_ms = 300'; \
+	else \
+		VOSK_SECTION='# [vosk] — non installato. Esegui: make bootstrap-vosk bootstrap-vosk-lib'; \
 	fi; \
 	sed -e "s|__PLATFORM__|$$PLATFORM|" \
 	    -e "s|__DATE__|$$DATE|" \
