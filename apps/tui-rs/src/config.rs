@@ -92,6 +92,10 @@ pub struct WhisperSection {
     pub model_path: Option<PathBuf>,
     /// BCP-47 language code passed to whisper.cpp. Default: `"it"`.
     pub language: Option<String>,
+    /// Also use Whisper for voice commands (replaces Vosk). Default: false.
+    /// More accurate than Vosk but higher latency (~2s vs instant).
+    #[serde(default)]
+    pub use_for_commands: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]

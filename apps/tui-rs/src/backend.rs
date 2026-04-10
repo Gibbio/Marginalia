@@ -4,7 +4,9 @@ use marginalia_runtime::{RuntimeFrontend, SqliteRuntime};
 #[cfg(feature = "vosk-stt")]
 use marginalia_stt_vosk::{VoskCommandRecognizer, VoskConfig};
 #[cfg(feature = "whisper-stt")]
-use marginalia_stt_whisper::{WhisperConfig, WhisperDictationTranscriber};
+use marginalia_stt_whisper::{
+    WhisperCommandRecognizer, WhisperConfig, WhisperDictationTranscriber,
+};
 use marginalia_tts_kokoro::{
     KokoroConfig, KokoroExternalPhonemizerConfig, KokoroSpeechSynthesizer,
     KokoroSpeechSynthesizerConfig, KokoroTextProcessor,
@@ -414,9 +416,29 @@ impl BetaBackendClient {
         #[cfg(feature = "whisper-stt")]
         if let Some(model_path) = config.whisper.model_path {
             let mut whisper_config = WhisperConfig::new(&model_path);
-            if let Some(language) = config.whisper.language {
+            if let Some(language) = config.whisper.language.clone() {
                 whisper_config.language = language;
             }
+
+            // Optionally use Whisper for voice commands (more accurate than Vosk)
+            if config.whisper.use_for_commands {
+                let cmd_commands = if config.vosk.commands.is_empty() {
+                    vec![
+                        "pausa".to_string(),
+                        "avanti".to_string(),
+                        "indietro".to_string(),
+                        "stop".to_string(),
+                    ]
+                } else {
+                    config.vosk.commands.clone()
+                };
+                runtime.set_command_recognizer(WhisperCommandRecognizer::new(
+                    whisper_config.clone(),
+                    cmd_commands,
+                ));
+                stt_label = "whisper";
+            }
+
             runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(whisper_config));
             runtime.set_provider_doctor_blob(
                 "whisper_dictation_stt",

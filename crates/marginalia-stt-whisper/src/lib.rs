@@ -1,7 +1,8 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use marginalia_core::ports::{
-    DictationSegment, DictationTranscriber, DictationTranscript, ProviderCapabilities,
-    ProviderExecutionMode,
+    CommandRecognition, CommandRecognizer, DictationSegment, DictationTranscriber,
+    DictationTranscript, ProviderCapabilities, ProviderExecutionMode, SpeechInterruptCapture,
+    SpeechInterruptMonitor,
 };
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -111,7 +112,7 @@ impl WhisperDictationTranscriber {
         self.run_inference(samples_f32)
     }
 
-    fn capture_audio_i16(&self) -> Result<Vec<i16>, String> {
+    pub(crate) fn capture_audio_i16(&self) -> Result<Vec<i16>, String> {
         let host = cpal::default_host();
         let device = match &self.config.input_device_name {
             Some(name) => host
@@ -193,7 +194,7 @@ impl WhisperDictationTranscriber {
         Ok(all_samples)
     }
 
-    fn run_inference(&self, samples: Vec<f32>) -> Result<DictationTranscript, String> {
+    pub(crate) fn run_inference(&self, samples: Vec<f32>) -> Result<DictationTranscript, String> {
         let model_path = self
             .config
             .model_path
@@ -260,6 +261,128 @@ impl WhisperDictationTranscriber {
             raw_text: Some(full_text),
         })
     }
+}
+
+// ---------------------------------------------------------------------------
+// CommandRecognizer (Whisper-based)
+// ---------------------------------------------------------------------------
+
+const CMD_PROVIDER_NAME: &str = "whisper-command-stt";
+const CMD_MAX_DURATION_SECONDS: f64 = 4.0;
+const CMD_SILENCE_TIMEOUT_SECONDS: f64 = 1.0;
+
+/// Whisper-based command recognizer. Transcribes speech then fuzzy-matches
+/// against a list of known commands. More accurate than grammar-based
+/// recognizers (Vosk) because it does full speech recognition first.
+pub struct WhisperCommandRecognizer {
+    config: WhisperConfig,
+    commands: Vec<String>,
+}
+
+impl WhisperCommandRecognizer {
+    pub fn new(config: WhisperConfig, commands: Vec<String>) -> Self {
+        Self { config, commands }
+    }
+
+    fn transcribe_short(&self) -> Result<String, String> {
+        // Use short timeouts for command recognition
+        let short_config = WhisperConfig {
+            max_duration_seconds: CMD_MAX_DURATION_SECONDS,
+            silence_timeout_seconds: CMD_SILENCE_TIMEOUT_SECONDS,
+            ..self.config.clone()
+        };
+        let transcriber = WhisperDictationTranscriber::new(short_config);
+        let samples = transcriber.capture_audio_i16()?;
+        if samples.is_empty() {
+            return Ok(String::new());
+        }
+        let samples_f32: Vec<f32> = samples.iter().map(|&s| s as f32 / 32768.0).collect();
+        let transcript = transcriber.run_inference(samples_f32)?;
+        Ok(transcript.text.to_lowercase())
+    }
+
+    /// Find the best matching command in the transcribed text.
+    fn match_command(&self, text: &str) -> Option<String> {
+        let text = text.to_lowercase();
+        // Exact substring match
+        for cmd in &self.commands {
+            if text.contains(&cmd.to_lowercase()) {
+                return Some(cmd.clone());
+            }
+        }
+        None
+    }
+}
+
+impl CommandRecognizer for WhisperCommandRecognizer {
+    fn describe_capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            provider_name: CMD_PROVIDER_NAME.to_string(),
+            interface_kind: "command_stt".to_string(),
+            supported_languages: vec![self.config.language.clone()],
+            supports_streaming: false,
+            supports_partial_results: false,
+            supports_timestamps: false,
+            low_latency_suitable: false,
+            offline_capable: true,
+            execution_mode: ProviderExecutionMode::Local,
+        }
+    }
+
+    fn listen_for_command(&mut self) -> Option<CommandRecognition> {
+        let text = self.transcribe_short().ok()?;
+        let command = self.match_command(&text)?;
+        Some(CommandRecognition {
+            command: command.clone(),
+            provider_name: CMD_PROVIDER_NAME.to_string(),
+            confidence: 1.0,
+            is_final: true,
+            raw_text: Some(text),
+        })
+    }
+
+    fn capture_interrupt(&mut self, _timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
+        let started = Instant::now();
+        let text = self.transcribe_short().unwrap_or_default();
+        let command = self.match_command(&text);
+        let elapsed_ms = started.elapsed().as_millis().min(u32::MAX as u128) as u32;
+
+        SpeechInterruptCapture {
+            provider_name: CMD_PROVIDER_NAME.to_string(),
+            speech_detected: !text.is_empty(),
+            capture_ended_ms: elapsed_ms,
+            speech_detected_ms: if text.is_empty() { None } else { Some(0) },
+            capture_started_ms: Some(0),
+            raw_text: Some(text),
+            recognized_command: command,
+            timed_out: false,
+            input_device_index: None,
+            input_device_name: None,
+            sample_rate: Some(self.config.sample_rate),
+        }
+    }
+
+    fn open_interrupt_monitor(&mut self) -> Box<dyn SpeechInterruptMonitor> {
+        Box::new(WhisperInterruptMonitor {
+            config: self.config.clone(),
+            commands: self.commands.clone(),
+        })
+    }
+}
+
+struct WhisperInterruptMonitor {
+    config: WhisperConfig,
+    commands: Vec<String>,
+}
+
+impl SpeechInterruptMonitor for WhisperInterruptMonitor {
+    fn capture_next_interrupt(&mut self, _timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
+        let mut recognizer =
+            WhisperCommandRecognizer::new(self.config.clone(), self.commands.clone());
+        recognizer.capture_interrupt(None)
+    }
+
+    fn close(&mut self) {}
 }
 
 // ---------------------------------------------------------------------------
