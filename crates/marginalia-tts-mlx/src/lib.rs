@@ -184,12 +184,13 @@ fn normalize_pauses(text: &str) -> String {
         .replace(" — ", ", ")
         .replace(" – ", ", ")
         .replace("--", ", ")
-        .replace('\u{2018}', "'") // left single quote
-        .replace('\u{2019}', "'") // right single quote
-        .replace('\u{201C}', "\"") // left double quote
-        .replace('\u{201D}', "\"") // right double quote
-        .replace('\u{00AB}', "\"") // «
-        .replace('\u{00BB}', "\"") // »
+        .replace('"', ", ")        // double quotes → pause (dialogue)
+        .replace('\u{201C}', ", ") // left double quote "
+        .replace('\u{201D}', ", ") // right double quote "
+        .replace('\u{00AB}', ", ") // «
+        .replace('\u{00BB}', ", ") // »
+        .replace('\u{2018}', "'")  // left single quote
+        .replace('\u{2019}', "'")  // right single quote
         .replace("  ", " ")
 }
 
