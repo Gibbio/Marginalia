@@ -170,8 +170,13 @@ impl BackendClient {
 
     /// Dispatch any command to a background thread. Returns immediately.
     /// Used for commands that trigger TTS synthesis to avoid UI freeze.
+    /// Silently drops the command if another async command is still running.
     fn send_async(&mut self, name: &str, payload: Value) {
         let Self::Beta(client) = self;
+        if client.is_busy() {
+            client.push_log(format!("beta command {name} => dropped (busy)"));
+            return;
+        }
         client.send_command_async(name.to_string(), payload);
     }
 
