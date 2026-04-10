@@ -258,7 +258,13 @@ beta-doctor:
 
 clean:
 	rm -rf target/
-	@echo "Rust build artifacts cleaned."
+	rm -rf benchmark/macos-apple-silicon/rust/target/
+	rm -rf benchmark/macos-apple-silicon/rust-voice/target/
+	rm -rf benchmark/macos-apple-silicon/rust-mlx/target/
+	rm -rf .bench-venv/
+	rm -f *.log
+	rm -f marginalia-cli.db marginalia-cli.db-shm marginalia-cli.db-wal
+	@echo "Rust build artifacts and benchmark caches cleaned."
 
 clean-alpha:
 	rm -rf build/ dist/ *.egg-info .eggs/
