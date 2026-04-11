@@ -87,31 +87,57 @@ With an empty command bar:
 
 ## Voice commands (STT)
 
-Two backends available for voice commands:
+Voice commands are configured in `[voice_commands]` — a map from action to
+trigger words. The STT backend listens for all words; when recognized, the
+action executes. Add synonyms in any language without touching code.
+
+```toml
+[voice_commands]
+pause = ["pausa", "ferma"]
+next = ["avanti", "prossimo"]
+back = ["indietro"]
+stop = ["stop", "basta"]
+repeat = ["ripeti"]
+resume = ["riprendi", "continua"]
+```
+
+| Action | What it does |
+|---|---|
+| **pause** | Pause playback |
+| **next** | Advance to next chunk |
+| **back** | Go back one chunk |
+| **stop** | Stop session |
+| **repeat** | Repeat current chunk |
+| **resume** | Resume playback |
+
+To add a new trigger word, edit the toml. To add a new action, also add
+a match arm in `app.rs` → `handle_voice_command`.
+
+### STT backends
 
 | Backend | Latency | Accuracy | Config |
 |---|---|---|---|
+| **Whisper** (recommended) | ~2s | Excellent | `[whisper]` + `use_for_commands = true` |
 | **Vosk** | Instant | Good (with tuning) | `[vosk]` section |
-| **Whisper** | ~2s | Excellent | `[whisper]` + `use_for_commands = true` |
 
-**Vosk** has adaptive noise floor: it continuously measures ambient noise
-and auto-adjusts the speech detection threshold. If the AC turns on or a
-window opens, the threshold rises within ~3 seconds. No manual tuning
-needed — works in quiet rooms and noisy cafes alike.
+**Whisper**: records audio, runs full speech recognition, then substring-matches
+trigger words in the transcript. Very accurate, no false positives on noise.
 
-Fine-tuning (optional):
-```toml
-[vosk]
-speech_threshold = 3000   # minimum floor (0-32767), raise if too sensitive
-silence_timeout = 1.2     # seconds of silence before finalizing
-min_speech_ms = 300       # ignore noise spikes shorter than this
-```
-
-**Whisper** is more accurate (full speech recognition, then command matching)
-but has ~2s latency per command cycle. Enable with:
 ```toml
 [whisper]
 use_for_commands = true
+speech_threshold = 300    # lower = more sensitive (default: 500)
+silence_timeout = 0.8     # faster response (default: 1.0)
+```
+
+**Vosk**: real-time grammar recognizer with adaptive noise floor. Continuously
+measures ambient noise and auto-adjusts threshold (~3s adaptation time).
+
+```toml
+[vosk]
+speech_threshold = "auto"   # or a fixed number (e.g. 3000)
+silence_timeout = 1.2
+min_speech_ms = 300         # ignore noise spikes shorter than this
 ```
 
 ## Build features
