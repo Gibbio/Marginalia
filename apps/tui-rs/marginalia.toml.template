@@ -4,7 +4,6 @@
 # Data:         __DATE__
 
 database_path = ".marginalia/beta.sqlite3"
-# debug_stt = true   # mostra nel Log cosa sente il microfono
 
 # ── TTS ───────────────────────────────────────────────────────
 __TTS_SECTION__
