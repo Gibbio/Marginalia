@@ -185,6 +185,28 @@ mode automatically switches back to command recognition after each note.
 Dictation tuning is fully independent from command tuning — setting a short
 `silence_timeout` in `[stt.commands]` will NOT truncate dictated notes.
 
+### Echo filter
+
+While the TTS is reading a chunk aloud, the microphone inevitably picks up
+the playback. Without protection, trigger words that happen to appear in
+the document (e.g. the Italian word *"avanti"* = "next") would fire
+spurious commands as soon as the TTS pronounces them.
+
+The TUI wires the external crate
+[`stt-echo-filter`](https://github.com/Gibbio/stt-echo-filter) into
+`handle_voice_command` to do a **post-STT, word-level** echo rejection:
+every STT utterance is compared against the text of the currently-playing
+chunk, and any word already present in that chunk is "consumed" by a
+per-word budget before trigger matching. What's left is what the user
+actually said. If the filter absorbs everything, the utterance is dropped
+with an `[echo] dropped: ...` line in the Log pane (when `stt.debug = true`).
+
+This is a triage filter, not a true acoustic echo canceller. It has one
+known trade-off: if the user legitimately speaks a word that is also in
+the current chunk, the budget treats it as echo and the command is
+ignored. Use a synonym in `[voice_commands]` to work around it
+(e.g. `next = ["avanti", "prossimo"]`).
+
 ## Build features
 
 | Feature | What it enables |
