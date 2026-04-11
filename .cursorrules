@@ -249,8 +249,23 @@ later so it can see the playback state.
 Known trade-off: if the user legitimately says a word that is ALSO in the
 current chunk text, the budget absorbs it as echo and the command is
 dropped. Mitigation: use synonyms in `[voice_commands]`, or speak between
-chunks. For harder cases we may one day add real acoustic AEC — see
-"Advanced echo handling" in NEXT.md.
+chunks.
+
+For harder cases we eventually want real **acoustic** echo cancellation in
+front of the STT — this needs a per-platform evaluation because the right
+tool differs: Apple/iOS have `AVAudioSession.voiceChat` + `VoiceProcessingIO`,
+Linux has PipeWire's `echo-cancel` module, Android has `AcousticEchoCanceler`,
+Windows has the Communications APO, Web has `getUserMedia echoCancellation`,
+and the cross-platform baseline is WebRTC AEC3 via `webrtc-audio-processing`
+or the `aec3` Rust crate.
+
+On macOS specifically, wiring real AEC in front of `SFSpeechRecognizer`
+requires a mic-pipeline refactor: either link an AEC library inside the
+Swift helper and apply it before `request.append(buffer)`, or move mic
+capture into Rust (cpal) and feed pre-cleaned PCM frames to the helper
+via a binary stdin protocol. Picking the approach is a separate decision —
+see the "Echo cancellation" section in NEXT.md for the full evaluation
+matrix and the mic pipeline refactor task that gates it.
 
 **Do not** try to apply the filter inside the STT monitor thread — it
 doesn't know about playback state. It lives in `App` where session state is
