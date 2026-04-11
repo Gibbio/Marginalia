@@ -6,6 +6,13 @@
 
 ## Short term
 
+### Testing & CI
+- [ ] **Core trait tests**: verify that changes to `SpeechSynthesizer`, `CommandRecognizer`, `DocumentRepository` etc. don't break implementations. Add trait-level test helpers that any implementation can reuse.
+- [ ] **Integration tests**: runtime with fake providers, full flow: ingest → start session → navigate → create note. Lives in `marginalia-runtime/tests/`.
+- [ ] **CI compiles all crates**: today CI only builds `default-members`. Add a macOS runner that also builds `marginalia-tts-mlx`, `marginalia-stt-apple`, `marginalia-stt-whisper`. Linux runner builds the cross-platform set.
+- [ ] **Clippy + fmt on all crates**: including optional ones.
+- [ ] **Provider contract tests**: each TTS/STT implementation gets a basic smoke test (e.g. synthesize empty string → error, synthesize short text → valid WAV). Uses `#[cfg(test)]` with mocks, no real models needed.
+
 ### i18n / Localization
 - [ ] All core/backend messages must be in **English**. The TUI currently mixes Italian and English — standardize to English.
 - [ ] Create a separate translation file for TUI user-facing strings (`apps/tui-rs/i18n/` or similar). This includes:
