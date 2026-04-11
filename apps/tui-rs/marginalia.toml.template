@@ -5,7 +5,6 @@
 
 database_path = ".marginalia/beta.sqlite3"
 # debug_stt = true   # mostra nel Log cosa sente il microfono
-# apple_stt = true   # Apple Neural Engine STT (macOS, richiede Dictation abilitata)
 
 # ── TTS ───────────────────────────────────────────────────────
 __TTS_SECTION__
@@ -25,10 +24,8 @@ bookmark = ["segna", "segnalibro"]
 note = ["nota", "appunto"]
 where = ["dove sono", "posizione"]
 
-# ── STT — scegli UNO tra Whisper e Vosk ──────────────────────
-__WHISPER_SECTION__
-
-__VOSK_SECTION__
+# ── STT — scegli UNO tra Apple, Whisper e Vosk ───────────────
+__STT_SECTION__
 
 # ── Playback ──────────────────────────────────────────────────
 [playback]

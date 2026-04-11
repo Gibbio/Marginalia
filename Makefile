@@ -209,21 +209,24 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	else \
 		TTS_SECTION='# Nessun TTS configurato. Esegui: make bootstrap-kokoro'; \
 	fi; \
+	STT_SECTION="# Scegli UNO tra Apple, Whisper e Vosk."; \
+	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
+		STT_SECTION="$$STT_SECTION\n\n# Apple STT: Neural Engine, nessun modello, velocissimo.\n# Richiede: System Settings → Keyboard → Dictation → ON\napple_stt = true"; \
+	fi; \
 	if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
-		WHISPER_SECTION='# Whisper: preciso, ~2s latenza (consigliato)\n[whisper]\nmodel_path = "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)"\nlanguage = "it"\nuse_for_commands = true\nspeech_threshold = 300\nsilence_timeout = 0.8'; \
-	else \
-		WHISPER_SECTION='# [whisper] — non installato. Esegui: make bootstrap-whisper'; \
+		if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
+			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza. Alternativa ad Apple STT.\n# [whisper]\n# model_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\n# language = \"it\"\n# use_for_commands = true\n# speech_threshold = 300\n# silence_timeout = 0.8"; \
+		else \
+			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza.\n[whisper]\nmodel_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\nlanguage = \"it\"\nuse_for_commands = true\nspeech_threshold = 300\nsilence_timeout = 0.8"; \
+		fi; \
 	fi; \
 	if [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then \
-		VOSK_SECTION='# Vosk: veloce, risposta istantanea, adattamento automatico al rumore\n# Decommentare per usare al posto di Whisper.\n# [vosk]\n# model_path = "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)"\n# speech_threshold = "auto"\n# silence_timeout = 1.2\n# min_speech_ms = 300'; \
-	else \
-		VOSK_SECTION='# [vosk] — non installato. Esegui: make bootstrap-vosk bootstrap-vosk-lib'; \
+		STT_SECTION="$$STT_SECTION\n\n# Vosk: veloce, risposta istantanea, adattamento rumore.\n# [vosk]\n# model_path = \"$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)\"\n# speech_threshold = \"auto\"\n# silence_timeout = 1.2\n# min_speech_ms = 300"; \
 	fi; \
 	sed -e "s|__PLATFORM__|$$PLATFORM|" \
 	    -e "s|__DATE__|$$DATE|" \
 	    -e "s|__TTS_SECTION__|$$TTS_SECTION|" \
-	    -e "s|__VOSK_SECTION__|$$VOSK_SECTION|" \
-	    -e "s|__WHISPER_SECTION__|$$WHISPER_SECTION|" \
+	    -e "s|__STT_SECTION__|$$STT_SECTION|" \
 	    $(TUI_TEMPLATE) > $(TUI_TOML); \
 	echo "Generated $(TUI_TOML) for $$PLATFORM"
 
