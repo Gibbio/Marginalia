@@ -385,19 +385,21 @@ impl BetaBackendClient {
         let mut stt_label = "fake";
 
         #[cfg(feature = "apple-stt")]
-        if config.stt.apple {
+        if let Some(apple_cfg) = &config.stt.apple {
             let commands = config.voice_commands.all_words();
             let language = config
+                .stt
                 .whisper
                 .language
                 .clone()
                 .unwrap_or_else(|| "it-IT".to_string());
-            match AppleCommandRecognizer::new(&language, commands) {
+            let silence_timeout = apple_cfg.silence_timeout.unwrap_or(0.8);
+            match AppleCommandRecognizer::new(&language, commands, silence_timeout) {
                 Ok(rec) => {
                     runtime.set_command_recognizer(rec);
                     runtime.set_provider_doctor_blob(
                         "apple_stt",
-                        json!({ "ready": true, "language": language }),
+                        json!({ "ready": true, "language": language, "silence_timeout": silence_timeout }),
                     );
                     stt_label = "apple";
                 }
@@ -411,10 +413,10 @@ impl BetaBackendClient {
             }
         }
         #[cfg(feature = "vosk-stt")]
-        if let Some(model_path) = config.vosk.model_path {
+        if let Some(model_path) = config.stt.vosk.model_path {
             let commands = config.voice_commands.all_words();
             let mut vosk_config = VoskConfig::new(&model_path, commands);
-            match &config.vosk.speech_threshold {
+            match &config.stt.vosk.speech_threshold {
                 crate::config::SpeechThreshold::Auto => {
                     // Use a low base threshold — the adaptive noise floor handles the rest
                     vosk_config.speech_threshold = 500;
@@ -423,10 +425,10 @@ impl BetaBackendClient {
                     vosk_config.speech_threshold = *v;
                 }
             }
-            if let Some(v) = config.vosk.silence_timeout {
+            if let Some(v) = config.stt.vosk.silence_timeout {
                 vosk_config.silence_timeout_seconds = v;
             }
-            if let Some(v) = config.vosk.min_speech_ms {
+            if let Some(v) = config.stt.vosk.min_speech_ms {
                 vosk_config.min_speech_duration_ms = v;
             }
             runtime.set_command_recognizer(VoskCommandRecognizer::new(vosk_config));
@@ -437,27 +439,27 @@ impl BetaBackendClient {
             stt_label = "vosk";
         }
 
-        // Dictation STT: Whisper se [whisper] model_path è configurato
+        // Dictation STT: Whisper se [stt.whisper] model_path è configurato
         #[allow(unused_mut, unused_variables)]
         let mut dictation_label = "fake";
         #[cfg(feature = "whisper-stt")]
-        if let Some(model_path) = config.whisper.model_path {
+        if let Some(model_path) = config.stt.whisper.model_path {
             let mut whisper_config = WhisperConfig::new(&model_path);
-            if let Some(language) = config.whisper.language.clone() {
+            if let Some(language) = config.stt.whisper.language.clone() {
                 whisper_config.language = language;
             }
-            if let Some(v) = config.whisper.speech_threshold {
+            if let Some(v) = config.stt.whisper.speech_threshold {
                 whisper_config.speech_threshold = v;
             }
-            if let Some(v) = config.whisper.max_record_seconds {
+            if let Some(v) = config.stt.whisper.max_record_seconds {
                 whisper_config.max_duration_seconds = v;
             }
-            if let Some(v) = config.whisper.silence_timeout {
+            if let Some(v) = config.stt.whisper.silence_timeout {
                 whisper_config.silence_timeout_seconds = v;
             }
 
             // Optionally use Whisper for voice commands (more accurate than Vosk)
-            if config.whisper.use_for_commands {
+            if config.stt.whisper.use_for_commands {
                 let cmd_commands = config.voice_commands.all_words();
                 runtime.set_command_recognizer(WhisperCommandRecognizer::new(
                     whisper_config.clone(),

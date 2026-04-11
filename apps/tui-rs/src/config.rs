@@ -14,12 +14,6 @@ pub struct TuiConfig {
     #[serde(default)]
     pub kokoro: KokoroSection,
     #[serde(default)]
-    #[cfg_attr(not(feature = "vosk-stt"), allow(dead_code))]
-    pub vosk: VoskSection,
-    #[serde(default)]
-    #[cfg_attr(not(feature = "whisper-stt"), allow(dead_code))]
-    pub whisper: WhisperSection,
-    #[serde(default)]
     pub voice_commands: VoiceCommandsSection,
     #[serde(default)]
     pub playback: PlaybackSection,
@@ -33,9 +27,26 @@ pub struct SttSection {
     /// Show raw transcript in Log pane. Works with all STT backends.
     #[serde(default)]
     pub debug: bool,
-    /// Use Apple native STT (SFSpeechRecognizer). macOS only.
+    /// Apple native STT (SFSpeechRecognizer / Neural Engine). macOS only.
+    /// Presence of `[stt.apple]` enables it; omit the section to disable.
+    #[cfg_attr(not(feature = "apple-stt"), allow(dead_code))]
+    pub apple: Option<AppleSttSection>,
+    /// Whisper STT settings (high accuracy, ~2s latency).
     #[serde(default)]
-    pub apple: bool,
+    #[cfg_attr(not(feature = "whisper-stt"), allow(dead_code))]
+    pub whisper: WhisperSection,
+    /// Vosk STT settings (fast, grammar-based).
+    #[serde(default)]
+    #[cfg_attr(not(feature = "vosk-stt"), allow(dead_code))]
+    pub vosk: VoskSection,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[cfg_attr(not(feature = "apple-stt"), allow(dead_code))]
+pub struct AppleSttSection {
+    /// Seconds of silence after speech before emitting a partial.
+    /// Lower = snappier response but may cut off slow speakers. Default: 0.8.
+    pub silence_timeout: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -211,17 +211,17 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	fi; \
 	STT_SECTION="[stt]\n# debug = true   # mostra nel Log cosa sente il microfono"; \
 	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-		STT_SECTION="$$STT_SECTION\napple = true     # Apple Neural Engine (richiede: System Settings → Keyboard → Dictation → ON)"; \
+		STT_SECTION="$$STT_SECTION\n\n# Apple Neural Engine (richiede: System Settings → Keyboard → Dictation → ON)\n# Commenta l'intera sezione per disabilitarlo.\n[stt.apple]\n# silence_timeout = 0.8   # secondi di silenzio prima di emettere un parziale (più basso = più reattivo)"; \
 	fi; \
 	if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
 		if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza. Alternativa ad Apple STT.\n# [whisper]\n# model_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\n# language = \"it\"\n# use_for_commands = true\n# speech_threshold = 300\n# silence_timeout = 0.8"; \
+			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza. Alternativa ad Apple STT.\n# [stt.whisper]\n# model_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\n# language = \"it\"\n# use_for_commands = true\n# speech_threshold = 300\n# silence_timeout = 0.8"; \
 		else \
-			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza.\n[whisper]\nmodel_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\nlanguage = \"it\"\nuse_for_commands = true\nspeech_threshold = 300\nsilence_timeout = 0.8"; \
+			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza.\n[stt.whisper]\nmodel_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\nlanguage = \"it\"\nuse_for_commands = true\nspeech_threshold = 300\nsilence_timeout = 0.8"; \
 		fi; \
 	fi; \
 	if [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then \
-		STT_SECTION="$$STT_SECTION\n\n# Vosk: veloce, risposta istantanea, adattamento rumore.\n# [vosk]\n# model_path = \"$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)\"\n# speech_threshold = \"auto\"\n# silence_timeout = 1.2\n# min_speech_ms = 300"; \
+		STT_SECTION="$$STT_SECTION\n\n# Vosk: veloce, risposta istantanea, adattamento rumore.\n# [stt.vosk]\n# model_path = \"$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)\"\n# speech_threshold = \"auto\"\n# silence_timeout = 1.2\n# min_speech_ms = 300"; \
 	fi; \
 	sed -e "s|__PLATFORM__|$$PLATFORM|" \
 	    -e "s|__DATE__|$$DATE|" \
