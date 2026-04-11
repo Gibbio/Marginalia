@@ -257,9 +257,10 @@ impl BackendClient {
         client.recent_stderr_entries(after_sequence)
     }
 
-    pub fn poll_voice_command(&mut self) -> Option<String> {
+    /// Returns (raw_text, command). raw_text is for debug logging.
+    pub fn poll_voice_event(&mut self) -> Option<(Option<String>, Option<String>)> {
         let Self::Beta(client) = self;
-        client.poll_voice_command()
+        client.poll_voice_event()
     }
 }
 
@@ -267,7 +268,7 @@ pub(crate) struct BetaBackendClient {
     runtime: Arc<Mutex<Box<dyn RuntimeFrontend + Send>>>,
     logs: VecDeque<BackendLogEntry>,
     sequence: u64,
-    voice_cmd_rx: Option<mpsc::Receiver<String>>,
+    voice_cmd_rx: Option<mpsc::Receiver<(Option<String>, Option<String>)>>,
     /// Receiver for the result of a command running on a background thread.
     async_result_rx: Option<mpsc::Receiver<AsyncCommandResult>>,
 }
@@ -447,9 +448,11 @@ impl BetaBackendClient {
         // Voice command monitor — open and run in background thread.
         // The monitor is independent from the runtime after creation (owns its own audio stream).
         // Thread exits automatically when voice_cmd_rx is dropped (tx.send fails).
+        let stt_debug = config.voice_commands.debug;
         let voice_cmd_rx = {
             let mut monitor = runtime.open_command_monitor();
-            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            // Channel sends (raw_text, command). raw_text is for debug logging.
+            let (tx, rx) = std::sync::mpsc::channel::<(Option<String>, Option<String>)>();
             std::thread::spawn(move || {
                 loop {
                     let capture = monitor.capture_next_interrupt(Some(2.0));
@@ -457,13 +460,16 @@ impl BetaBackendClient {
                     if let Some(raw) = &capture.raw_text {
                         if raw.starts_with("error:") {
                             eprintln!("[voice-monitor] {raw}");
-                            // Don't spin on repeated errors — back off
                             std::thread::sleep(std::time::Duration::from_secs(5));
                             continue;
                         }
                     }
-                    if let Some(cmd) = capture.recognized_command {
-                        if tx.send(cmd).is_err() {
+
+                    let raw = capture.raw_text.filter(|t| !t.is_empty());
+                    let cmd = capture.recognized_command;
+
+                    if stt_debug && raw.is_some() || cmd.is_some() {
+                        if tx.send((raw, cmd)).is_err() {
                             break;
                         }
                     }
@@ -492,7 +498,7 @@ impl BetaBackendClient {
         Ok(client)
     }
 
-    pub fn poll_voice_command(&mut self) -> Option<String> {
+    pub fn poll_voice_event(&mut self) -> Option<(Option<String>, Option<String>)> {
         self.voice_cmd_rx.as_ref()?.try_recv().ok()
     }
 

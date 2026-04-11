@@ -181,6 +181,9 @@ pub struct VoiceCommandsSection {
     /// Words that resume playback. Default: ["riprendi", "resume"]
     #[serde(default = "default_resume")]
     pub resume: Vec<String>,
+    /// Show STT raw text in Log pane (what the mic heard). Default: false.
+    #[serde(default)]
+    pub debug: bool,
 }
 
 impl Default for VoiceCommandsSection {
@@ -192,6 +195,7 @@ impl Default for VoiceCommandsSection {
             stop: default_stop(),
             repeat: default_repeat(),
             resume: default_resume(),
+            debug: false,
         }
     }
 }

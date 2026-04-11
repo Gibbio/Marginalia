@@ -556,7 +556,7 @@ impl App {
         Ok(message)
     }
 
-    fn push_message(&mut self, message: String) {
+    pub fn push_message(&mut self, message: String) {
         self.logger.info(format!("ui-log {message}"));
         self.messages.push_back(message);
         while self.messages.len() > 200 {
@@ -637,8 +637,8 @@ impl App {
         self.run_async_shortcut("Next chapter", BackendClient::next_chapter);
     }
 
-    pub fn poll_voice_command(&mut self) -> Option<String> {
-        self.backend.poll_voice_command()
+    pub fn poll_voice_event(&mut self) -> Option<(Option<String>, Option<String>)> {
+        self.backend.poll_voice_event()
     }
 
     pub fn handle_voice_command(&mut self, cmd: &str) {
