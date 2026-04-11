@@ -640,28 +640,28 @@ impl App {
     fn voice_bookmark(&mut self) {
         if let Some(session) = &self.session_snapshot {
             let label = format!(
-                "[SEGNALIBRO] {}, cap.{} chunk{}",
+                "[BOOKMARK] {}, ch.{} chunk{}",
                 session.section_title,
                 session.section_index + 1,
                 session.chunk_index + 1,
             );
             match self.backend.create_note(&label) {
                 Ok(_) => self.push_message(format!(
-                    "Segnalibro salvato: cap.{} chunk{}",
+                    "Bookmark saved: ch.{} chunk{}",
                     session.section_index + 1,
                     session.chunk_index + 1,
                 )),
-                Err(e) => self.push_message(format!("Errore segnalibro: {e}")),
+                Err(e) => self.push_message(format!("Bookmark error: {e}")),
             }
         } else {
-            self.push_message("Nessuna sessione attiva.".to_string());
+            self.push_message("No active session.".to_string());
         }
     }
 
     fn voice_where(&mut self) {
         if let Some(session) = &self.session_snapshot {
             let chapter_info = format!(
-                "capitolo {}/{} ({})",
+                "chapter {}/{} ({})",
                 session.section_index + 1,
                 session.section_count,
                 session.section_title,
@@ -671,9 +671,9 @@ impl App {
             } else {
                 format!("chunk {}", session.chunk_index + 1)
             };
-            self.push_message(format!("Posizione: {chapter_info}, {chunk_info}"));
+            self.push_message(format!("Position: {chapter_info}, {chunk_info}"));
         } else {
-            self.push_message("Nessuna sessione attiva.".to_string());
+            self.push_message("No active session.".to_string());
         }
     }
 
@@ -700,7 +700,7 @@ impl App {
             Some("resume") => self.run_async_shortcut("Resume", BackendClient::resume_session),
             Some("next_chapter") => self.navigate_next_chapter(),
             Some("prev_chapter") => self.navigate_previous_chapter(),
-            Some("note") => self.push_message("Nota: usa /note <testo> per ora.".to_string()),
+            Some("note") => self.push_message("Note: use /note <text> for now.".to_string()),
             Some("bookmark") => self.voice_bookmark(),
             Some("where") => self.voice_where(),
             _ => {}
