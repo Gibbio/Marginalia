@@ -380,9 +380,72 @@ impl BetaBackendClient {
             }
         }
 
-        // STT: Apple native (macOS) > Whisper > Vosk > fake
+        // Command STT priority (highest wins): Apple > Vosk > Whisper > fake.
+        // Whisper is processed first so Vosk/Apple can override it for commands;
+        // Whisper is always installed as the dictation backend when present.
         #[allow(unused_mut, unused_variables)]
         let mut stt_label = "fake";
+        #[allow(unused_mut, unused_variables)]
+        let mut dictation_label = "fake";
+
+        #[cfg(feature = "whisper-stt")]
+        if let Some(model_path) = config.stt.whisper.model_path {
+            let mut whisper_config = WhisperConfig::new(&model_path);
+            if let Some(language) = config.stt.whisper.language.clone() {
+                whisper_config.language = language;
+            }
+            if let Some(v) = config.stt.whisper.speech_threshold {
+                whisper_config.speech_threshold = v;
+            }
+            if let Some(v) = config.stt.whisper.max_record_seconds {
+                whisper_config.max_duration_seconds = v;
+            }
+            if let Some(v) = config.stt.whisper.silence_timeout {
+                whisper_config.silence_timeout_seconds = v;
+            }
+
+            // Whisper covers commands too — Apple/Vosk below will override if present.
+            let cmd_commands = config.voice_commands.all_words();
+            runtime.set_command_recognizer(WhisperCommandRecognizer::new(
+                whisper_config.clone(),
+                cmd_commands,
+            ));
+            stt_label = "whisper";
+
+            runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(whisper_config));
+            runtime.set_provider_doctor_blob(
+                "whisper_dictation_stt",
+                json!({ "ready": true, "model_path": model_path.display().to_string() }),
+            );
+            dictation_label = "whisper";
+        }
+
+        #[cfg(feature = "vosk-stt")]
+        if let Some(model_path) = config.stt.vosk.model_path {
+            let commands = config.voice_commands.all_words();
+            let mut vosk_config = VoskConfig::new(&model_path, commands);
+            match &config.stt.vosk.speech_threshold {
+                crate::config::SpeechThreshold::Auto => {
+                    // Use a low base threshold — the adaptive noise floor handles the rest
+                    vosk_config.speech_threshold = 500;
+                }
+                crate::config::SpeechThreshold::Fixed(v) => {
+                    vosk_config.speech_threshold = *v;
+                }
+            }
+            if let Some(v) = config.stt.vosk.silence_timeout {
+                vosk_config.silence_timeout_seconds = v;
+            }
+            if let Some(v) = config.stt.vosk.min_speech_ms {
+                vosk_config.min_speech_duration_ms = v;
+            }
+            runtime.set_command_recognizer(VoskCommandRecognizer::new(vosk_config));
+            runtime.set_provider_doctor_blob(
+                "vosk",
+                json!({ "ready": true, "model_path": model_path.display().to_string() }),
+            );
+            stt_label = "vosk";
+        }
 
         #[cfg(feature = "apple-stt")]
         if let Some(apple_cfg) = &config.stt.apple {
@@ -411,69 +474,6 @@ impl BetaBackendClient {
                     eprintln!("[apple-stt] {e}");
                 }
             }
-        }
-        #[cfg(feature = "vosk-stt")]
-        if let Some(model_path) = config.stt.vosk.model_path {
-            let commands = config.voice_commands.all_words();
-            let mut vosk_config = VoskConfig::new(&model_path, commands);
-            match &config.stt.vosk.speech_threshold {
-                crate::config::SpeechThreshold::Auto => {
-                    // Use a low base threshold — the adaptive noise floor handles the rest
-                    vosk_config.speech_threshold = 500;
-                }
-                crate::config::SpeechThreshold::Fixed(v) => {
-                    vosk_config.speech_threshold = *v;
-                }
-            }
-            if let Some(v) = config.stt.vosk.silence_timeout {
-                vosk_config.silence_timeout_seconds = v;
-            }
-            if let Some(v) = config.stt.vosk.min_speech_ms {
-                vosk_config.min_speech_duration_ms = v;
-            }
-            runtime.set_command_recognizer(VoskCommandRecognizer::new(vosk_config));
-            runtime.set_provider_doctor_blob(
-                "vosk",
-                json!({ "ready": true, "model_path": model_path.display().to_string() }),
-            );
-            stt_label = "vosk";
-        }
-
-        // Dictation STT: Whisper se [stt.whisper] model_path è configurato
-        #[allow(unused_mut, unused_variables)]
-        let mut dictation_label = "fake";
-        #[cfg(feature = "whisper-stt")]
-        if let Some(model_path) = config.stt.whisper.model_path {
-            let mut whisper_config = WhisperConfig::new(&model_path);
-            if let Some(language) = config.stt.whisper.language.clone() {
-                whisper_config.language = language;
-            }
-            if let Some(v) = config.stt.whisper.speech_threshold {
-                whisper_config.speech_threshold = v;
-            }
-            if let Some(v) = config.stt.whisper.max_record_seconds {
-                whisper_config.max_duration_seconds = v;
-            }
-            if let Some(v) = config.stt.whisper.silence_timeout {
-                whisper_config.silence_timeout_seconds = v;
-            }
-
-            // Optionally use Whisper for voice commands (more accurate than Vosk)
-            if config.stt.whisper.use_for_commands {
-                let cmd_commands = config.voice_commands.all_words();
-                runtime.set_command_recognizer(WhisperCommandRecognizer::new(
-                    whisper_config.clone(),
-                    cmd_commands,
-                ));
-                stt_label = "whisper";
-            }
-
-            runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(whisper_config));
-            runtime.set_provider_doctor_blob(
-                "whisper_dictation_stt",
-                json!({ "ready": true, "model_path": model_path.display().to_string() }),
-            );
-            dictation_label = "whisper";
         }
 
         // Voice command monitor — open and run in background thread.
