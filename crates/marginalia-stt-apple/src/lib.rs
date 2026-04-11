@@ -17,12 +17,15 @@ use std::time::Duration;
 
 const PROVIDER_NAME: &str = "apple-stt";
 
+/// Bump when SWIFT_HELPER_SOURCE changes so the cached binary gets recompiled.
+const HELPER_VERSION: u32 = 2;
+
 static COMPILE_HELPER: Once = Once::new();
 
 fn helper_path() -> PathBuf {
     std::env::temp_dir()
         .join("marginalia-stt-apple")
-        .join("stt-helper")
+        .join(format!("stt-helper-v{HELPER_VERSION}"))
 }
 
 fn ensure_helper() -> Result<PathBuf, String> {
@@ -61,15 +64,28 @@ fn ensure_helper() -> Result<PathBuf, String> {
 pub struct AppleCommandRecognizer {
     language: String,
     commands: Vec<String>,
+    silence_timeout: f64,
+}
+
+/// Joins commands with `|` for the helper CLI arg. Pipe is safe because trigger
+/// words are alphanumeric/space (defined in user toml).
+fn join_commands(commands: &[String]) -> String {
+    commands.join("|")
 }
 
 impl AppleCommandRecognizer {
-    pub fn new(language: &str, commands: Vec<String>) -> Result<Self, String> {
+    pub fn new(
+        language: &str,
+        commands: Vec<String>,
+        silence_timeout: f64,
+    ) -> Result<Self, String> {
         let helper = ensure_helper()?;
 
         // Quick check: run helper for 0.5s to see if it errors immediately
         let output = Command::new(&helper)
             .arg(language)
+            .arg(format!("{silence_timeout}"))
+            .arg(join_commands(&commands))
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
@@ -90,6 +106,7 @@ impl AppleCommandRecognizer {
         Ok(Self {
             language: language.to_string(),
             commands,
+            silence_timeout,
         })
     }
 }
@@ -138,7 +155,11 @@ impl CommandRecognizer for AppleCommandRecognizer {
     }
 
     fn open_interrupt_monitor(&mut self) -> Box<dyn SpeechInterruptMonitor> {
-        match AppleInterruptMonitor::new(&self.language, self.commands.clone()) {
+        match AppleInterruptMonitor::new(
+            &self.language,
+            self.commands.clone(),
+            self.silence_timeout,
+        ) {
             Ok(m) => Box::new(m),
             Err(e) => {
                 eprintln!("[apple-stt] monitor failed: {e}");
@@ -157,10 +178,16 @@ struct AppleInterruptMonitor {
 }
 
 impl AppleInterruptMonitor {
-    fn new(language: &str, commands: Vec<String>) -> Result<Self, String> {
+    fn new(
+        language: &str,
+        commands: Vec<String>,
+        silence_timeout: f64,
+    ) -> Result<Self, String> {
         let helper = ensure_helper()?;
         let mut child = Command::new(&helper)
             .arg(language)
+            .arg(format!("{silence_timeout}"))
+            .arg(join_commands(&commands))
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .stdin(Stdio::piped()) // kept open — helper exits when this closes
@@ -264,12 +291,23 @@ impl SpeechInterruptMonitor for ErrorMonitor {
 
 /// Swift helper: persistent process that keeps the mic open and prints
 /// each recognized phrase on a new line to stdout. Runs until killed.
+///
+/// CLI: `stt-helper <language> <silence_timeout_seconds> <commands_pipe_separated>`
+///
+/// If a partial result already contains one of the trigger words, it is emitted
+/// immediately (fast-path) instead of waiting for the silence timer.
 const SWIFT_HELPER_SOURCE: &str = r#"
 import Foundation
 import Speech
 import AVFoundation
 
 let language = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "it-IT"
+let silenceTimeout = CommandLine.arguments.count > 2
+    ? (Double(CommandLine.arguments[2]) ?? 0.8)
+    : 0.8
+let triggerWords: [String] = CommandLine.arguments.count > 3 && !CommandLine.arguments[3].isEmpty
+    ? CommandLine.arguments[3].split(separator: "|").map { $0.lowercased() }
+    : []
 
 // Unbuffered stdout
 setbuf(stdout, nil)
@@ -324,6 +362,12 @@ func scheduleRestart() {
     }
 }
 
+func containsTrigger(_ text: String) -> Bool {
+    if triggerWords.isEmpty { return false }
+    let lower = text.lowercased()
+    return triggerWords.contains(where: { lower.contains($0) })
+}
+
 func startRecognitionTask() {
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
@@ -352,7 +396,16 @@ func startRecognitionTask() {
                 return
             }
 
-            // Silence timer: emit after 1.5s of no new partials
+            // Fast-path: if the current partial already contains a trigger word,
+            // emit immediately and restart — no need to wait for silence.
+            if !emitted && containsTrigger(lastText) {
+                print(lastText)
+                emitted = true
+                scheduleRestart()
+                return
+            }
+
+            // Silence timer: emit after `silenceTimeout` seconds of no new partials
             let timer = DispatchWorkItem {
                 if !lastText.isEmpty && !emitted {
                     print(lastText)
@@ -361,7 +414,7 @@ func startRecognitionTask() {
                 scheduleRestart()
             }
             silenceTimer = timer
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timer)
+            DispatchQueue.main.asyncAfter(deadline: .now() + silenceTimeout, execute: timer)
         }
 
         if error != nil && !isRestarting {
