@@ -237,7 +237,7 @@ tui-rs: $(TUI_TOML)
 	if [ -f "$$WHISPER_MODEL" ]; then \
 		if [ "$$OS" = "Darwin" ]; then _add whisper-stt-metal; else _add whisper-stt; fi; \
 	fi; \
-	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then _add mlx-tts; fi; \
+	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then _add mlx-tts; _add apple-stt; fi; \
 	echo ""; \
 	echo "=== marginalia-tui ==="; \
 	echo "  platform: $$OS $$ARCH"; \
