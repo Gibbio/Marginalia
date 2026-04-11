@@ -221,6 +221,43 @@ Both engines keep the microphone stream open for the entire session
 (no permission icon flickering). Command monitor thread runs independently
 from the runtime, so there's no lock contention while navigating or replaying.
 
+### Echo filter — the TTS talking to itself
+
+When the TTS reads a document aloud and the mic picks up the playback, the
+STT transcribes the TTS audio as if the user had spoken. Trigger words inside
+the document would then fire spurious commands.
+
+To prevent this, `apps/tui-rs` depends on **`stt-echo-filter`** (external
+crate, https://github.com/Gibbio/stt-echo-filter), a tiny pure-Rust library
+that strips playback echo from STT transcripts at the WORD level. It's a
+**post-STT** filter, not an acoustic one — it doesn't touch audio, only text.
+
+Algorithm: per-word budget. Each word in the currently-playing chunk
+"consumes" one occurrence in the STT output. Surplus words form a delta that
+represents what the user actually said, in order. Multi-word triggers like
+`"prossimo capitolo"` still work because the delta preserves order.
+
+Where it's wired: `App::handle_voice_command(raw: &str)` takes the raw STT
+utterance, looks up `session_snapshot.chunk_text` and `playback_state`, and
+— only when `playback_state == "playing"` — calls `stt_echo_filter::strip_echo`
+before passing the result to `voice_commands.resolve_action`. If the filter
+absorbs everything, a debug line is logged to the Log pane and no action is
+fired. The monitor thread still pre-matches a command internally but that
+pre-match is intentionally **ignored** by `main.rs`; the filtering happens
+later so it can see the playback state.
+
+Known trade-off: if the user legitimately says a word that is ALSO in the
+current chunk text, the budget absorbs it as echo and the command is
+dropped. Mitigation: use synonyms in `[voice_commands]`, or speak between
+chunks. For harder cases we may one day add real acoustic AEC — see
+"Advanced echo handling" in NEXT.md.
+
+**Do not** try to apply the filter inside the STT monitor thread — it
+doesn't know about playback state. It lives in `App` where session state is
+available. And **do not** remove the `_cmd` channel field in
+`poll_voice_event` even though main.rs ignores it — other future consumers
+(e.g. a pre-playback command prompt) may still want the pre-matched hint.
+
 ## Key conventions
 
 - Italian is the primary language (documents, TTS voices, STT commands)
@@ -260,3 +297,11 @@ from the runtime, so there's no lock contention while navigating or replaying.
   vice versa: they must move together, otherwise users run a stale cached binary.
 - Don't link AppKit/NSSound into the Swift helper — stick to Foundation,
   Speech, AVFoundation, AudioToolbox. No GUI runtime dependency.
+- Don't apply the `stt-echo-filter` inside the STT crates or the monitor
+  thread — it lives in `App::handle_voice_command` where the session
+  snapshot (chunk text + playback state) is reachable. The monitor thread
+  is deliberately dumb about playback.
+- Don't vendor `stt-echo-filter` into the Marginalia tree — it is an
+  independent crate at https://github.com/Gibbio/stt-echo-filter, pulled
+  via git dependency in `apps/tui-rs/Cargo.toml`. Changes to the algorithm
+  go there, then we bump the git reference here.

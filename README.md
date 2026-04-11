@@ -95,6 +95,14 @@ Apple STT (`marginalia-stt-apple`) needs no model download — it uses the
 Neural Engine via SFSpeechRecognizer. Requires macOS Dictation to be enabled
 (`System Settings → Keyboard → Dictation → ON`).
 
+## External dependencies born here
+
+- **[stt-echo-filter](https://github.com/Gibbio/stt-echo-filter)** — a
+  zero-dependency Rust crate that strips TTS playback echo from STT
+  transcripts at the word level. Born inside Marginalia as a post-STT
+  echo rejection layer, spun out as a standalone library so other voice
+  apps can reuse it. Pulled via git dependency in `apps/tui-rs/Cargo.toml`.
+
 Verify setup:
 
 ```bash
