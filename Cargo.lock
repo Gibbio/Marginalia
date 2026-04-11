@@ -1593,7 +1593,6 @@ dependencies = [
  "marginalia-playback-host",
  "marginalia-runtime",
  "marginalia-stt-apple",
- "marginalia-stt-vosk",
  "marginalia-stt-whisper",
  "marginalia-tts-kokoro",
  "marginalia-tts-mlx",

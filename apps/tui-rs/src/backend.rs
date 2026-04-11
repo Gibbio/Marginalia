@@ -3,8 +3,6 @@ use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::{RuntimeFrontend, SqliteRuntime};
 #[cfg(feature = "apple-stt")]
 use marginalia_stt_apple::AppleCommandRecognizer;
-#[cfg(feature = "vosk-stt")]
-use marginalia_stt_vosk::{VoskCommandRecognizer, VoskConfig};
 #[cfg(feature = "whisper-stt")]
 use marginalia_stt_whisper::{
     WhisperCommandRecognizer, WhisperConfig, WhisperDictationTranscriber,
@@ -380,100 +378,124 @@ impl BetaBackendClient {
             }
         }
 
-        // Command STT priority (highest wins): Apple > Vosk > Whisper > fake.
-        // Whisper is processed first so Vosk/Apple can override it for commands;
-        // Whisper is always installed as the dictation backend when present.
+        // STT engine: one engine handles both commands and dictation, with
+        // per-context tuning from [stt.commands] and [stt.dictation].
         #[allow(unused_mut, unused_variables)]
         let mut stt_label = "fake";
         #[allow(unused_mut, unused_variables)]
         let mut dictation_label = "fake";
+        let stt_engine = config.stt.engine.to_lowercase();
 
-        #[cfg(feature = "whisper-stt")]
-        if let Some(model_path) = config.stt.whisper.model_path {
-            let mut whisper_config = WhisperConfig::new(&model_path);
-            if let Some(language) = config.stt.whisper.language.clone() {
-                whisper_config.language = language;
+        if stt_engine == "apple" {
+            #[cfg(feature = "apple-stt")]
+            {
+                let commands = config.voice_commands.all_words();
+                // Apple wants BCP-47 (it-IT). Accept ISO ("it") and upgrade.
+                let language = match config.stt.language.as_deref() {
+                    None => "it-IT".to_string(),
+                    Some(l) if l.contains('-') => l.to_string(),
+                    Some(l) if l.eq_ignore_ascii_case("it") => "it-IT".to_string(),
+                    Some(l) if l.eq_ignore_ascii_case("en") => "en-US".to_string(),
+                    Some(l) => l.to_string(),
+                };
+                let silence_timeout = config.stt.commands.silence_timeout.unwrap_or(0.8);
+                match AppleCommandRecognizer::new(&language, commands, silence_timeout) {
+                    Ok(rec) => {
+                        runtime.set_command_recognizer(rec);
+                        runtime.set_provider_doctor_blob(
+                            "apple_stt",
+                            json!({
+                                "ready": true,
+                                "language": language,
+                                "silence_timeout": silence_timeout,
+                            }),
+                        );
+                        stt_label = "apple";
+                    }
+                    Err(e) => {
+                        runtime.set_provider_doctor_blob(
+                            "apple_stt",
+                            json!({ "ready": false, "error": e }),
+                        );
+                        eprintln!("[apple-stt] {e}");
+                    }
+                }
+                // Apple dictation requires extending the Swift helper to a
+                // long-form mode. Until then, dictation stays disabled when
+                // engine = apple. See NEXT.md.
+                eprintln!(
+                    "[stt] note: engine=apple — dictation not yet implemented \
+                     for Apple, /note will be unavailable. Use engine=whisper \
+                     if you need dictation."
+                );
             }
-            if let Some(v) = config.stt.whisper.speech_threshold {
-                whisper_config.speech_threshold = v;
-            }
-            if let Some(v) = config.stt.whisper.max_record_seconds {
-                whisper_config.max_duration_seconds = v;
-            }
-            if let Some(v) = config.stt.whisper.silence_timeout {
-                whisper_config.silence_timeout_seconds = v;
-            }
+            #[cfg(not(feature = "apple-stt"))]
+            eprintln!("[stt] engine=apple but apple-stt feature is not built in");
+        } else if stt_engine == "whisper" {
+            #[cfg(feature = "whisper-stt")]
+            if let Some(model_path) = config.stt.whisper.model_path.clone() {
+                // Whisper wants ISO ("it"). Accept BCP-47 ("it-IT") and downgrade.
+                let language = config
+                    .stt
+                    .language
+                    .clone()
+                    .map(|l| l.split('-').next().unwrap_or("it").to_string())
+                    .unwrap_or_else(|| "it".to_string());
 
-            // Whisper covers commands too — Apple/Vosk below will override if present.
-            let cmd_commands = config.voice_commands.all_words();
-            runtime.set_command_recognizer(WhisperCommandRecognizer::new(
-                whisper_config.clone(),
-                cmd_commands,
-            ));
-            stt_label = "whisper";
+                // Command-context Whisper: short defaults tuned for trigger words.
+                let mut whisper_command_config = WhisperConfig::new(&model_path);
+                whisper_command_config.language = language.clone();
+                whisper_command_config.max_duration_seconds = 4.0;
+                whisper_command_config.silence_timeout_seconds = 0.8;
+                if let Some(v) = config.stt.commands.silence_timeout {
+                    whisper_command_config.silence_timeout_seconds = v;
+                }
+                if let Some(v) = config.stt.commands.max_record_seconds {
+                    whisper_command_config.max_duration_seconds = v;
+                }
+                if let Some(v) = config.stt.commands.speech_threshold {
+                    whisper_command_config.speech_threshold = v;
+                }
+                let cmd_commands = config.voice_commands.all_words();
+                runtime.set_command_recognizer(WhisperCommandRecognizer::new(
+                    whisper_command_config,
+                    cmd_commands,
+                ));
+                stt_label = "whisper";
 
-            runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(whisper_config));
-            runtime.set_provider_doctor_blob(
-                "whisper_dictation_stt",
-                json!({ "ready": true, "model_path": model_path.display().to_string() }),
+                // Dictation-context Whisper: long defaults from WhisperConfig::new
+                // (60s, 1.5s, 500), then [stt.dictation] overrides.
+                let mut whisper_dictation_config = WhisperConfig::new(&model_path);
+                whisper_dictation_config.language = language;
+                if let Some(v) = config.stt.dictation.silence_timeout {
+                    whisper_dictation_config.silence_timeout_seconds = v;
+                }
+                if let Some(v) = config.stt.dictation.max_record_seconds {
+                    whisper_dictation_config.max_duration_seconds = v;
+                }
+                if let Some(v) = config.stt.dictation.speech_threshold {
+                    whisper_dictation_config.speech_threshold = v;
+                }
+                runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(
+                    whisper_dictation_config.clone(),
+                ));
+                runtime.set_provider_doctor_blob(
+                    "whisper_dictation_stt",
+                    json!({
+                        "ready": true,
+                        "model_path": model_path.display().to_string(),
+                        "max_record_seconds": whisper_dictation_config.max_duration_seconds,
+                        "silence_timeout": whisper_dictation_config.silence_timeout_seconds,
+                    }),
+                );
+                dictation_label = "whisper";
+            }
+            #[cfg(not(feature = "whisper-stt"))]
+            eprintln!("[stt] engine=whisper but whisper-stt feature is not built in");
+        } else {
+            eprintln!(
+                "[stt] unknown engine '{stt_engine}' — valid choices: \"apple\", \"whisper\""
             );
-            dictation_label = "whisper";
-        }
-
-        #[cfg(feature = "vosk-stt")]
-        if let Some(model_path) = config.stt.vosk.model_path {
-            let commands = config.voice_commands.all_words();
-            let mut vosk_config = VoskConfig::new(&model_path, commands);
-            match &config.stt.vosk.speech_threshold {
-                crate::config::SpeechThreshold::Auto => {
-                    // Use a low base threshold — the adaptive noise floor handles the rest
-                    vosk_config.speech_threshold = 500;
-                }
-                crate::config::SpeechThreshold::Fixed(v) => {
-                    vosk_config.speech_threshold = *v;
-                }
-            }
-            if let Some(v) = config.stt.vosk.silence_timeout {
-                vosk_config.silence_timeout_seconds = v;
-            }
-            if let Some(v) = config.stt.vosk.min_speech_ms {
-                vosk_config.min_speech_duration_ms = v;
-            }
-            runtime.set_command_recognizer(VoskCommandRecognizer::new(vosk_config));
-            runtime.set_provider_doctor_blob(
-                "vosk",
-                json!({ "ready": true, "model_path": model_path.display().to_string() }),
-            );
-            stt_label = "vosk";
-        }
-
-        #[cfg(feature = "apple-stt")]
-        if let Some(apple_cfg) = &config.stt.apple {
-            let commands = config.voice_commands.all_words();
-            let language = config
-                .stt
-                .whisper
-                .language
-                .clone()
-                .unwrap_or_else(|| "it-IT".to_string());
-            let silence_timeout = apple_cfg.silence_timeout.unwrap_or(0.8);
-            match AppleCommandRecognizer::new(&language, commands, silence_timeout) {
-                Ok(rec) => {
-                    runtime.set_command_recognizer(rec);
-                    runtime.set_provider_doctor_blob(
-                        "apple_stt",
-                        json!({ "ready": true, "language": language, "silence_timeout": silence_timeout }),
-                    );
-                    stt_label = "apple";
-                }
-                Err(e) => {
-                    runtime.set_provider_doctor_blob(
-                        "apple_stt",
-                        json!({ "ready": false, "error": e }),
-                    );
-                    eprintln!("[apple-stt] {e}");
-                }
-            }
         }
 
         // Voice command monitor — open and run in background thread.
