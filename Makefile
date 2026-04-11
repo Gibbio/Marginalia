@@ -237,12 +237,17 @@ tui-rs: $(TUI_TOML)
 	if [ -f "$$WHISPER_MODEL" ]; then \
 		if [ "$$OS" = "Darwin" ]; then _add whisper-stt-metal; else _add whisper-stt; fi; \
 	fi; \
-	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then _add mlx-tts; _add apple-stt; fi; \
+	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
+		_add mlx-tts; _add apple-stt; \
+	fi; \
 	echo ""; \
 	echo "=== marginalia-tui ==="; \
 	echo "  platform: $$OS $$ARCH"; \
 	echo "  config:   $(TUI_TOML)"; \
 	echo "  features: $${FEATURES:-none}"; \
+	if echo "$$FEATURES" | grep -q "apple-stt"; then \
+		echo "  note:     Apple STT requires: System Settings → Keyboard → Dictation → ON"; \
+	fi; \
 	echo "========================"; \
 	echo ""; \
 	VOSK_PATH=$(VOSK_LIB_DIR) \

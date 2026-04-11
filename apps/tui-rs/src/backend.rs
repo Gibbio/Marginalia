@@ -395,10 +395,18 @@ impl BetaBackendClient {
             match AppleCommandRecognizer::new(&language, commands) {
                 Ok(rec) => {
                     runtime.set_command_recognizer(rec);
+                    runtime.set_provider_doctor_blob(
+                        "apple_stt",
+                        json!({ "ready": true, "language": language }),
+                    );
                     stt_label = "apple";
                 }
                 Err(e) => {
-                    eprintln!("[apple-stt] init failed: {e}");
+                    runtime.set_provider_doctor_blob(
+                        "apple_stt",
+                        json!({ "ready": false, "error": e }),
+                    );
+                    eprintln!("[apple-stt] {e}");
                 }
             }
         }

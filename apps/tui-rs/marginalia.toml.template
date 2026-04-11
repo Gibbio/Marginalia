@@ -5,6 +5,7 @@
 
 database_path = ".marginalia/beta.sqlite3"
 # debug_stt = true   # mostra nel Log cosa sente il microfono
+# apple_stt = true   # Apple Neural Engine STT (macOS, richiede Dictation abilitata)
 
 # ── TTS ───────────────────────────────────────────────────────
 __TTS_SECTION__

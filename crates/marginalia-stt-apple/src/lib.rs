@@ -65,7 +65,28 @@ pub struct AppleCommandRecognizer {
 
 impl AppleCommandRecognizer {
     pub fn new(language: &str, commands: Vec<String>) -> Result<Self, String> {
-        ensure_helper()?;
+        let helper = ensure_helper()?;
+
+        // Quick check: run helper for 0.5s to see if it errors immediately
+        let output = Command::new(&helper)
+            .arg(language)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                std::thread::sleep(Duration::from_millis(500));
+                let _ = child.kill();
+                child.wait_with_output()
+            })
+            .map_err(|e| format!("helper check failed: {e}"))?;
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("Siri and Dictation are disabled") {
+            return Err("Apple STT requires macOS Dictation to be enabled. \
+                 Enable in: System Settings → Keyboard → Dictation → ON"
+                .to_string());
+        }
+
         Ok(Self {
             language: language.to_string(),
             commands,
