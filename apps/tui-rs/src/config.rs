@@ -184,6 +184,21 @@ pub struct VoiceCommandsSection {
     /// Words that resume playback. Default: ["riprendi", "resume"]
     #[serde(default = "default_resume")]
     pub resume: Vec<String>,
+    /// Words that jump to next chapter. Default: ["capitolo", "prossimo capitolo"]
+    #[serde(default = "default_next_chapter")]
+    pub next_chapter: Vec<String>,
+    /// Words that jump to previous chapter. Default: ["capitolo indietro", "capitolo precedente"]
+    #[serde(default = "default_prev_chapter")]
+    pub prev_chapter: Vec<String>,
+    /// Words that create a bookmark note. Default: ["segna", "segnalibro"]
+    #[serde(default = "default_bookmark")]
+    pub bookmark: Vec<String>,
+    /// Words that start note dictation. Default: ["nota", "appunto"]
+    #[serde(default = "default_note")]
+    pub note: Vec<String>,
+    /// Words that report current position. Default: ["dove sono", "posizione"]
+    #[serde(default = "default_where")]
+    pub r#where: Vec<String>,
 }
 
 impl Default for VoiceCommandsSection {
@@ -195,6 +210,11 @@ impl Default for VoiceCommandsSection {
             stop: default_stop(),
             repeat: default_repeat(),
             resume: default_resume(),
+            next_chapter: default_next_chapter(),
+            prev_chapter: default_prev_chapter(),
+            bookmark: default_bookmark(),
+            note: default_note(),
+            r#where: default_where(),
         }
     }
 }
@@ -203,33 +223,50 @@ impl VoiceCommandsSection {
     /// Flat list of all trigger words (for the STT backend).
     pub fn all_words(&self) -> Vec<String> {
         let mut words = Vec::new();
-        words.extend(self.pause.clone());
-        words.extend(self.next.clone());
-        words.extend(self.back.clone());
-        words.extend(self.stop.clone());
-        words.extend(self.repeat.clone());
-        words.extend(self.resume.clone());
+        for list in [
+            &self.pause,
+            &self.next,
+            &self.back,
+            &self.stop,
+            &self.repeat,
+            &self.resume,
+            &self.next_chapter,
+            &self.prev_chapter,
+            &self.bookmark,
+            &self.note,
+            &self.r#where,
+        ] {
+            words.extend(list.clone());
+        }
         words
     }
 
     /// Map a recognized word back to an action name.
+    /// Checks longer phrases first to avoid partial matches
+    /// (e.g. "capitolo" matching before "capitolo indietro").
     pub fn resolve_action(&self, word: &str) -> Option<&'static str> {
         let w = word.to_lowercase();
-        if self.pause.iter().any(|t| w.contains(&t.to_lowercase())) {
-            Some("pause")
-        } else if self.next.iter().any(|t| w.contains(&t.to_lowercase())) {
-            Some("next")
-        } else if self.back.iter().any(|t| w.contains(&t.to_lowercase())) {
-            Some("back")
-        } else if self.stop.iter().any(|t| w.contains(&t.to_lowercase())) {
-            Some("stop")
-        } else if self.repeat.iter().any(|t| w.contains(&t.to_lowercase())) {
-            Some("repeat")
-        } else if self.resume.iter().any(|t| w.contains(&t.to_lowercase())) {
-            Some("resume")
-        } else {
-            None
+        let checks: &[(&Vec<String>, &str)] = &[
+            // Longer phrases first
+            (&self.next_chapter, "next_chapter"),
+            (&self.prev_chapter, "prev_chapter"),
+            (&self.bookmark, "bookmark"),
+            (&self.note, "note"),
+            (&self.r#where, "where"),
+            // Then single words
+            (&self.pause, "pause"),
+            (&self.next, "next"),
+            (&self.back, "back"),
+            (&self.stop, "stop"),
+            (&self.repeat, "repeat"),
+            (&self.resume, "resume"),
+        ];
+        for (triggers, action) in checks {
+            if triggers.iter().any(|t| w.contains(&t.to_lowercase())) {
+                return Some(action);
+            }
         }
+        None
     }
 }
 
@@ -250,6 +287,21 @@ fn default_repeat() -> Vec<String> {
 }
 fn default_resume() -> Vec<String> {
     vec!["riprendi".into(), "resume".into()]
+}
+fn default_next_chapter() -> Vec<String> {
+    vec!["prossimo capitolo".into(), "capitolo avanti".into()]
+}
+fn default_prev_chapter() -> Vec<String> {
+    vec!["capitolo indietro".into(), "capitolo precedente".into()]
+}
+fn default_bookmark() -> Vec<String> {
+    vec!["segna".into(), "segnalibro".into()]
+}
+fn default_note() -> Vec<String> {
+    vec!["nota".into(), "appunto".into()]
+}
+fn default_where() -> Vec<String> {
+    vec!["dove sono".into(), "posizione".into()]
 }
 
 #[derive(Debug, Deserialize, Default)]
