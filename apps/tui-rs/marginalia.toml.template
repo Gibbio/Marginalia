@@ -11,12 +11,12 @@ __TTS_SECTION__
 # ── Comandi vocali ────────────────────────────────────────────
 # Mappa azione → parole trigger. Aggiungi sinonimi in qualsiasi lingua.
 [voice_commands]
-pause = ["pausa", "pause"]
-next = ["avanti", "next"]
-back = ["indietro", "back"]
+pause = ["pausa", "ferma"]
+next = ["avanti", "prossimo"]
+back = ["indietro"]
 stop = ["stop", "basta"]
-repeat = ["ripeti", "repeat"]
-resume = ["riprendi", "resume", "continua"]
+repeat = ["ripeti"]
+resume = ["riprendi", "continua"]
 
 # ── STT — scegli UNO tra Whisper e Vosk ──────────────────────
 __WHISPER_SECTION__
