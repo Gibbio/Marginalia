@@ -147,9 +147,15 @@ fn run_tui(
         app.flush_pending_play();
         app.poll_async_command();
 
-        if let Some(cmd) = app.poll_voice_command() {
-            logger.info(format!("voice-command received: {cmd}"));
-            app.handle_voice_command(&cmd);
+        if let Some((raw, cmd)) = app.poll_voice_event() {
+            if let Some(raw) = &raw {
+                app.push_message(format!("stt: \"{raw}\""));
+                logger.info(format!("stt heard: {raw}"));
+            }
+            if let Some(cmd) = &cmd {
+                logger.info(format!("voice-command: {cmd}"));
+                app.handle_voice_command(cmd);
+            }
         }
 
         if event::poll(Duration::from_millis(100))
