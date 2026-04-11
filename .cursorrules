@@ -155,3 +155,5 @@ The monitor thread runs independently from the runtime (no lock contention).
 - Don't invent phonemizer rules — check misaki (hexgrad/misaki) first
 - Don't call espeak-ng on full text (strips punctuation) — call per clause
 - Don't open/close audio streams per capture cycle — keep them persistent
+- Don't change core traits without checking all implementations compile
+- Don't add a new provider without at least a basic smoke test
