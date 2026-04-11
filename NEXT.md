@@ -64,6 +64,8 @@
 ### STT
 - [ ] Voice note dictation via Whisper transcriber (record → transcribe → save as note).
 - [ ] Evaluate larger Whisper models (medium, large-v3-turbo) for better accuracy.
+- [ ] **Apple native STT** (`SFSpeechRecognizer`) for macOS desktop app and iOS. Runs on Neural Engine, same as Siri/dictation — faster and more accurate than Whisper for supported languages. Not available as standalone Rust crate, requires Objective-C/Swift bridge (via `objc2` crate or Swift package). Ideal for Tauri desktop and native iOS apps.
+- [ ] Android native STT (`SpeechRecognizer` API) for Android app.
 
 ### Sync
 - [ ] Reading position sync across devices.
