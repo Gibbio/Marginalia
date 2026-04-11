@@ -13,8 +13,10 @@ whisper-stt-cuda  = ["dep:marginalia-stt-whisper", "marginalia-stt-whisper/cuda"
 kokoro-coreml     = ["marginalia-tts-kokoro/coreml"]
 kokoro-cuda       = ["marginalia-tts-kokoro/cuda"]
 mlx-tts           = ["dep:marginalia-tts-mlx"]
+apple-stt         = ["dep:marginalia-stt-apple"]
 
 [dependencies]
+marginalia-stt-apple = { path = "../../crates/marginalia-stt-apple", optional = true }
 marginalia-stt-vosk = { path = "../../crates/marginalia-stt-vosk", optional = true }
 marginalia-stt-whisper = { path = "../../crates/marginalia-stt-whisper", optional = true }
 crossterm = "0.28"

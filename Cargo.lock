@@ -569,7 +569,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1542,6 +1542,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "marginalia-stt-apple"
+version = "0.1.0"
+dependencies = [
+ "marginalia-core",
+]
+
+[[package]]
 name = "marginalia-stt-vosk"
 version = "0.1.0"
 dependencies = [
@@ -1584,6 +1591,7 @@ dependencies = [
  "crossterm",
  "marginalia-playback-host",
  "marginalia-runtime",
+ "marginalia-stt-apple",
  "marginalia-stt-vosk",
  "marginalia-stt-whisper",
  "marginalia-tts-kokoro",
@@ -2309,7 +2317,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2696,7 +2704,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

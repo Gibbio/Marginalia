@@ -1,6 +1,8 @@
 use crate::config::TuiConfig;
 use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::{RuntimeFrontend, SqliteRuntime};
+#[cfg(feature = "apple-stt")]
+use marginalia_stt_apple::AppleCommandRecognizer;
 #[cfg(feature = "vosk-stt")]
 use marginalia_stt_vosk::{VoskCommandRecognizer, VoskConfig};
 #[cfg(feature = "whisper-stt")]
@@ -378,9 +380,28 @@ impl BetaBackendClient {
             }
         }
 
-        // STT: Vosk se [vosk] model_path è configurato
+        // STT: Apple native (macOS) > Whisper > Vosk > fake
         #[allow(unused_mut, unused_variables)]
         let mut stt_label = "fake";
+
+        #[cfg(feature = "apple-stt")]
+        if config.apple_stt {
+            let commands = config.voice_commands.all_words();
+            let language = config
+                .whisper
+                .language
+                .clone()
+                .unwrap_or_else(|| "it-IT".to_string());
+            match AppleCommandRecognizer::new(&language, commands) {
+                Ok(rec) => {
+                    runtime.set_command_recognizer(rec);
+                    stt_label = "apple";
+                }
+                Err(e) => {
+                    eprintln!("[apple-stt] init failed: {e}");
+                }
+            }
+        }
         #[cfg(feature = "vosk-stt")]
         if let Some(model_path) = config.vosk.model_path {
             let commands = config.voice_commands.all_words();

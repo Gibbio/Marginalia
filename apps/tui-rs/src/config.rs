@@ -9,9 +9,14 @@ use std::path::PathBuf;
 pub struct TuiConfig {
     /// Path to the SQLite database. Default: `.marginalia/beta.sqlite3`.
     pub database_path: Option<PathBuf>,
-    /// Show STT raw transcript in Log pane. Works with both Whisper and Vosk.
+    /// Show STT raw transcript in Log pane. Works with all STT backends.
     #[serde(default)]
     pub debug_stt: bool,
+    /// Use Apple native STT (SFSpeechRecognizer) for voice commands.
+    /// macOS only. Faster than Whisper, uses Neural Engine, zero models to download.
+    #[serde(default)]
+    #[cfg_attr(not(feature = "apple-stt"), allow(dead_code))]
+    pub apple_stt: bool,
     #[serde(default)]
     pub kokoro: KokoroSection,
     #[serde(default)]

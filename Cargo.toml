@@ -9,6 +9,7 @@ members = [
     "crates/marginalia-provider-fake",
     "crates/marginalia-runtime",
     "crates/marginalia-storage-sqlite",
+    "crates/marginalia-stt-apple",
     "crates/marginalia-stt-vosk",
     "crates/marginalia-stt-whisper",
     "crates/marginalia-tts-kokoro",

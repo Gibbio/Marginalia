@@ -1,0 +1,8 @@
+[package]
+name = "marginalia-stt-apple"
+version = "0.1.0"
+edition = "2021"
+description = "Apple native STT via SFSpeechRecognizer — macOS Neural Engine, zero models"
+
+[dependencies]
+marginalia-core = { path = "../marginalia-core" }
