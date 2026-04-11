@@ -163,7 +163,7 @@ impl AppleInterruptMonitor {
             .arg(language)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped()) // kept open — helper exits when this closes
             .spawn()
             .map_err(|e| format!("spawn helper: {e}"))?;
 
@@ -333,6 +333,7 @@ func startRecognitionTask() {
     currentRequest = request
 
     var lastText = ""
+    var emitted = false
     var silenceTimer: DispatchWorkItem?
 
     recognizer.recognitionTask(with: request) { result, error in
@@ -342,17 +343,20 @@ func startRecognitionTask() {
             lastText = result.bestTranscription.formattedString
 
             if result.isFinal {
-                if !lastText.isEmpty { print(lastText) }
+                if !lastText.isEmpty && !emitted {
+                    print(lastText)
+                }
                 lastText = ""
+                emitted = false
                 scheduleRestart()
                 return
             }
 
             // Silence timer: emit after 1.5s of no new partials
             let timer = DispatchWorkItem {
-                if !lastText.isEmpty {
+                if !lastText.isEmpty && !emitted {
                     print(lastText)
-                    lastText = ""
+                    emitted = true
                 }
                 scheduleRestart()
             }
@@ -361,10 +365,17 @@ func startRecognitionTask() {
         }
 
         if error != nil && !isRestarting {
-            // Only restart on genuine errors, not cancellation
             scheduleRestart()
         }
     }
+}
+
+// Monitor stdin — exit when parent process dies (pipe closes)
+DispatchQueue.global().async {
+    while let _ = readLine() {}
+    // Parent closed stdin — clean exit
+    audioEngine.stop()
+    exit(0)
 }
 
 startRecognitionTask()
