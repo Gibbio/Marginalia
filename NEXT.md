@@ -13,13 +13,38 @@
 - [ ] **Clippy + fmt on all crates**: including optional ones.
 - [ ] **Provider contract tests**: each TTS/STT implementation gets a basic smoke test (e.g. synthesize empty string → error, synthesize short text → valid WAV). Uses `#[cfg(test)]` with mocks, no real models needed.
 
-### Playback engine
-- [ ] **Replace subprocess player with rodio** (`afplay`/`aplay` → in-process audio). Benefits:
-  - Native pause/resume (no kill + re-spawn)
-  - Volume control (`sink.set_volume()`)
-  - End-of-chunk callback → auto-advance to next chunk (continuous reading)
-  - No process spawn overhead per chunk
-  - Cross-platform (macOS, Linux, Windows)
+### Playback engine (done: rodio replaces afplay)
+- [x] ~~Replace subprocess player with rodio~~ (done)
+- [ ] **Auto-play next chunk** when current finishes (rodio `sink.empty()` callback)
+- [ ] **Volume control** via voice command (`sink.set_volume()`)
+
+### Echo cancellation — voice commands during playback
+The user must be able to say "pausa" while Kokoro is reading. The mic picks up
+the TTS output (echo) and the STT transcribes it as false commands.
+
+**Research needed**: how do Teams, Zoom, FaceTime, Alexa handle this?
+- **Microsoft Teams**: uses WebRTC AEC3 + hardware AEC on supported devices. The
+  far-end audio (speaker) is fed as reference to cancel echo from near-end (mic).
+  Also uses AI-based noise suppression layered on top.
+- **Zoom**: proprietary AEC + machine learning noise isolation. Separates human
+  voice from everything else (including speaker echo).
+- **Apple FaceTime/Siri**: uses the Secure Enclave + Neural Engine for on-device
+  AEC. Exposed via `AVAudioSession` with `.voiceChat` mode on iOS — not available
+  to third-party macOS apps via public API.
+- **Amazon Alexa**: hardware AEC (multi-mic array) + keyword detection runs on a
+  separate DSP. The keyword detector is specifically trained to ignore the device's
+  own speaker output.
+
+**Options for Marginalia** (ordered by feasibility):
+- [ ] **Text-based echo rejection** (recommended first step): we know the exact text
+  being read (`chunk_text`). Strip chunk words from STT transcript — if only a
+  trigger word remains, execute it. Zero dependencies, works now.
+- [ ] **aec3 crate**: Rust port of WebRTC AEC3. Feed rodio output samples as reference,
+  clean mic input before STT. Professional quality but requires audio pipeline changes.
+- [ ] **Apple AVAudioSession voiceChat mode**: on iOS this enables system AEC. On macOS
+  it may work for CoreAudio-based apps. Investigate via `objc2-av-foundation`.
+- [ ] **AI voice isolation**: emerging approach (like Krisp, NVIDIA RTX Voice). Would
+  require a dedicated ML model. Overkill for our use case.
 - [ ] **Auto-play next chunk** when current finishes (requires end-of-chunk callback from rodio)
 - [ ] **Voice command: volume up/down** (requires rodio volume control)
 
