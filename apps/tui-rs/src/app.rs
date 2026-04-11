@@ -637,6 +637,46 @@ impl App {
         self.run_async_shortcut("Next chapter", BackendClient::next_chapter);
     }
 
+    fn voice_bookmark(&mut self) {
+        if let Some(session) = &self.session_snapshot {
+            let label = format!(
+                "[SEGNALIBRO] {}, cap.{} chunk{}",
+                session.section_title,
+                session.section_index + 1,
+                session.chunk_index + 1,
+            );
+            match self.backend.create_note(&label) {
+                Ok(_) => self.push_message(format!(
+                    "Segnalibro salvato: cap.{} chunk{}",
+                    session.section_index + 1,
+                    session.chunk_index + 1,
+                )),
+                Err(e) => self.push_message(format!("Errore segnalibro: {e}")),
+            }
+        } else {
+            self.push_message("Nessuna sessione attiva.".to_string());
+        }
+    }
+
+    fn voice_where(&mut self) {
+        if let Some(session) = &self.session_snapshot {
+            let chapter_info = format!(
+                "capitolo {}/{} ({})",
+                session.section_index + 1,
+                session.section_count,
+                session.section_title,
+            );
+            let chunk_info = if let Some(view) = &self.document_view {
+                format!("chunk {}/{}", session.chunk_index + 1, view.chunk_count)
+            } else {
+                format!("chunk {}", session.chunk_index + 1)
+            };
+            self.push_message(format!("Posizione: {chapter_info}, {chunk_info}"));
+        } else {
+            self.push_message("Nessuna sessione attiva.".to_string());
+        }
+    }
+
     pub fn poll_voice_event(&mut self) -> Option<(Option<String>, Option<String>)> {
         self.backend.poll_voice_event()
     }
@@ -658,6 +698,11 @@ impl App {
             Some("stop") => self.run_shortcut_command(BackendClient::stop_session),
             Some("repeat") => self.run_async_shortcut("Repeat", BackendClient::repeat_chunk),
             Some("resume") => self.run_async_shortcut("Resume", BackendClient::resume_session),
+            Some("next_chapter") => self.navigate_next_chapter(),
+            Some("prev_chapter") => self.navigate_previous_chapter(),
+            Some("note") => self.push_message("Nota: usa /note <testo> per ora.".to_string()),
+            Some("bookmark") => self.voice_bookmark(),
+            Some("where") => self.voice_where(),
             _ => {}
         }
     }

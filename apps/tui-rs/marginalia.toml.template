@@ -18,6 +18,11 @@ back = ["indietro"]
 stop = ["stop", "basta"]
 repeat = ["ripeti"]
 resume = ["riprendi", "continua"]
+next_chapter = ["prossimo capitolo", "capitolo avanti"]
+prev_chapter = ["capitolo indietro", "capitolo precedente"]
+bookmark = ["segna", "segnalibro"]
+note = ["nota", "appunto"]
+where = ["dove sono", "posizione"]
 
 # ── STT — scegli UNO tra Whisper e Vosk ──────────────────────
 __WHISPER_SECTION__
