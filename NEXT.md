@@ -29,6 +29,11 @@
 - [ ] **Notes review**: `/notes` command to list all notes and bookmarks, jump to any.
 - [ ] **Export notes**: export all notes/bookmarks for a document to markdown file.
 
+### Annotations
+- [ ] **Voice highlights**: "evidenzia" command marks the current chunk; color/category for type (important / doubt / idea).
+- [ ] **Tags in notes**: inline `#tag` syntax for filtering and grouping notes later.
+- [ ] **Annotation timeline**: chronological view of all notes/highlights/bookmarks for a document.
+
 ### UX
 - [ ] **Visual indicator during synthesis** ("synthesizing..." in status bar).
 - [ ] **Progress bar** (chunk X/N, chapter X/N) in the TUI header.
@@ -84,11 +89,9 @@
 
 ### Integrations
 - [ ] **Export notes to Obsidian/Notion/Markdown** (via file or API).
-- [ ] **Import from Kindle highlights** (My Clippings.txt).
 - [ ] **RSS/Atom feed reader** with TTS — subscribe to blogs, listen to new posts.
 
 ### Advanced audio
-- [ ] **Multiple voices for dialogue**: detect speakers in text, assign different Kokoro voices.
 - [ ] **Background ambient sounds** while reading (optional, for focus).
 - [ ] **Spatial audio**: position the reader voice in 3D space (macOS spatial audio API).
 
