@@ -127,10 +127,19 @@ Enable `debug_stt = true` in the config to see what the mic hears in the Log pan
 
 ### STT backends
 
-| Backend | Latency | Accuracy | Config |
-|---|---|---|---|
-| **Whisper** (recommended) | ~2s | Excellent | `[whisper]` + `use_for_commands = true` |
-| **Vosk** | Instant | Good (with tuning) | `[vosk]` section |
+| Backend | Latency | Accuracy | Config | Requires |
+|---|---|---|---|---|
+| **Apple** (macOS) | ~0.5s | Excellent | `apple_stt = true` | macOS Dictation enabled |
+| **Whisper** | ~2s | Excellent | `[whisper]` + `use_for_commands = true` | Whisper model (~460MB) |
+| **Vosk** | Instant | Good (with tuning) | `[vosk]` section | libvosk + Vosk model |
+
+**Apple STT** (recommended on macOS): uses SFSpeechRecognizer on the Neural Engine.
+No models to download, fastest response. Requires macOS Dictation to be enabled:
+`System Settings → Keyboard → Dictation → ON`.
+
+```toml
+apple_stt = true
+```
 
 **Whisper**: records audio, runs full speech recognition, then substring-matches
 trigger words in the transcript. Very accurate, no false positives on noise.
