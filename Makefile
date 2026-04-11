@@ -6,7 +6,7 @@ VOSK_LIB_VERSION   ?= 0.3.42
 VOSK_LIB_DIR       ?= models/stt/vosk
 ORT_VERSION        ?= 1.24.4
 WHISPER_MODEL_DIR  ?= models/stt/whisper
-WHISPER_MODEL_NAME ?= ggml-base.bin
+WHISPER_MODEL_NAME ?= ggml-small.bin
 WHISPER_MODEL_URL  ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(WHISPER_MODEL_NAME)
 
 .PHONY: \
