@@ -2,32 +2,41 @@ use marginalia_core::domain::{Document, PlaybackState, ReadingPosition};
 use marginalia_core::ports::{
     PlaybackEngine, PlaybackSnapshot, ProviderCapabilities, ProviderExecutionMode, SynthesisResult,
 };
-use std::process::{Child, Command, Stdio};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use std::fs::File;
+use std::io::BufReader;
 
-const AUDIO_PLACEHOLDER: &str = "{audio}";
+/// Wrapper to make rodio's OutputStream Send.
+/// The stream is created and dropped on the same thread context;
+/// we only hold it as a drop guard to keep the audio device open.
+struct SendOutputStream(#[allow(dead_code)] OutputStream);
+unsafe impl Send for SendOutputStream {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostPlaybackConfig {
     pub command_template: Option<Vec<String>>,
 }
 
-#[derive(Debug)]
 pub struct HostPlaybackEngine {
-    command_template: Option<Vec<String>>,
+    _stream: Option<SendOutputStream>,
+    stream_handle: Option<OutputStreamHandle>,
+    sink: Option<Sink>,
     snapshot: PlaybackSnapshot,
-    child: Option<Child>,
 }
 
 impl Default for HostPlaybackEngine {
     fn default() -> Self {
-        Self::new(HostPlaybackConfig::default())
-    }
-}
-
-impl HostPlaybackEngine {
-    pub fn new(config: HostPlaybackConfig) -> Self {
+        let (stream, handle) = match OutputStream::try_default() {
+            Ok((s, h)) => (Some(SendOutputStream(s)), Some(h)),
+            Err(e) => {
+                eprintln!("[playback] audio output not available: {e}");
+                (None, None)
+            }
+        };
         Self {
-            command_template: config.command_template.or_else(detect_command_template),
+            _stream: stream,
+            stream_handle: handle,
+            sink: None,
             snapshot: PlaybackSnapshot {
                 state: PlaybackState::Stopped,
                 last_action: "initialized".to_string(),
@@ -35,69 +44,29 @@ impl HostPlaybackEngine {
                 anchor: None,
                 progress_units: 0,
                 audio_reference: None,
-                provider_name: Some("host-playback".to_string()),
+                provider_name: Some("rodio".to_string()),
                 process_id: None,
             },
-            child: None,
         }
     }
+}
 
-    pub fn with_command_template(command_template: Vec<String>) -> Self {
-        Self::new(HostPlaybackConfig {
-            command_template: Some(command_template),
-        })
+impl HostPlaybackEngine {
+    pub fn new(_config: HostPlaybackConfig) -> Self {
+        Self::default()
     }
 
-    pub fn command_template(&self) -> Option<&[String]> {
-        self.command_template.as_deref()
-    }
-
-    fn prepare_command(&self, audio_reference: &str) -> Option<Command> {
-        let template = self.command_template.as_ref()?;
-        let (program, args) = template.split_first()?;
-        let mut command = Command::new(program);
-        for arg in args {
-            if arg == AUDIO_PLACEHOLDER {
-                command.arg(audio_reference);
-            } else {
-                command.arg(arg);
-            }
-        }
-        command.stdin(Stdio::null());
-        command.stdout(Stdio::null());
-        command.stderr(Stdio::null());
-        Some(command)
-    }
-
-    fn refresh_state(&mut self) {
-        if let Some(child) = self.child.as_mut() {
-            match child.try_wait() {
-                Ok(Some(_)) => {
-                    if self.snapshot.state == PlaybackState::Playing {
-                        self.snapshot.last_action = "completed".to_string();
-                    }
-                    self.snapshot.state = PlaybackState::Stopped;
-                    self.snapshot.process_id = None;
-                    self.child = None;
-                }
-                Ok(None) => {
-                    self.snapshot.process_id = Some(child.id());
-                }
-                Err(_) => {
-                    self.snapshot.last_action = "monitor-failed".to_string();
-                    self.snapshot.state = PlaybackState::Stopped;
-                    self.snapshot.process_id = None;
-                    self.child = None;
-                }
-            }
-        }
+    /// Check if current playback has finished (for auto-advance).
+    pub fn is_finished(&self) -> bool {
+        self.sink.as_ref().is_some_and(|s| s.empty())
+            && self.snapshot.state == PlaybackState::Playing
     }
 }
 
 impl PlaybackEngine for HostPlaybackEngine {
     fn describe_capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            provider_name: "host-playback".to_string(),
+            provider_name: "rodio".to_string(),
             interface_kind: "playback".to_string(),
             supported_languages: vec!["it".to_string(), "en".to_string()],
             supports_streaming: false,
@@ -119,7 +88,6 @@ impl PlaybackEngine for HostPlaybackEngine {
             self.snapshot.anchor = None;
             self.snapshot.audio_reference = None;
             self.snapshot.process_id = None;
-            self.child = None;
         }
     }
 
@@ -133,7 +101,7 @@ impl PlaybackEngine for HostPlaybackEngine {
         self.snapshot.document_id = Some(document.document_id.clone());
         self.snapshot.anchor = Some(position.anchor());
         self.snapshot.progress_units = position.chunk_index;
-        self.snapshot.audio_reference = synthesis.as_ref().map(|item| item.audio_reference.clone());
+        self.snapshot.audio_reference = synthesis.as_ref().map(|s| s.audio_reference.clone());
 
         let Some(synthesis) = synthesis else {
             self.snapshot.state = PlaybackState::Stopped;
@@ -141,40 +109,51 @@ impl PlaybackEngine for HostPlaybackEngine {
             return self.snapshot();
         };
 
-        let Some(mut command) = self.prepare_command(&synthesis.audio_reference) else {
+        let Some(handle) = &self.stream_handle else {
             self.snapshot.state = PlaybackState::Stopped;
-            self.snapshot.last_action = "start-no-command".to_string();
+            self.snapshot.last_action = "start-no-audio-device".to_string();
             return self.snapshot();
         };
 
-        match command.spawn() {
-            Ok(child) => {
-                self.snapshot.state = PlaybackState::Playing;
-                self.snapshot.last_action = "start".to_string();
-                self.snapshot.process_id = Some(child.id());
-                self.snapshot.audio_reference = Some(synthesis.audio_reference);
-                self.child = Some(child);
-            }
+        let file = match File::open(&synthesis.audio_reference) {
+            Ok(f) => f,
             Err(_) => {
                 self.snapshot.state = PlaybackState::Stopped;
-                self.snapshot.last_action = "start-spawn-failed".to_string();
-                self.snapshot.process_id = None;
-                self.child = None;
+                self.snapshot.last_action = "start-file-not-found".to_string();
+                return self.snapshot();
             }
-        }
+        };
 
+        let source = match Decoder::new(BufReader::new(file)) {
+            Ok(s) => s,
+            Err(_) => {
+                self.snapshot.state = PlaybackState::Stopped;
+                self.snapshot.last_action = "start-decode-failed".to_string();
+                return self.snapshot();
+            }
+        };
+
+        let sink = match Sink::try_new(handle) {
+            Ok(s) => s,
+            Err(_) => {
+                self.snapshot.state = PlaybackState::Stopped;
+                self.snapshot.last_action = "start-sink-failed".to_string();
+                return self.snapshot();
+            }
+        };
+
+        sink.append(source);
+        self.sink = Some(sink);
+        self.snapshot.state = PlaybackState::Playing;
+        self.snapshot.last_action = "start".to_string();
+        self.snapshot.audio_reference = Some(synthesis.audio_reference);
         self.snapshot()
     }
 
     fn pause(&mut self) -> PlaybackSnapshot {
-        self.refresh_state();
-        #[cfg(unix)]
-        if let Some(pid) = self.snapshot.process_id {
+        if let Some(sink) = &self.sink {
             if self.snapshot.state == PlaybackState::Playing {
-                let _ = Command::new("kill")
-                    .arg("-STOP")
-                    .arg(pid.to_string())
-                    .status();
+                sink.pause();
                 self.snapshot.state = PlaybackState::Paused;
             }
         }
@@ -183,16 +162,10 @@ impl PlaybackEngine for HostPlaybackEngine {
     }
 
     fn resume(&mut self) -> PlaybackSnapshot {
-        self.refresh_state();
-        #[cfg(unix)]
-        if let Some(pid) = self.snapshot.process_id {
+        if let Some(sink) = &self.sink {
             if self.snapshot.state == PlaybackState::Paused {
-                let _ = Command::new("kill")
-                    .arg("-CONT")
-                    .arg(pid.to_string())
-                    .status();
+                sink.play();
                 self.snapshot.state = PlaybackState::Playing;
-                self.snapshot.progress_units += 1;
             }
         }
         self.snapshot.last_action = "resume".to_string();
@@ -200,17 +173,8 @@ impl PlaybackEngine for HostPlaybackEngine {
     }
 
     fn stop(&mut self) -> PlaybackSnapshot {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        } else if let Some(pid) = self.snapshot.process_id {
-            #[cfg(unix)]
-            {
-                let _ = Command::new("kill")
-                    .arg("-TERM")
-                    .arg(pid.to_string())
-                    .status();
-            }
+        if let Some(sink) = self.sink.take() {
+            sink.stop();
         }
         self.snapshot.state = PlaybackState::Stopped;
         self.snapshot.last_action = "stop".to_string();
@@ -229,49 +193,21 @@ impl PlaybackEngine for HostPlaybackEngine {
 
     fn snapshot(&self) -> PlaybackSnapshot {
         let mut snapshot = self.snapshot.clone();
-        if let Some(child) = self.child.as_ref() {
-            snapshot.process_id = Some(child.id());
+        // Update state if playback finished naturally
+        if let Some(sink) = &self.sink {
+            if sink.empty() && snapshot.state == PlaybackState::Playing {
+                snapshot.state = PlaybackState::Stopped;
+                snapshot.last_action = "completed".to_string();
+            }
         }
         snapshot
     }
 }
 
-fn detect_command_template() -> Option<Vec<String>> {
-    if cfg!(target_os = "macos") && command_exists("afplay") {
-        return Some(vec!["afplay".to_string(), AUDIO_PLACEHOLDER.to_string()]);
-    }
-    if command_exists("aplay") {
-        return Some(vec!["aplay".to_string(), AUDIO_PLACEHOLDER.to_string()]);
-    }
-    if command_exists("ffplay") {
-        return Some(vec![
-            "ffplay".to_string(),
-            "-nodisp".to_string(),
-            "-autoexit".to_string(),
-            "-loglevel".to_string(),
-            "quiet".to_string(),
-            AUDIO_PLACEHOLDER.to_string(),
-        ]);
-    }
-    None
-}
-
-fn command_exists(command: &str) -> bool {
-    Command::new("sh")
-        .arg("-lc")
-        .arg(format!("command -v {command} >/dev/null 2>&1"))
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{HostPlaybackEngine, AUDIO_PLACEHOLDER};
-    use marginalia_core::domain::{
-        Document, DocumentChunk, DocumentSection, PlaybackState, ReadingPosition,
-    };
-    use marginalia_core::ports::{PlaybackEngine, SynthesisResult};
+    use super::*;
+    use marginalia_core::domain::{DocumentChunk, DocumentSection};
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
@@ -280,18 +216,11 @@ mod tests {
     static COUNTER: AtomicU64 = AtomicU64::new(1);
 
     #[test]
-    fn host_playback_engine_starts_with_custom_command_template() {
+    fn playback_engine_starts_and_stops() {
         let audio_path = temp_wav_path();
         write_silence_wav(&audio_path, 1_000);
 
-        let mut engine = HostPlaybackEngine::with_command_template(vec![
-            "sh".to_string(),
-            "-lc".to_string(),
-            "cat \"$1\" >/dev/null".to_string(),
-            "sh".to_string(),
-            AUDIO_PLACEHOLDER.to_string(),
-        ]);
-
+        let mut engine = HostPlaybackEngine::default();
         let started = engine.start(
             &test_document(),
             &ReadingPosition::default(),
@@ -307,31 +236,41 @@ mod tests {
         );
 
         assert_eq!(started.state, PlaybackState::Playing);
-        assert!(started.process_id.is_some());
 
-        let _ = engine.stop();
+        let stopped = engine.stop();
+        assert_eq!(stopped.state, PlaybackState::Stopped);
+
         let _ = fs::remove_file(audio_path);
     }
 
     #[test]
-    fn host_playback_engine_reports_missing_command() {
-        let mut engine = HostPlaybackEngine::with_command_template(vec![]);
-        let started = engine.start(
+    fn playback_engine_pause_resume() {
+        let audio_path = temp_wav_path();
+        write_silence_wav(&audio_path, 48_000); // 3 seconds of silence
+
+        let mut engine = HostPlaybackEngine::default();
+        engine.start(
             &test_document(),
             &ReadingPosition::default(),
             Some(SynthesisResult {
                 provider_name: "fake-tts".to_string(),
                 voice: "narrator".to_string(),
                 content_type: "audio/wav".to_string(),
-                audio_reference: "/tmp/does-not-matter.wav".to_string(),
-                byte_length: 1,
+                audio_reference: audio_path.display().to_string(),
+                byte_length: 1000,
                 text_excerpt: "Alpha".to_string(),
                 metadata: HashMap::new(),
             }),
         );
 
-        assert_eq!(started.state, PlaybackState::Stopped);
-        assert_eq!(started.last_action, "start-no-command");
+        let paused = engine.pause();
+        assert_eq!(paused.state, PlaybackState::Paused);
+
+        let resumed = engine.resume();
+        assert_eq!(resumed.state, PlaybackState::Playing);
+
+        let _ = engine.stop();
+        let _ = fs::remove_file(audio_path);
     }
 
     fn test_document() -> Document {
@@ -356,7 +295,7 @@ mod tests {
 
     fn temp_wav_path() -> PathBuf {
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("marginalia-playback-host-{id}.wav"))
+        std::env::temp_dir().join(format!("marginalia-playback-test-{id}.wav"))
     }
 
     fn write_silence_wav(path: &PathBuf, sample_count: usize) {
