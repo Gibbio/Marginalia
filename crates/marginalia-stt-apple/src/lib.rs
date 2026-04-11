@@ -1,29 +1,30 @@
 //! Apple native STT via SFSpeechRecognizer.
 //!
-//! Uses a compiled Swift helper that calls SFSpeechRecognizer on the Neural Engine.
-//! Faster and more accurate than Whisper, zero models to download.
-//! macOS 10.15+ only. Requires microphone permission.
+//! Uses a persistent Swift helper process that keeps the microphone open
+//! and streams recognized text via stdout. The Rust side reads lines and
+//! matches commands. Zero models to download — uses the Neural Engine.
 
 use marginalia_core::ports::{
     CommandRecognition, CommandRecognizer, ProviderCapabilities, ProviderExecutionMode,
     SpeechInterruptCapture, SpeechInterruptMonitor,
 };
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::sync::Once;
+use std::time::{Duration, Instant};
 
 const PROVIDER_NAME: &str = "apple-stt";
 
 static COMPILE_HELPER: Once = Once::new();
 
-/// Get path to the compiled Swift helper binary.
 fn helper_path() -> PathBuf {
-    let dir = std::env::temp_dir().join("marginalia-stt-apple");
-    dir.join("stt-helper")
+    std::env::temp_dir()
+        .join("marginalia-stt-apple")
+        .join("stt-helper")
 }
 
-/// Compile the Swift helper if not already compiled.
 fn ensure_helper() -> Result<PathBuf, String> {
     let path = helper_path();
     COMPILE_HELPER.call_once(|| {
@@ -43,7 +44,7 @@ fn ensure_helper() -> Result<PathBuf, String> {
                 "AVFoundation",
             ])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .status();
         match status {
             Ok(s) if s.success() => {}
@@ -57,43 +58,18 @@ fn ensure_helper() -> Result<PathBuf, String> {
     }
 }
 
-/// Run the Swift helper to recognize speech for a given duration.
-fn recognize(helper: &Path, language: &str, duration_secs: f64) -> Result<String, String> {
-    let output = Command::new(helper)
-        .args([language, &format!("{duration_secs:.1}")])
-        .output()
-        .map_err(|e| format!("helper failed: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("helper error: {stderr}"));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 pub struct AppleCommandRecognizer {
     language: String,
     commands: Vec<String>,
-    helper: PathBuf,
 }
 
 impl AppleCommandRecognizer {
     pub fn new(language: &str, commands: Vec<String>) -> Result<Self, String> {
-        let helper = ensure_helper()?;
+        ensure_helper()?;
         Ok(Self {
             language: language.to_string(),
             commands,
-            helper,
         })
-    }
-
-    fn match_command(&self, text: &str) -> Option<String> {
-        let t = text.to_lowercase();
-        self.commands
-            .iter()
-            .find(|cmd| t.contains(&cmd.to_lowercase()))
-            .cloned()
     }
 }
 
@@ -103,8 +79,8 @@ impl CommandRecognizer for AppleCommandRecognizer {
             provider_name: PROVIDER_NAME.to_string(),
             interface_kind: "command_stt".to_string(),
             supported_languages: vec![self.language.clone()],
-            supports_streaming: false,
-            supports_partial_results: false,
+            supports_streaming: true,
+            supports_partial_results: true,
             supports_timestamps: false,
             low_latency_suitable: true,
             offline_capable: true,
@@ -113,24 +89,107 @@ impl CommandRecognizer for AppleCommandRecognizer {
     }
 
     fn listen_for_command(&mut self) -> Option<CommandRecognition> {
-        let text = recognize(&self.helper, &self.language, 4.0).ok()?;
-        let command = self.match_command(&text)?;
+        let capture = self.capture_interrupt(Some(4.0));
+        let command = capture.recognized_command?;
         Some(CommandRecognition {
             command: command.clone(),
             provider_name: PROVIDER_NAME.to_string(),
             confidence: 1.0,
             is_final: true,
-            raw_text: Some(text),
+            raw_text: capture.raw_text,
         })
     }
 
-    fn capture_interrupt(&mut self, timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
-        let timeout = timeout_seconds.unwrap_or(4.0);
-        let (text, error) = match recognize(&self.helper, &self.language, timeout) {
-            Ok(t) => (t, None),
-            Err(e) => (String::new(), Some(format!("error: {e}"))),
+    fn capture_interrupt(&mut self, _timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
+        SpeechInterruptCapture {
+            provider_name: PROVIDER_NAME.to_string(),
+            speech_detected: false,
+            capture_ended_ms: 0,
+            speech_detected_ms: None,
+            capture_started_ms: None,
+            raw_text: None,
+            recognized_command: None,
+            timed_out: true,
+            input_device_index: None,
+            input_device_name: None,
+            sample_rate: None,
+        }
+    }
+
+    fn open_interrupt_monitor(&mut self) -> Box<dyn SpeechInterruptMonitor> {
+        match AppleInterruptMonitor::new(&self.language, self.commands.clone()) {
+            Ok(m) => Box::new(m),
+            Err(e) => {
+                eprintln!("[apple-stt] monitor failed: {e}");
+                Box::new(ErrorMonitor(e))
+            }
+        }
+    }
+}
+
+/// Persistent monitor: starts the Swift helper once, keeps mic open,
+/// reads recognized text from stdout line by line.
+struct AppleInterruptMonitor {
+    commands: Vec<String>,
+    line_rx: mpsc::Receiver<String>,
+    _child: Child,
+}
+
+impl AppleInterruptMonitor {
+    fn new(language: &str, commands: Vec<String>) -> Result<Self, String> {
+        let helper = ensure_helper()?;
+        let mut child = Command::new(&helper)
+            .arg(language)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("spawn helper: {e}"))?;
+
+        let stdout = child.stdout.take().ok_or("no stdout")?;
+        let (tx, rx) = mpsc::channel();
+
+        // Reader thread: sends each line of recognized text
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                match line {
+                    Ok(text) => {
+                        if tx.send(text).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Ok(Self {
+            commands,
+            line_rx: rx,
+            _child: child,
+        })
+    }
+}
+
+impl SpeechInterruptMonitor for AppleInterruptMonitor {
+    fn capture_next_interrupt(&mut self, timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
+        let timeout = Duration::from_secs_f64(timeout_seconds.unwrap_or(4.0));
+
+        // Wait for a line from the helper
+        let text = match self.line_rx.recv_timeout(timeout) {
+            Ok(t) => t.trim().to_string(),
+            Err(_) => String::new(),
         };
-        let command = self.match_command(&text);
+
+        let command = if !text.is_empty() {
+            self.commands
+                .iter()
+                .find(|cmd| text.to_lowercase().contains(&cmd.to_lowercase()))
+                .cloned()
+        } else {
+            None
+        };
 
         SpeechInterruptCapture {
             provider_name: PROVIDER_NAME.to_string(),
@@ -138,7 +197,7 @@ impl CommandRecognizer for AppleCommandRecognizer {
             capture_ended_ms: 0,
             speech_detected_ms: if text.is_empty() { None } else { Some(0) },
             capture_started_ms: Some(0),
-            raw_text: error.or(Some(text)),
+            raw_text: Some(text),
             recognized_command: command,
             timed_out: false,
             input_device_index: None,
@@ -147,43 +206,32 @@ impl CommandRecognizer for AppleCommandRecognizer {
         }
     }
 
-    fn open_interrupt_monitor(&mut self) -> Box<dyn SpeechInterruptMonitor> {
-        Box::new(AppleInterruptMonitor {
-            language: self.language.clone(),
-            commands: self.commands.clone(),
-            helper: self.helper.clone(),
-        })
+    fn close(&mut self) {
+        let _ = self._child.kill();
     }
 }
 
-struct AppleInterruptMonitor {
-    language: String,
-    commands: Vec<String>,
-    helper: PathBuf,
+impl Drop for AppleInterruptMonitor {
+    fn drop(&mut self) {
+        let _ = self._child.kill();
+        let _ = self._child.wait();
+    }
 }
 
-impl SpeechInterruptMonitor for AppleInterruptMonitor {
-    fn capture_next_interrupt(&mut self, timeout_seconds: Option<f64>) -> SpeechInterruptCapture {
-        let timeout = timeout_seconds.unwrap_or(4.0);
-        let (text, error) = match recognize(&self.helper, &self.language, timeout) {
-            Ok(t) => (t, None),
-            Err(e) => (String::new(), Some(format!("error: {e}"))),
-        };
-        let command = self
-            .commands
-            .iter()
-            .find(|cmd| text.to_lowercase().contains(&cmd.to_lowercase()))
-            .cloned();
+struct ErrorMonitor(String);
 
+impl SpeechInterruptMonitor for ErrorMonitor {
+    fn capture_next_interrupt(&mut self, _: Option<f64>) -> SpeechInterruptCapture {
+        std::thread::sleep(Duration::from_secs(5));
         SpeechInterruptCapture {
             provider_name: PROVIDER_NAME.to_string(),
-            speech_detected: !text.is_empty(),
+            speech_detected: false,
             capture_ended_ms: 0,
-            speech_detected_ms: if text.is_empty() { None } else { Some(0) },
-            capture_started_ms: Some(0),
-            raw_text: error.or(Some(text)),
-            recognized_command: command,
-            timed_out: false,
+            speech_detected_ms: None,
+            capture_started_ms: None,
+            raw_text: Some(format!("error: {}", self.0)),
+            recognized_command: None,
+            timed_out: true,
             input_device_index: None,
             input_device_name: None,
             sample_rate: None,
@@ -193,87 +241,83 @@ impl SpeechInterruptMonitor for AppleInterruptMonitor {
     fn close(&mut self) {}
 }
 
-/// Swift helper source. Compiled once at runtime.
-/// Uses SFSpeechRecognizer with on-device recognition (Neural Engine).
+/// Swift helper: persistent process that keeps the mic open and prints
+/// each recognized phrase on a new line to stdout. Runs until killed.
 const SWIFT_HELPER_SOURCE: &str = r#"
 import Foundation
 import Speech
 import AVFoundation
 
 let language = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "it-IT"
-let duration = CommandLine.arguments.count > 2 ? Double(CommandLine.arguments[2]) ?? 4.0 : 4.0
+
+// Unbuffered stdout
+setbuf(stdout, nil)
 
 let semaphore = DispatchSemaphore(value: 0)
-var resultText = ""
 
 SFSpeechRecognizer.requestAuthorization { status in
     guard status == .authorized else {
         fputs("Speech recognition not authorized\n", stderr)
         exit(1)
     }
+    semaphore.signal()
+}
+semaphore.wait()
 
-    let locale = Locale(identifier: language)
-    guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
-        fputs("SFSpeechRecognizer not available for \(language)\n", stderr)
-        exit(1)
-    }
+let locale = Locale(identifier: language)
+guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
+    fputs("SFSpeechRecognizer not available for \(language)\n", stderr)
+    exit(1)
+}
 
-    // Force on-device recognition (Neural Engine, no network)
-    if #available(macOS 13.0, *) {
-        recognizer.supportsOnDeviceRecognition = true
-    }
+if #available(macOS 13.0, *) {
+    recognizer.supportsOnDeviceRecognition = true
+}
 
-    let audioEngine = AVAudioEngine()
+let audioEngine = AVAudioEngine()
+let inputNode = audioEngine.inputNode
+let format = inputNode.outputFormat(forBus: 0)
+
+func startRecognition() {
     let request = SFSpeechAudioBufferRecognitionRequest()
-    request.shouldReportPartialResults = true
-
+    request.shouldReportPartialResults = false
     if #available(macOS 13.0, *) {
         request.requiresOnDeviceRecognition = true
     }
 
-    let inputNode = audioEngine.inputNode
-    let format = inputNode.outputFormat(forBus: 0)
-
-    inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+    inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
         request.append(buffer)
     }
 
     audioEngine.prepare()
-    do {
-        try audioEngine.start()
-    } catch {
+    do { try audioEngine.start() } catch {
         fputs("Audio engine failed: \(error)\n", stderr)
         exit(1)
     }
 
-    var silenceTimer: Timer?
-    var lastResultTime = Date()
-
-    let task = recognizer.recognitionTask(with: request) { result, error in
-        if let result = result {
-            resultText = result.bestTranscription.formattedString
-            lastResultTime = Date()
-        }
-        if error != nil || (result?.isFinal ?? false) {
+    recognizer.recognitionTask(with: request) { result, error in
+        if let result = result, result.isFinal {
+            let text = result.bestTranscription.formattedString
+            if !text.isEmpty {
+                print(text)
+            }
+            // Restart for next utterance
             audioEngine.stop()
             inputNode.removeTap(onBus: 0)
-            request.endAudio()
-            semaphore.signal()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                startRecognition()
+            }
+        }
+        if error != nil {
+            audioEngine.stop()
+            inputNode.removeTap(onBus: 0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                startRecognition()
+            }
         }
     }
-
-    // Stop after duration seconds
-    DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-        task.cancel()
-        audioEngine.stop()
-        inputNode.removeTap(onBus: 0)
-        request.endAudio()
-        semaphore.signal()
-    }
-
-    RunLoop.main.run(until: Date(timeIntervalSinceNow: duration + 1))
 }
 
-semaphore.wait()
-print(resultText)
+startRecognition()
+dispatchMain()
 "#;
