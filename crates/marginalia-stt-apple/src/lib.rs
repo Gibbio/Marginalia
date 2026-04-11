@@ -8,12 +8,12 @@ use marginalia_core::ports::{
     CommandRecognition, CommandRecognizer, ProviderCapabilities, ProviderExecutionMode,
     SpeechInterruptCapture, SpeechInterruptMonitor,
 };
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::Once;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const PROVIDER_NAME: &str = "apple-stt";
 
