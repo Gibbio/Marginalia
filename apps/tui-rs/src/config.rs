@@ -9,12 +9,16 @@ use std::path::PathBuf;
 pub struct TuiConfig {
     /// Path to the SQLite database. Default: `.marginalia/beta.sqlite3`.
     pub database_path: Option<PathBuf>,
+    /// Trigger words mapped to actions (`pause`, `next`, etc.).
+    #[serde(default)]
+    pub voice_commands: VoiceCommandsSection,
+    /// Speech-to-text engine settings. The chosen engine handles both command
+    /// recognition and dictation; per-context tuning lives in `[stt.commands]`
+    /// and `[stt.dictation]`.
     #[serde(default)]
     pub stt: SttSection,
     #[serde(default)]
     pub kokoro: KokoroSection,
-    #[serde(default)]
-    pub voice_commands: VoiceCommandsSection,
     #[serde(default)]
     pub playback: PlaybackSection,
     #[serde(default)]
@@ -22,31 +26,73 @@ pub struct TuiConfig {
     pub mlx: MlxSection,
 }
 
+/// STT configuration root.
+///
+/// Layout:
+/// - `engine`, `language`, `debug` — global engine selection and shared options.
+/// - `[stt.whisper]` / `[stt.apple]` — engine-specific settings (only the
+///   chosen engine is read; the other section is ignored).
+/// - `[stt.commands]` — tuning for short-utterance command recognition.
+/// - `[stt.dictation]` — tuning for long-utterance note dictation.
 #[derive(Debug, Deserialize, Default)]
 pub struct SttSection {
-    /// Show raw transcript in Log pane. Works with all STT backends.
+    /// Engine choice: `"apple"` or `"whisper"`. Default: `"whisper"`.
+    #[serde(default = "default_stt_engine")]
+    pub engine: String,
+    /// Recognition language. Whisper expects ISO ("it"), Apple expects BCP-47
+    /// ("it-IT"); the backend normalizes between the two. Default: `"it"`.
+    pub language: Option<String>,
+    /// Show raw transcript in the Log pane.
     #[serde(default)]
     pub debug: bool,
-    /// Apple native STT (SFSpeechRecognizer / Neural Engine). macOS only.
-    /// Presence of `[stt.apple]` enables it; omit the section to disable.
-    #[cfg_attr(not(feature = "apple-stt"), allow(dead_code))]
-    pub apple: Option<AppleSttSection>,
-    /// Whisper STT settings (high accuracy, ~2s latency).
+    /// Apple-engine settings (placeholder for future apple-only options).
+    #[serde(default)]
+    #[allow(dead_code)] // currently empty; reserved for future apple-only fields
+    pub apple: AppleEngineSection,
+    /// Whisper-engine settings (model file path).
     #[serde(default)]
     #[cfg_attr(not(feature = "whisper-stt"), allow(dead_code))]
-    pub whisper: WhisperSection,
-    /// Vosk STT settings (fast, grammar-based).
+    pub whisper: WhisperEngineSection,
+    /// Tuning profile applied when recognizing voice commands (short utterances).
     #[serde(default)]
-    #[cfg_attr(not(feature = "vosk-stt"), allow(dead_code))]
-    pub vosk: VoskSection,
+    pub commands: SttContextSection,
+    /// Tuning profile applied when transcribing dictated notes (long utterances).
+    #[serde(default)]
+    #[cfg_attr(not(feature = "whisper-stt"), allow(dead_code))]
+    pub dictation: SttContextSection,
 }
 
+fn default_stt_engine() -> String {
+    "whisper".to_string()
+}
+
+/// Apple-engine settings. Currently empty; reserved for future apple-only
+/// options (e.g. on-device requirement, custom locale, etc.).
 #[derive(Debug, Deserialize, Default)]
 #[cfg_attr(not(feature = "apple-stt"), allow(dead_code))]
-pub struct AppleSttSection {
-    /// Seconds of silence after speech before emitting a partial.
-    /// Lower = snappier response but may cut off slow speakers. Default: 0.8.
+pub struct AppleEngineSection {}
+
+#[derive(Debug, Deserialize, Default)]
+#[cfg_attr(not(feature = "whisper-stt"), allow(dead_code))]
+pub struct WhisperEngineSection {
+    /// Path to the Whisper ggml model file (e.g. `ggml-small.bin`).
+    pub model_path: Option<PathBuf>,
+}
+
+/// Per-context tuning. Each context (commands / dictation) gets its own values
+/// for the same parameter set. Backend interpretation depends on the engine.
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)] // some fields are read only when a given engine is enabled
+pub struct SttContextSection {
+    /// Seconds of silence after speech before emitting/finalizing.
+    /// Default: 0.8 (commands) / 1.5 (dictation).
     pub silence_timeout: Option<f64>,
+    /// Maximum recording duration in seconds (Whisper only).
+    /// Default: 4 (commands) / 60 (dictation).
+    pub max_record_seconds: Option<f64>,
+    /// Minimum RMS amplitude (0-32767) considered as speech (Whisper only).
+    /// Default: 500.
+    pub speech_threshold: Option<i16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,93 +136,6 @@ pub struct KokoroSection {
     /// Default for espeak-ng: `["-v", "it", "--ipa", "-q"]`.
     #[serde(default)]
     pub phonemizer_args: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub enum SpeechThreshold {
-    Auto,
-    Fixed(i16),
-}
-
-impl Default for SpeechThreshold {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-fn default_vosk_threshold() -> SpeechThreshold {
-    SpeechThreshold::Auto
-}
-
-impl<'de> Deserialize<'de> for SpeechThreshold {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de;
-        struct Visitor;
-        impl de::Visitor<'_> for Visitor {
-            type Value = SpeechThreshold;
-
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(f, r#""auto" or a number 0-32767"#)
-            }
-
-            fn visit_str<E: de::Error>(self, v: &str) -> Result<SpeechThreshold, E> {
-                if v.eq_ignore_ascii_case("auto") {
-                    Ok(SpeechThreshold::Auto)
-                } else {
-                    Err(E::custom(format!(
-                        "expected \"auto\" or a number, got \"{v}\""
-                    )))
-                }
-            }
-
-            fn visit_i64<E: de::Error>(self, v: i64) -> Result<SpeechThreshold, E> {
-                Ok(SpeechThreshold::Fixed(v as i16))
-            }
-
-            fn visit_u64<E: de::Error>(self, v: u64) -> Result<SpeechThreshold, E> {
-                Ok(SpeechThreshold::Fixed(v as i16))
-            }
-        }
-        deserializer.deserialize_any(Visitor)
-    }
-}
-
-#[derive(Debug, Deserialize, Default)]
-#[allow(dead_code)] // fields are read only when vosk-stt feature is enabled
-pub struct VoskSection {
-    /// Path to the Vosk acoustic model directory.
-    pub model_path: Option<PathBuf>,
-    /// Minimum audio peak to consider as speech.
-    /// "auto" = adaptive noise floor (continuously adjusts to ambient noise).
-    /// Or a fixed number 0-32767 (higher = less sensitive). Default: "auto".
-    #[serde(default = "default_vosk_threshold")]
-    pub speech_threshold: SpeechThreshold,
-    /// Seconds of silence after speech before finalizing. Default: 1.2.
-    pub silence_timeout: Option<f64>,
-    /// Minimum milliseconds of sustained speech to accept a result. Default: 300.
-    /// Filters out brief noise spikes that Vosk would force-match to a command.
-    pub min_speech_ms: Option<u64>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-#[allow(dead_code)] // fields are read only when whisper-stt feature is enabled
-pub struct WhisperSection {
-    /// Path to the Whisper ggml model file (e.g. `ggml-base.bin`).
-    /// When set, Whisper is used for dictation AND voice commands. Apple STT
-    /// or Vosk (if also configured) take priority over Whisper for commands.
-    pub model_path: Option<PathBuf>,
-    /// BCP-47 language code passed to whisper.cpp. Default: `"it"`.
-    pub language: Option<String>,
-    /// Minimum RMS amplitude (0-32767) to consider as speech. Default: 500.
-    /// Lower = more sensitive to quiet speech. Higher = ignores background noise.
-    pub speech_threshold: Option<i16>,
-    /// Max seconds to record before forcing inference. Default: 4.
-    pub max_record_seconds: Option<f64>,
-    /// Seconds of silence after speech before finalizing. Default: 1.0.
-    pub silence_timeout: Option<f64>,
 }
 
 /// Maps actions to trigger words. The STT backend listens for all words;

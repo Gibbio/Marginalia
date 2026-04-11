@@ -24,6 +24,7 @@
 - [ ] Research: how Teams (WebRTC AEC3 + AI), Zoom (ML isolation), Apple (Neural Engine), Alexa (DSP multi-mic) handle this.
 
 ### Study features
+- [ ] **Apple STT dictation mode**: extend the Swift helper with a long-form mode (no auto-restart, longer silence timer, accumulates the full utterance) so that on macOS the user can pick `engine = "apple"` and get both commands AND dictation from the Neural Engine, without needing Whisper. Today only Whisper does dictation, so picking Apple disables `/note`.
 - [ ] **Voice note dictation**: "nota" command activates Whisper/Apple STT in transcription mode, records until silence, saves as note attached to current position.
 - [ ] **Search within document**: `/search <text>` to find and jump to a passage.
 - [ ] **Notes review**: `/notes` command to list all notes and bookmarks, jump to any.

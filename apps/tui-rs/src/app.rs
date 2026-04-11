@@ -1002,15 +1002,6 @@ fn startup_warnings(report: &Value) -> Vec<String> {
         providers,
         resolved,
         checks,
-        "command_stt",
-        "vosk",
-        "Vosk command STT is not ready",
-    );
-    push_provider_warning(
-        &mut warnings,
-        providers,
-        resolved,
-        checks,
         "dictation_stt",
         "whisper-dictation-stt",
         "Whisper dictation STT is not ready",

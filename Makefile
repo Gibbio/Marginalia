@@ -203,26 +203,28 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	PLATFORM="$$OS $$ARCH"; \
 	DATE=$$(date "+%Y-%m-%d %H:%M"); \
 	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-		TTS_SECTION='# Kokoro via MLX Metal GPU (auto-download da HuggingFace)\n[mlx]\nvoice = "if_sara"    # Italian female (or: im_nicola, af_bella, am_adam)'; \
+		TTS_SECTION='# Kokoro via MLX Metal GPU (auto-downloaded from HuggingFace)\n[mlx]\nvoice = "if_sara"    # Italian female (or: im_nicola, af_bella, am_adam)'; \
 	elif [ -d "$(KOKORO_ASSETS_DIR)" ]; then \
 		TTS_SECTION='# Kokoro via ONNX Runtime CPU\n[kokoro]\nassets_root = "$(KOKORO_ASSETS_DIR)"\nphonemizer_program = "espeak-ng"\nphonemizer_args = ["-v", "it", "--ipa", "-q"]'; \
 	else \
-		TTS_SECTION='# Nessun TTS configurato. Esegui: make bootstrap-kokoro'; \
+		TTS_SECTION='# No TTS configured. Run: make bootstrap-kokoro'; \
 	fi; \
-	STT_SECTION="[stt]\n# debug = true   # mostra nel Log cosa sente il microfono"; \
 	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-		STT_SECTION="$$STT_SECTION\n\n# Apple Neural Engine (richiede: System Settings → Keyboard → Dictation → ON)\n# Commenta l'intera sezione per disabilitarlo.\n[stt.apple]\n# silence_timeout = 0.8   # secondi di silenzio prima di emettere un parziale (più basso = più reattivo)"; \
+		DEFAULT_ENGINE="apple"; \
+	else \
+		DEFAULT_ENGINE="whisper"; \
+	fi; \
+	STT_SECTION="[stt]\nengine   = \"$$DEFAULT_ENGINE\"     # \"apple\" or \"whisper\"\nlanguage = \"it\"        # ISO (\"it\") or BCP-47 (\"it-IT\"); auto-converted per engine\ndebug    = true        # show raw transcript in the Log pane"; \
+	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
+		STT_SECTION="$$STT_SECTION\n\n# Apple-engine settings.\n# Requires: System Settings → Keyboard → Dictation → ON.\n# NOTE: Apple dictation is not yet implemented — pick engine = \"whisper\" if\n# you need /note. See NEXT.md (\"Apple STT dictation mode\").\n[stt.apple]"; \
 	fi; \
 	if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
-		if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza. Usato per dettatura e comandi\n# (Apple STT o Vosk hanno priorità sui comandi se anche loro configurati).\n# [stt.whisper]\n# model_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\n# language = \"it\"\n# speech_threshold = 300\n# silence_timeout = 0.8"; \
-		else \
-			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza. Usato per dettatura e comandi.\n[stt.whisper]\nmodel_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\nlanguage = \"it\"\nspeech_threshold = 300\nsilence_timeout = 0.8"; \
-		fi; \
+		STT_SECTION="$$STT_SECTION\n\n# Whisper-engine settings.\n[stt.whisper]\nmodel_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\""; \
+	else \
+		STT_SECTION="$$STT_SECTION\n\n# Whisper-engine settings.\n# [stt.whisper]\n# model_path = \"models/stt/whisper/ggml-small.bin\""; \
 	fi; \
-	if [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then \
-		STT_SECTION="$$STT_SECTION\n\n# Vosk: veloce, risposta istantanea, adattamento rumore.\n# [stt.vosk]\n# model_path = \"$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)\"\n# speech_threshold = \"auto\"\n# silence_timeout = 1.2\n# min_speech_ms = 300"; \
-	fi; \
+	STT_SECTION="$$STT_SECTION\n\n# Tuning profile for SHORT utterances (voice commands).\n# Defaults: silence_timeout = 0.8, max_record_seconds = 4, speech_threshold = 500\n[stt.commands]\n# silence_timeout    = 0.8\n# max_record_seconds = 4\n# speech_threshold   = 500"; \
+	STT_SECTION="$$STT_SECTION\n\n# Tuning profile for LONG utterances (note dictation via /note).\n# Defaults: silence_timeout = 1.5, max_record_seconds = 60, speech_threshold = 500\n[stt.dictation]\n# silence_timeout    = 1.5\n# max_record_seconds = 60\n# speech_threshold   = 500"; \
 	sed -e "s|__PLATFORM__|$$PLATFORM|" \
 	    -e "s|__DATE__|$$DATE|" \
 	    -e "s|__TTS_SECTION__|$$TTS_SECTION|" \
@@ -232,11 +234,9 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 
 tui-rs: $(TUI_TOML)
 	@OS=$$(uname -s); ARCH=$$(uname -m); \
-	VOSK_LIB=$$(ls $(VOSK_LIB_DIR)/libvosk.* 2>/dev/null | head -1); \
 	WHISPER_MODEL=$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME); \
 	FEATURES=""; \
 	_add() { if [ -z "$$FEATURES" ]; then FEATURES="$$1"; else FEATURES="$$FEATURES,$$1"; fi; }; \
-	if [ -n "$$VOSK_LIB" ] && [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then _add vosk-stt; fi; \
 	if [ -f "$$WHISPER_MODEL" ]; then \
 		if [ "$$OS" = "Darwin" ]; then _add whisper-stt-metal; else _add whisper-stt; fi; \
 	fi; \
@@ -253,10 +253,9 @@ tui-rs: $(TUI_TOML)
 	fi; \
 	echo "========================"; \
 	echo ""; \
-	VOSK_PATH=$(VOSK_LIB_DIR) \
-	LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$LIBRARY_PATH \
-	LD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$LD_LIBRARY_PATH \
-	DYLD_LIBRARY_PATH=$(VOSK_LIB_DIR):$(KOKORO_ASSETS_DIR)/lib:$$DYLD_LIBRARY_PATH \
+	LIBRARY_PATH=$(KOKORO_ASSETS_DIR)/lib:$$LIBRARY_PATH \
+	LD_LIBRARY_PATH=$(KOKORO_ASSETS_DIR)/lib:$$LD_LIBRARY_PATH \
+	DYLD_LIBRARY_PATH=$(KOKORO_ASSETS_DIR)/lib:$$DYLD_LIBRARY_PATH \
 	cargo run --release --manifest-path apps/tui-rs/Cargo.toml \
 		$$([ -n "$$FEATURES" ] && echo "--features $$FEATURES")
 

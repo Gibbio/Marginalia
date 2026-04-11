@@ -6,7 +6,6 @@ description = "Rust TUI frontend for Marginalia"
 
 [features]
 default = []
-vosk-stt          = ["dep:marginalia-stt-vosk"]
 whisper-stt       = ["dep:marginalia-stt-whisper"]
 whisper-stt-metal = ["whisper-stt", "marginalia-stt-whisper/metal"]
 whisper-stt-cuda  = ["dep:marginalia-stt-whisper", "marginalia-stt-whisper/cuda"]
@@ -17,7 +16,6 @@ apple-stt         = ["dep:marginalia-stt-apple"]
 
 [dependencies]
 marginalia-stt-apple = { path = "../../crates/marginalia-stt-apple", optional = true }
-marginalia-stt-vosk = { path = "../../crates/marginalia-stt-vosk", optional = true }
 marginalia-stt-whisper = { path = "../../crates/marginalia-stt-whisper", optional = true }
 crossterm = "0.28"
 marginalia-playback-host = { path = "../../crates/marginalia-playback-host" }
