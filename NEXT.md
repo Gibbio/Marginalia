@@ -13,6 +13,16 @@
 - [ ] **Clippy + fmt on all crates**: including optional ones.
 - [ ] **Provider contract tests**: each TTS/STT implementation gets a basic smoke test (e.g. synthesize empty string → error, synthesize short text → valid WAV). Uses `#[cfg(test)]` with mocks, no real models needed.
 
+### Playback engine
+- [ ] **Replace subprocess player with rodio** (`afplay`/`aplay` → in-process audio). Benefits:
+  - Native pause/resume (no kill + re-spawn)
+  - Volume control (`sink.set_volume()`)
+  - End-of-chunk callback → auto-advance to next chunk (continuous reading)
+  - No process spawn overhead per chunk
+  - Cross-platform (macOS, Linux, Windows)
+- [ ] **Auto-play next chunk** when current finishes (requires end-of-chunk callback from rodio)
+- [ ] **Voice command: volume up/down** (requires rodio volume control)
+
 ### i18n / Localization
 - [ ] All core/backend messages must be in **English**. The TUI currently mixes Italian and English — standardize to English.
 - [ ] Create a separate translation file for TUI user-facing strings (`apps/tui-rs/i18n/` or similar). This includes:
