@@ -215,9 +215,9 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	fi; \
 	if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
 		if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza. Alternativa ad Apple STT.\n# [stt.whisper]\n# model_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\n# language = \"it\"\n# use_for_commands = true\n# speech_threshold = 300\n# silence_timeout = 0.8"; \
+			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza. Usato per dettatura e comandi\n# (Apple STT o Vosk hanno priorità sui comandi se anche loro configurati).\n# [stt.whisper]\n# model_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\n# language = \"it\"\n# speech_threshold = 300\n# silence_timeout = 0.8"; \
 		else \
-			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza.\n[stt.whisper]\nmodel_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\nlanguage = \"it\"\nuse_for_commands = true\nspeech_threshold = 300\nsilence_timeout = 0.8"; \
+			STT_SECTION="$$STT_SECTION\n\n# Whisper: preciso, ~2s latenza. Usato per dettatura e comandi.\n[stt.whisper]\nmodel_path = \"$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)\"\nlanguage = \"it\"\nspeech_threshold = 300\nsilence_timeout = 0.8"; \
 		fi; \
 	fi; \
 	if [ -d "$(MODELS_DIR)/vosk/$(VOSK_MODEL_NAME)" ]; then \

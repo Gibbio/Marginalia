@@ -165,13 +165,11 @@ pub struct VoskSection {
 #[allow(dead_code)] // fields are read only when whisper-stt feature is enabled
 pub struct WhisperSection {
     /// Path to the Whisper ggml model file (e.g. `ggml-base.bin`).
+    /// When set, Whisper is used for dictation AND voice commands. Apple STT
+    /// or Vosk (if also configured) take priority over Whisper for commands.
     pub model_path: Option<PathBuf>,
     /// BCP-47 language code passed to whisper.cpp. Default: `"it"`.
     pub language: Option<String>,
-    /// Also use Whisper for voice commands (replaces Vosk). Default: false.
-    /// More accurate than Vosk but higher latency (~2s vs instant).
-    #[serde(default)]
-    pub use_for_commands: bool,
     /// Minimum RMS amplitude (0-32767) to consider as speech. Default: 500.
     /// Lower = more sensitive to quiet speech. Higher = ignores background noise.
     pub speech_threshold: Option<i16>,
