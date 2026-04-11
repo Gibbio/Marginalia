@@ -2,7 +2,7 @@ use crate::config::TuiConfig;
 use marginalia_playback_host::HostPlaybackEngine;
 use marginalia_runtime::{RuntimeFrontend, SqliteRuntime};
 #[cfg(feature = "apple-stt")]
-use marginalia_stt_apple::AppleCommandRecognizer;
+use marginalia_stt_apple::new_apple_stt;
 #[cfg(feature = "whisper-stt")]
 use marginalia_stt_whisper::{
     WhisperCommandRecognizer, WhisperConfig, WhisperDictationTranscriber,
@@ -398,19 +398,25 @@ impl BetaBackendClient {
                     Some(l) if l.eq_ignore_ascii_case("en") => "en-US".to_string(),
                     Some(l) => l.to_string(),
                 };
-                let silence_timeout = config.stt.commands.silence_timeout.unwrap_or(0.8);
-                match AppleCommandRecognizer::new(&language, commands, silence_timeout) {
-                    Ok(rec) => {
+                let cmd_silence = config.stt.commands.silence_timeout.unwrap_or(0.8);
+                let dict_silence = config.stt.dictation.silence_timeout.unwrap_or(1.5);
+                let dict_max = config.stt.dictation.max_record_seconds.unwrap_or(60.0);
+                match new_apple_stt(&language, commands, cmd_silence, dict_silence, dict_max) {
+                    Ok((rec, dict)) => {
                         runtime.set_command_recognizer(rec);
+                        runtime.set_dictation_transcriber(dict);
                         runtime.set_provider_doctor_blob(
                             "apple_stt",
                             json!({
                                 "ready": true,
                                 "language": language,
-                                "silence_timeout": silence_timeout,
+                                "cmd_silence_timeout": cmd_silence,
+                                "dict_silence_timeout": dict_silence,
+                                "dict_max_seconds": dict_max,
                             }),
                         );
                         stt_label = "apple";
+                        dictation_label = "apple";
                     }
                     Err(e) => {
                         runtime.set_provider_doctor_blob(
@@ -420,14 +426,6 @@ impl BetaBackendClient {
                         eprintln!("[apple-stt] {e}");
                     }
                 }
-                // Apple dictation requires extending the Swift helper to a
-                // long-form mode. Until then, dictation stays disabled when
-                // engine = apple. See NEXT.md.
-                eprintln!(
-                    "[stt] note: engine=apple — dictation not yet implemented \
-                     for Apple, /note will be unavailable. Use engine=whisper \
-                     if you need dictation."
-                );
             }
             #[cfg(not(feature = "apple-stt"))]
             eprintln!("[stt] engine=apple but apple-stt feature is not built in");

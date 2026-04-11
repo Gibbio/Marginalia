@@ -28,15 +28,16 @@ apps/
   cli-rs/              CLI for testing core (ingest, read, bench)
 
 crates/
-  marginalia-core/     Domain, ports, application services (no external deps)
-  marginalia-runtime/  Orchestration: core + storage + providers
+  marginalia-core/             Domain, ports, application services (no external deps)
+  marginalia-runtime/          Orchestration: core + storage + providers
   marginalia-storage-sqlite/   SQLite persistence
   marginalia-import-text/      Text/Markdown document importer
   marginalia-tts-mlx/          Kokoro TTS via MLX Metal GPU (macOS Apple Silicon)
   marginalia-tts-kokoro/       Kokoro TTS via ONNX Runtime (cross-platform)
-  marginalia-stt-vosk/         Vosk speech recognition (optional)
-  marginalia-stt-whisper/      Whisper speech recognition (optional)
-  marginalia-playback-host/    Audio playback
+  marginalia-stt-apple/        Apple SFSpeechRecognizer — commands + dictation (macOS)
+  marginalia-stt-whisper/      Whisper STT — commands + dictation (cross-platform)
+  marginalia-stt-vosk/         Vosk STT (legacy, no longer wired in tui-rs)
+  marginalia-playback-host/    Audio playback (rodio in-process)
   marginalia-provider-fake/    Fake providers for testing
   marginalia-devtools/         Development utilities
 
@@ -71,7 +72,7 @@ cargo build --release -p marginalia-tui --features mlx-tts
 cargo run -p marginalia-cli -- help
 
 # Optional providers (need native libs)
-cargo build -p marginalia-stt-vosk      # needs libvosk
+cargo build -p marginalia-stt-apple     # needs Xcode (Swift helper)
 cargo build -p marginalia-stt-whisper   # needs cmake + C++ compiler
 cargo build -p marginalia-tts-mlx       # needs Xcode + Metal Toolchain
 ```
@@ -87,9 +88,12 @@ make bootstrap-beta
 # Individual
 make bootstrap-kokoro    # Kokoro ONNX model + voices
 make bootstrap-ort       # ONNX Runtime library
-make bootstrap-vosk      # Vosk STT model
-make bootstrap-whisper   # Whisper STT model
+make bootstrap-whisper   # Whisper STT model (commands + dictation)
 ```
+
+Apple STT (`marginalia-stt-apple`) needs no model download — it uses the
+Neural Engine via SFSpeechRecognizer. Requires macOS Dictation to be enabled
+(`System Settings → Keyboard → Dictation → ON`).
 
 Verify setup:
 
