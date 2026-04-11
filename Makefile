@@ -209,9 +209,9 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	else \
 		TTS_SECTION='# Nessun TTS configurato. Esegui: make bootstrap-kokoro'; \
 	fi; \
-	STT_SECTION="# Scegli UNO tra Apple, Whisper e Vosk."; \
+	STT_SECTION="[stt]\n# debug = true   # mostra nel Log cosa sente il microfono"; \
 	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-		STT_SECTION="$$STT_SECTION\n\n# Apple STT: Neural Engine, nessun modello, velocissimo.\n# Richiede: System Settings → Keyboard → Dictation → ON\napple_stt = true"; \
+		STT_SECTION="$$STT_SECTION\napple = true     # Apple Neural Engine (richiede: System Settings → Keyboard → Dictation → ON)"; \
 	fi; \
 	if [ -f "$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)" ]; then \
 		if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \

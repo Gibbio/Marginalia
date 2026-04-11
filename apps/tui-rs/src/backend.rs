@@ -385,7 +385,7 @@ impl BetaBackendClient {
         let mut stt_label = "fake";
 
         #[cfg(feature = "apple-stt")]
-        if config.apple_stt {
+        if config.stt.apple {
             let commands = config.voice_commands.all_words();
             let language = config
                 .whisper
@@ -477,7 +477,7 @@ impl BetaBackendClient {
         // Voice command monitor — open and run in background thread.
         // The monitor is independent from the runtime after creation (owns its own audio stream).
         // Thread exits automatically when voice_cmd_rx is dropped (tx.send fails).
-        let stt_debug = config.debug_stt;
+        let stt_debug = config.stt.debug;
         let voice_cmd_rx = {
             let mut monitor = runtime.open_command_monitor();
             // Channel sends (raw_text, command). raw_text is for debug logging.

@@ -9,14 +9,8 @@ use std::path::PathBuf;
 pub struct TuiConfig {
     /// Path to the SQLite database. Default: `.marginalia/beta.sqlite3`.
     pub database_path: Option<PathBuf>,
-    /// Show STT raw transcript in Log pane. Works with all STT backends.
     #[serde(default)]
-    pub debug_stt: bool,
-    /// Use Apple native STT (SFSpeechRecognizer) for voice commands.
-    /// macOS only. Faster than Whisper, uses Neural Engine, zero models to download.
-    #[serde(default)]
-    #[cfg_attr(not(feature = "apple-stt"), allow(dead_code))]
-    pub apple_stt: bool,
+    pub stt: SttSection,
     #[serde(default)]
     pub kokoro: KokoroSection,
     #[serde(default)]
@@ -32,6 +26,16 @@ pub struct TuiConfig {
     #[serde(default)]
     #[cfg_attr(not(feature = "mlx-tts"), allow(dead_code))]
     pub mlx: MlxSection,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct SttSection {
+    /// Show raw transcript in Log pane. Works with all STT backends.
+    #[serde(default)]
+    pub debug: bool,
+    /// Use Apple native STT (SFSpeechRecognizer). macOS only.
+    #[serde(default)]
+    pub apple: bool,
 }
 
 #[derive(Debug, Deserialize)]
