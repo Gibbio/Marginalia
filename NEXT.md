@@ -7,108 +7,92 @@
 ## Short term
 
 ### Testing & CI
-- [ ] **Core trait tests**: verify that changes to `SpeechSynthesizer`, `CommandRecognizer`, `DocumentRepository` etc. don't break implementations. Add trait-level test helpers that any implementation can reuse.
-- [ ] **Integration tests**: runtime with fake providers, full flow: ingest → start session → navigate → create note. Lives in `marginalia-runtime/tests/`.
-- [ ] **CI compiles all crates**: today CI only builds `default-members`. Add a macOS runner that also builds `marginalia-tts-mlx`, `marginalia-stt-apple`, `marginalia-stt-whisper`. Linux runner builds the cross-platform set.
-- [ ] **Clippy + fmt on all crates**: including optional ones.
-- [ ] **Provider contract tests**: each TTS/STT implementation gets a basic smoke test (e.g. synthesize empty string → error, synthesize short text → valid WAV). Uses `#[cfg(test)]` with mocks, no real models needed.
+- [ ] **Core trait tests**: verify that changes to `SpeechSynthesizer`, `CommandRecognizer`, `DocumentRepository` etc. don't break implementations.
+- [ ] **Integration tests**: runtime with fake providers, full flow: ingest → start session → navigate → create note.
+- [ ] **CI compiles all crates**: macOS runner for mlx/apple-stt/whisper, Linux runner for the rest.
+- [ ] **Provider contract tests**: each TTS/STT implementation gets a basic smoke test.
 
-### Playback engine (done: rodio replaces afplay)
-- [x] ~~Replace subprocess player with rodio~~ (done)
-- [ ] **Auto-play next chunk** when current finishes (rodio `sink.empty()` callback)
-- [ ] **Volume control** via voice command (`sink.set_volume()`)
+### Reading flow
+- [ ] **Auto-play next chunk** when current finishes (rodio `sink.empty()` callback). This is the most requested feature — continuous reading without pressing /next.
+- [ ] **Reading speed control**: voice commands "piu' veloce" / "piu' lento" that adjust TTS speed parameter and/or rodio playback rate.
+- [ ] **Resume where you left off**: persist reading position in SQLite, auto-resume on `/play`.
+- [ ] **Sentence-level navigation**: skip/repeat single sentences within a chunk, not just whole chunks.
 
 ### Echo cancellation — voice commands during playback
-The user must be able to say "pausa" while Kokoro is reading. The mic picks up
-the TTS output (echo) and the STT transcribes it as false commands.
+- [ ] **Text-based echo rejection** (first step): strip chunk words from STT transcript, execute only if a trigger word remains.
+- [ ] **aec3 crate**: WebRTC AEC3 for professional echo cancellation.
+- [ ] Research: how Teams (WebRTC AEC3 + AI), Zoom (ML isolation), Apple (Neural Engine), Alexa (DSP multi-mic) handle this.
 
-**Research needed**: how do Teams, Zoom, FaceTime, Alexa handle this?
-- **Microsoft Teams**: uses WebRTC AEC3 + hardware AEC on supported devices. The
-  far-end audio (speaker) is fed as reference to cancel echo from near-end (mic).
-  Also uses AI-based noise suppression layered on top.
-- **Zoom**: proprietary AEC + machine learning noise isolation. Separates human
-  voice from everything else (including speaker echo).
-- **Apple FaceTime/Siri**: uses the Secure Enclave + Neural Engine for on-device
-  AEC. Exposed via `AVAudioSession` with `.voiceChat` mode on iOS — not available
-  to third-party macOS apps via public API.
-- **Amazon Alexa**: hardware AEC (multi-mic array) + keyword detection runs on a
-  separate DSP. The keyword detector is specifically trained to ignore the device's
-  own speaker output.
-
-**Options for Marginalia** (ordered by feasibility):
-- [ ] **Text-based echo rejection** (recommended first step): we know the exact text
-  being read (`chunk_text`). Strip chunk words from STT transcript — if only a
-  trigger word remains, execute it. Zero dependencies, works now.
-- [ ] **aec3 crate**: Rust port of WebRTC AEC3. Feed rodio output samples as reference,
-  clean mic input before STT. Professional quality but requires audio pipeline changes.
-- [ ] **Apple AVAudioSession voiceChat mode**: on iOS this enables system AEC. On macOS
-  it may work for CoreAudio-based apps. Investigate via `objc2-av-foundation`.
-- [ ] **AI voice isolation**: emerging approach (like Krisp, NVIDIA RTX Voice). Would
-  require a dedicated ML model. Overkill for our use case.
-- [ ] **Auto-play next chunk** when current finishes (requires end-of-chunk callback from rodio)
-- [ ] **Voice command: volume up/down** (requires rodio volume control)
-
-### i18n / Localization
-- [ ] All core/backend messages must be in **English**. The TUI currently mixes Italian and English — standardize to English.
-- [ ] Create a separate translation file for TUI user-facing strings (`apps/tui-rs/i18n/` or similar). This includes:
-  - Log pane messages ("Bookmark saved", "No active session", "Position: ...")
-  - Status messages ("Starting playback...", "Busy — please wait...")
-  - Command descriptions ("/play", "/pause", etc.)
-- [ ] Voice commands are already configurable in the toml (`[voice_commands]`) — users set trigger words in their language. No code changes needed for new languages.
-- [ ] TUI locale setting in config: `language = "it"` → loads Italian strings.
-
-### Italian TTS quality
-- [ ] Evaluate StyleTTS2 fine-tune with Italian dataset (Mozilla Common Voice IT, ~100h free). Training: GPU 24GB+, 2-3 days. Produces ONNX drop-in replacement for Kokoro.
-- [ ] Create better Italian voice embeddings from professional speaker samples.
-- [ ] Explore `espeak-rs` (compiled Rust binding) to eliminate system `espeak-ng` dependency.
-
-### TTS cloud premium
-- [ ] Integrate ElevenLabs and/or OpenAI TTS as optional paid backend. REST API, implement `SpeechSynthesizer` with an HTTP crate. User chooses local (free, ~1s) or cloud (paid, ~100ms, higher quality especially for Italian).
-- [ ] Config:
-  ```toml
-  [tts]
-  provider = "mlx"  # or "elevenlabs", "openai"
-
-  [elevenlabs]
-  api_key = "..."
-  voice_id = "..."
-  ```
+### Study features
+- [ ] **Voice note dictation**: "nota" command activates Whisper/Apple STT in transcription mode, records until silence, saves as note attached to current position.
+- [ ] **Search within document**: `/search <text>` to find and jump to a passage.
+- [ ] **Notes review**: `/notes` command to list all notes and bookmarks, jump to any.
+- [ ] **Export notes**: export all notes/bookmarks for a document to markdown file.
 
 ### UX
-- [ ] Auto-play next chunk when current finishes (continuous reading without pressing /next).
-- [ ] Visual indicator during synthesis ("synthesizing...").
-- [ ] Progress bar (chunk X/N).
-- [ ] Voice note dictation: "nota" command activates Whisper transcriber, records until silence, saves as note.
+- [ ] **Visual indicator during synthesis** ("synthesizing..." in status bar).
+- [ ] **Progress bar** (chunk X/N, chapter X/N) in the TUI header.
+- [ ] **Volume control** via voice command and keyboard (rodio `sink.set_volume()`).
+- [ ] **Reading timer**: show how long you've been reading this session.
+
+### i18n / Localization
+- [ ] All core/backend messages in English. Create translation files (`apps/tui-rs/i18n/`).
+- [ ] TUI locale setting: `language = "it"` → loads Italian strings.
+- [ ] Voice commands already configurable in toml — no code changes for new languages.
+
+### TTS quality
+- [ ] **StyleTTS2 fine-tune** with Italian dataset (Mozilla Common Voice IT).
+- [ ] **Better Italian voice embeddings** from professional speaker samples.
+- [ ] **espeak-rs**: compiled Rust binding to eliminate system espeak-ng dependency.
+- [ ] **TTS cloud premium**: ElevenLabs / OpenAI as optional paid backend.
 
 ## Medium term
 
+### Import formats
+- [ ] **PDF** (text extraction via pdf-extract or similar crate).
+- [ ] **EPUB** (structured chapters + metadata).
+- [ ] **URL import** (web scraping, reader mode extraction).
+- [ ] **Markdown with images**: skip images, read alt text.
+
+### Audio export
+- [ ] **Generate audiobook**: export entire document as concatenated WAV/MP3.
+- [ ] **Per-chapter export**: one audio file per chapter.
+- [ ] Useful for offline listening (commute, gym) without the app running.
+
 ### Multi-platform
-- [ ] Test and optimize Kokoro ONNX on Linux (CPU). May need XNNPACK or different backend for ARM Linux.
-- [ ] Evaluate TTS for Windows (DirectML, CUDA).
-- [ ] Desktop app with Tauri (wraps TUI or a web UI).
+- [ ] **Linux**: test Kokoro ONNX on CPU, Whisper STT.
+- [ ] **Tauri desktop app**: wraps a web UI, ships as native .app / .deb / .exe.
+- [ ] **Windows**: DirectML or CUDA for TTS.
+
+### AI features
+- [ ] **Summarize chapter**: LLM generates a summary of the current chapter on demand.
+- [ ] **Explain passage**: select a passage, ask the LLM to explain it.
+- [ ] **Quiz generation**: generate questions from what you've read (study mode).
+- [ ] **Translation on the fly**: read a document in one language, get translation in another.
 
 ### Dependencies
-- [ ] Monitor `mlx-rs` for new crates.io releases — when it includes MLX C++ v0.31+, remove git dependency and use stable version.
-- [ ] Monitor `voice-tts` / `voice-nn` for updates — if the author returns to mlx-rs, align with their repo instead of maintaining `Gibbio/voice-mlx` fork.
-- [ ] Evaluate `compile_with_state` for JIT decoder compilation when mlx-rs supports it better. Potential -30% latency.
-
-### Import
-- [ ] PDF support (text extraction).
-- [ ] EPUB support.
-- [ ] Import from URL (web scraping).
+- [ ] Monitor `mlx-rs` for crates.io updates (MLX C++ v0.31+).
+- [ ] Monitor `voice-tts` / `voice-nn` for upstream mlx-rs return.
+- [ ] Evaluate `compile_with_state` for JIT decoder when mlx-rs improves.
 
 ## Long term
 
 ### Mobile
-- [ ] iOS app with native CoreML Kokoro (FluidInference/kokoro-82m-coreml model, benchmarked 23x RTF on M4).
-- [ ] Android app with ONNX Runtime (CPU or NNAPI).
+- [ ] **iOS app**: CoreML Kokoro + SFSpeechRecognizer (native Neural Engine for both TTS and STT).
+- [ ] **Android app**: ONNX Runtime + Android SpeechRecognizer API.
+- [ ] **Reading position sync** across devices.
 
-### STT
-- [ ] Voice note dictation via Whisper transcriber (record → transcribe → save as note).
-- [ ] Evaluate larger Whisper models (medium, large-v3-turbo) for better accuracy.
-- [ ] **Apple native STT** (`SFSpeechRecognizer`) via `objc2-speech` crate (v0.3.2). Runs on Neural Engine — faster and more accurate than Whisper, zero models to download. New crate `marginalia-stt-apple` implementing `CommandRecognizer`. macOS/iOS only (cfg target). Could replace Whisper as default on Apple platforms.
-- [ ] Android native STT (`SpeechRecognizer` API) for Android app.
+### Integrations
+- [ ] **Export notes to Obsidian/Notion/Markdown** (via file or API).
+- [ ] **Import from Kindle highlights** (My Clippings.txt).
+- [ ] **RSS/Atom feed reader** with TTS — subscribe to blogs, listen to new posts.
 
-### Sync
-- [ ] Reading position sync across devices.
-- [ ] Cloud backup for documents and notes (optional).
+### Advanced audio
+- [ ] **Multiple voices for dialogue**: detect speakers in text, assign different Kokoro voices.
+- [ ] **Background ambient sounds** while reading (optional, for focus).
+- [ ] **Spatial audio**: position the reader voice in 3D space (macOS spatial audio API).
+
+### Community
+- [ ] **Shared voice packs**: users create and share custom Kokoro voice embeddings.
+- [ ] **Document library sharing**: share annotated documents with study groups.
+- [ ] **Plugin system**: allow custom importers, TTS backends, STT backends via dynamic loading.
