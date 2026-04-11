@@ -299,24 +299,32 @@ let audioEngine = AVAudioEngine()
 let inputNode = audioEngine.inputNode
 let format = inputNode.outputFormat(forBus: 0)
 
+// Shared request — the tap writes audio here, recognition reads from here.
+// We replace this when restarting recognition (new task needs new request).
+var currentRequest: SFSpeechAudioBufferRecognitionRequest?
 var currentTask: SFSpeechRecognitionTask?
 
-func startRecognition() {
+// Install a single persistent tap. It forwards audio to whatever
+// currentRequest is set to.
+inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+    currentRequest?.append(buffer)
+}
+
+audioEngine.prepare()
+do { try audioEngine.start() } catch {
+    fputs("Audio engine failed: \(error)\n", stderr)
+    exit(1)
+}
+
+fputs("[apple-stt] audio engine started\n", stderr)
+
+func startRecognitionTask() {
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
     if #available(macOS 13.0, *) {
         request.requiresOnDeviceRecognition = true
     }
-
-    inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-        request.append(buffer)
-    }
-
-    audioEngine.prepare()
-    do { try audioEngine.start() } catch {
-        fputs("Audio engine failed: \(error)\n", stderr)
-        exit(1)
-    }
+    currentRequest = request
 
     fputs("[apple-stt] listening...\n", stderr)
 
@@ -324,41 +332,32 @@ func startRecognition() {
     var silenceTimer: DispatchWorkItem?
 
     currentTask = recognizer.recognitionTask(with: request) { result, error in
-        // Cancel any pending silence timer
         silenceTimer?.cancel()
 
         if let result = result {
             lastText = result.bestTranscription.formattedString
 
             if result.isFinal {
-                // Final result — emit and restart
                 if !lastText.isEmpty {
                     print(lastText)
-                    fputs("[apple-stt] final: \(lastText)\n", stderr)
                 }
                 lastText = ""
-                audioEngine.stop()
-                inputNode.removeTap(onBus: 0)
+                // Restart task only (audio engine stays running)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    startRecognition()
+                    startRecognitionTask()
                 }
                 return
             }
 
-            // Partial result — start silence timer (1.5s)
-            // If no new partial arrives within 1.5s, emit what we have
+            // Partial result — silence timer: emit after 1.5s of no new partials
             let timer = DispatchWorkItem {
                 if !lastText.isEmpty {
                     print(lastText)
-                    fputs("[apple-stt] timeout: \(lastText)\n", stderr)
                     lastText = ""
                 }
-                // Cancel and restart
                 currentTask?.cancel()
-                audioEngine.stop()
-                inputNode.removeTap(onBus: 0)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    startRecognition()
+                    startRecognitionTask()
                 }
             }
             silenceTimer = timer
@@ -367,15 +366,14 @@ func startRecognition() {
 
         if let error = error {
             fputs("[apple-stt] error: \(error.localizedDescription)\n", stderr)
-            audioEngine.stop()
-            inputNode.removeTap(onBus: 0)
+            // Restart task after error (audio engine stays running)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                startRecognition()
+                startRecognitionTask()
             }
         }
     }
 }
 
-startRecognition()
+startRecognitionTask()
 dispatchMain()
 "#;
