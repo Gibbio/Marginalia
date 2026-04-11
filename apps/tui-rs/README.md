@@ -99,19 +99,31 @@ back = ["indietro"]
 stop = ["stop", "basta"]
 repeat = ["ripeti"]
 resume = ["riprendi", "continua"]
+next_chapter = ["prossimo capitolo", "capitolo avanti"]
+prev_chapter = ["capitolo indietro", "capitolo precedente"]
+bookmark = ["segna", "segnalibro"]
+note = ["nota", "appunto"]
+where = ["dove sono", "posizione"]
 ```
 
-| Action | What it does |
-|---|---|
-| **pause** | Pause playback |
-| **next** | Advance to next chunk |
-| **back** | Go back one chunk |
-| **stop** | Stop session |
-| **repeat** | Repeat current chunk |
-| **resume** | Resume playback |
+| Action | What it does | Default triggers |
+|---|---|---|
+| **pause** | Pause playback | pausa, ferma |
+| **next** | Next chunk | avanti, prossimo |
+| **back** | Previous chunk | indietro |
+| **stop** | Stop session | stop, basta |
+| **repeat** | Repeat current chunk | ripeti |
+| **resume** | Resume playback | riprendi, continua |
+| **next_chapter** | Skip to next chapter | prossimo capitolo |
+| **prev_chapter** | Previous chapter | capitolo indietro |
+| **bookmark** | Save position as note | segna, segnalibro |
+| **note** | Start note (dictation planned) | nota, appunto |
+| **where** | Show current position in Log | dove sono, posizione |
 
 To add a new trigger word, edit the toml. To add a new action, also add
 a match arm in `app.rs` → `handle_voice_command`.
+
+Enable `debug_stt = true` in the config to see what the mic hears in the Log pane.
 
 ### STT backends
 
