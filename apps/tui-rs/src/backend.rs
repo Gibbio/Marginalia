@@ -738,8 +738,9 @@ impl BetaBackendClient {
         };
         drop(runtime);
 
-        // Only log commands and query errors — skip routine polling queries
-        if request_type == "command" || response.status != "ok" {
+        // Log commands and query errors — skip routine polling (queries + auto_advance).
+        let is_silent = name == "auto_advance";
+        if (request_type == "command" && !is_silent) || response.status != "ok" {
             self.push_log(format!("beta {request_type} {name} => {}", response.status));
         }
         ResponseEnvelope {
