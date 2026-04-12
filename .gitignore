@@ -43,7 +43,6 @@ models/tts/piper/*.json
 models/tts/mlx/*.safetensors
 models/tts/mlx/voices/
 models/tts/mlx/.cache/
-!models/tts/mlx/README.md
 
 # Benchmark artifacts
 benchmark/macos-apple-silicon/rust/target/
