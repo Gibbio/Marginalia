@@ -262,6 +262,13 @@ impl BackendClient {
         let Self::Beta(client) = self;
         client.poll_voice_event()
     }
+
+    /// Check if the current chunk finished playing. If so, auto-advance to
+    /// the next chunk (or stop at end of document). Returns true if advanced.
+    pub fn check_auto_advance(&mut self) -> bool {
+        let Self::Beta(client) = self;
+        client.check_auto_advance()
+    }
 }
 
 pub(crate) struct BetaBackendClient {
@@ -477,11 +484,10 @@ impl BetaBackendClient {
                     whisper_command_config.speech_threshold = v;
                 }
                 let cmd_commands = config.voice_commands.all_words();
-                runtime.set_command_recognizer(WhisperCommandRecognizer::new(
+                let whisper_cmd_rec = WhisperCommandRecognizer::new(
                     whisper_command_config,
                     cmd_commands,
-                ));
-                stt_label = "whisper";
+                );
 
                 // Dictation-context Whisper: long defaults from WhisperConfig::new
                 // (60s, 1.5s, 500), then [stt.dictation] overrides.
@@ -496,9 +502,15 @@ impl BetaBackendClient {
                 if let Some(v) = config.stt.dictation.speech_threshold {
                     whisper_dictation_config.speech_threshold = v;
                 }
-                runtime.set_dictation_transcriber(WhisperDictationTranscriber::new(
+                let whisper_dict = WhisperDictationTranscriber::new(
                     whisper_dictation_config.clone(),
-                ));
+                );
+                runtime.set_stt_engine(marginalia_runtime::SttEngineOutput {
+                    command_recognizer: Box::new(whisper_cmd_rec),
+                    dictation_transcriber: Box::new(whisper_dict),
+                    engine_label: "whisper".to_string(),
+                });
+                stt_label = "whisper";
                 runtime.set_provider_doctor_blob(
                     "whisper_dictation_stt",
                     json!({
@@ -599,6 +611,15 @@ impl BetaBackendClient {
 
     pub fn poll_voice_event(&mut self) -> Option<(Option<String>, Option<String>)> {
         self.voice_cmd_rx.as_ref()?.try_recv().ok()
+    }
+
+    pub fn check_auto_advance(&mut self) -> bool {
+        let response = self.send_request("command", "auto_advance", json!({}));
+        response
+            .payload
+            .get("advanced")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     fn get_app_snapshot(&mut self) -> Result<AppSnapshot, String> {

@@ -19,6 +19,6 @@ pub use runtime::{RuntimeCleanupReport, RuntimeSessionRecord, RuntimeSupervisor}
 pub use storage::StorageError;
 pub use stt::{
     CommandRecognition, CommandRecognizer, DictationSegment, DictationTranscriber,
-    DictationTranscript, SpeechInterruptCapture, SpeechInterruptMonitor,
+    DictationTranscript, SpeechInterruptCapture, SpeechInterruptMonitor, SttEngineOutput,
 };
 pub use tts::{SpeechSynthesizer, SynthesisError, SynthesisRequest, SynthesisResult};

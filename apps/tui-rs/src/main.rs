@@ -146,16 +146,12 @@ fn run_tui(
 
         app.flush_pending_play();
         app.poll_async_command();
+        app.check_auto_advance();
 
         if let Some((raw, _cmd)) = app.poll_voice_event() {
             if let Some(raw) = raw {
                 app.push_message(format!("stt: \"{raw}\""));
                 logger.info(format!("stt heard: {raw}"));
-                // Always pass the raw utterance to the handler; the echo
-                // filter inside will strip TTS playback words (if any) and
-                // then resolve the action. The pre-match done by the monitor
-                // thread (`_cmd`) is intentionally ignored because it is
-                // computed before echo filtering.
                 app.handle_voice_command(&raw);
             }
         }
