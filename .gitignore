@@ -40,6 +40,9 @@ models/tts/kokoro/voices/
 models/tts/kokoro/lib/
 models/tts/piper/*.onnx
 models/tts/piper/*.json
+models/tts/mlx/*.safetensors
+models/tts/mlx/voices/
+models/tts/mlx/.cache/
 
 # Benchmark artifacts
 benchmark/macos-apple-silicon/rust/target/
