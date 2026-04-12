@@ -24,8 +24,8 @@ descoped before tagging `v0.1.0-beta`.
 | 12 | **Config** | Configurable chunk size (`chunk_target_chars`) | Done | Per-platform tuning |
 | 13 | **Logging** | Replace `eprintln!` with `log` crate | Done | All library crates + TUI migrated |
 | 14 | **Shared config** | Extract `marginalia-config` crate with reusable config types | Done | VoiceCommandsSection, SttSection, etc. extracted |
-| 15 | **RuntimeBuilder** | Builder pattern for provider wiring | **TODO** | Eliminates 500 lines of duplicated wiring per app |
-| 16 | **Events / callbacks** | Runtime event system (not just polling) | **TODO** | Mobile needs push: playback finished, command recognized, synthesis ready |
+| 15 | **RuntimeBuilder** | Builder pattern for provider wiring | Done | `RuntimeBuilder::new(path).stt(cfg).build()` — ~290 lines removed from TUI backend. Feature flags forwarded to runtime. |
+| 16 | **Events / callbacks** | Runtime event system (not just polling) | Done | `RuntimeEvent` enum + `RuntimeEventSink` (channels + callbacks). Emits: PlaybackFinished, ChunkAdvanced, SessionRestored, SessionStopped. |
 | 17 | **FFI** | C-compatible API or UniFFI bindings | **TODO** | Required for iOS (Swift), Android (Kotlin), Windows (C#) |
 | 18 | **Testing** | Core trait tests + integration tests | **TODO** | Developers need to trust the library before building on it |
 | 19 | **CI** | GitHub Actions: macOS + Linux | **TODO** | Compiles all crates, runs all tests on every push |

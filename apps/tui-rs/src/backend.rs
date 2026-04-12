@@ -1,16 +1,5 @@
 use crate::config::TuiConfig;
-use marginalia_playback_host::HostPlaybackEngine;
-use marginalia_runtime::{RuntimeFrontend, SqliteRuntime};
-#[cfg(feature = "apple-stt")]
-use marginalia_stt_apple::new_apple_stt;
-#[cfg(feature = "whisper-stt")]
-use marginalia_stt_whisper::{
-    WhisperCommandRecognizer, WhisperConfig, WhisperDictationTranscriber,
-};
-use marginalia_tts_kokoro::{
-    KokoroConfig, KokoroExternalPhonemizerConfig, KokoroSpeechSynthesizer,
-    KokoroSpeechSynthesizerConfig, KokoroTextProcessor,
-};
+use marginalia_runtime::{RuntimeBuilder, RuntimeFrontend};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -293,7 +282,7 @@ pub(crate) struct BetaBackendClient {
     async_result_rx: Option<mpsc::Receiver<AsyncCommandResult>>,
     /// Real-time audio waveform data from the AEC pipeline (if active).
     #[cfg(feature = "apple-stt")]
-    pub waveform_data: Option<std::sync::Arc<std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>>>,
+    pub waveform_data: Option<std::sync::Arc<std::sync::Mutex<marginalia_runtime::builder::WaveformData>>>,
 }
 
 struct AsyncCommandResult {
@@ -308,265 +297,28 @@ impl BetaBackendClient {
         let db_path = config
             .database_path
             .unwrap_or_else(|| PathBuf::from(".marginalia/beta.sqlite3"));
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        let tts_cache_dir = config.tts_cache_dir.clone().unwrap_or_else(|| {
-            db_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join("tts-cache")
-        });
-        std::fs::create_dir_all(&tts_cache_dir).ok();
+
         let mut runtime_config = marginalia_runtime::RuntimeConfig::default();
         if let Some(v) = config.chunk_target_chars {
             runtime_config.chunk_target_chars = v;
         }
-        runtime_config.tts_cache_dir = Some(tts_cache_dir);
-        let mut runtime = SqliteRuntime::open_with_config(&db_path, runtime_config)
-            .map_err(|err| format!("Unable to open beta runtime database: {err}"))?;
-
-        // Playback engine: created here, but NOT passed to the runtime yet.
-        // We set the AEC render callback (if needed) after STT init, then hand
-        // it off to the runtime.
-        let mut playback_engine = if config.playback.fake {
-            None
-        } else {
-            Some(HostPlaybackEngine::default())
-        };
-        let playback_label = if playback_engine.is_some() { "host" } else { "fake" };
-
-        // TTS: Kokoro se [kokoro] assets_root è configurato
-        let mut tts_label = "fake";
-        if let Some(assets_root) = config.kokoro.assets_root {
-            let kokoro_config = KokoroConfig::from_assets_root(&assets_root);
-            let readiness = kokoro_config.readiness_report();
-            if readiness.is_ready() {
-                let tts_dir = config.kokoro.tts_cache_dir.unwrap_or_else(|| {
-                    db_path
-                        .parent()
-                        .unwrap_or_else(|| Path::new("."))
-                        .join(".marginalia-tts-cache")
-                });
-                let synth_config = KokoroSpeechSynthesizerConfig::new(&tts_dir);
-                let synthesizer = if let Some(program) = &config.kokoro.phonemizer_program {
-                    let args = if config.kokoro.phonemizer_args.is_empty() {
-                        vec![
-                            "-v".to_string(),
-                            "it".to_string(),
-                            "--ipa".to_string(),
-                            "-q".to_string(),
-                        ]
-                    } else {
-                        config.kokoro.phonemizer_args.clone()
-                    };
-                    let text_processor = KokoroTextProcessor::with_external_command(
-                        kokoro_config.clone(),
-                        KokoroExternalPhonemizerConfig {
-                            program: program.clone(),
-                            args,
-                        },
-                    );
-                    KokoroSpeechSynthesizer::with_text_processor(
-                        kokoro_config,
-                        synth_config,
-                        text_processor,
-                    )
-                } else {
-                    KokoroSpeechSynthesizer::new(kokoro_config, synth_config)
-                };
-                runtime.set_speech_synthesizer(synthesizer);
-                runtime.set_provider_doctor_blob(
-                    "kokoro",
-                    json!({ "ready": true, "assets_root": assets_root.display().to_string() }),
-                );
-                tts_label = "kokoro";
-            } else {
-                runtime.set_provider_doctor_blob(
-                    "kokoro",
-                    json!({
-                        "ready": false,
-                        "assets_root": assets_root.display().to_string(),
-                        "missing": readiness.missing,
-                    }),
-                );
-            }
+        if let Some(dir) = config.tts_cache_dir.clone() {
+            runtime_config.tts_cache_dir = Some(dir);
         }
 
-        // TTS: MLX (macOS Apple Silicon) — overrides Kokoro ONNX if available
-        #[cfg(feature = "mlx-tts")]
-        {
-            let tts_cache = db_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(".marginalia-tts-cache");
-            match marginalia_tts_mlx::MlxSpeechSynthesizer::new(
-                &config.mlx.model,
-                &config.mlx.voice,
-                &tts_cache,
-            ) {
-                Ok(synth) => {
-                    runtime.set_speech_synthesizer(synth);
-                    runtime.set_default_voice(&config.mlx.voice);
-                    tts_label = "kokoro-mlx";
-                }
-                Err(e) => {
-                    log::warn!("MLX TTS init failed, keeping {tts_label}: {e}");
-                }
-            }
-        }
+        let output = RuntimeBuilder::new(&db_path)
+            .config(runtime_config)
+            .voice_commands(config.voice_commands)
+            .stt(config.stt)
+            .kokoro(config.kokoro)
+            .mlx(config.mlx)
+            .playback(config.playback)
+            .build()?;
 
-        // STT engine: one engine handles both commands and dictation, with
-        // per-context tuning from [stt.commands] and [stt.dictation].
-        #[allow(unused_mut, unused_variables)]
-        let mut stt_label = "fake";
-        #[allow(unused_mut, unused_variables)]
-        let mut dictation_label = "fake";
-        #[cfg(feature = "apple-stt")]
-        let mut _waveform_data: Option<std::sync::Arc<std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>>> = None;
-        let stt_engine = config.stt.engine.to_lowercase();
+        let mut runtime = output.runtime;
+        let stt_debug = output.stt_debug;
 
-        if stt_engine == "apple" {
-            #[cfg(feature = "apple-stt")]
-            {
-                let commands = config.voice_commands.all_words();
-                // Apple wants BCP-47 (it-IT). Accept ISO ("it") and upgrade.
-                let language = match config.stt.language.as_deref() {
-                    None => "it-IT".to_string(),
-                    Some(l) if l.contains('-') => l.to_string(),
-                    Some(l) if l.eq_ignore_ascii_case("it") => "it-IT".to_string(),
-                    Some(l) if l.eq_ignore_ascii_case("en") => "en-US".to_string(),
-                    Some(l) => l.to_string(),
-                };
-                let cmd_silence = config.stt.commands.silence_timeout.unwrap_or(0.8);
-                let dict_silence = config.stt.dictation.silence_timeout.unwrap_or(1.5);
-                let dict_max = config.stt.dictation.max_record_seconds.unwrap_or(60.0);
-                match new_apple_stt(&language, commands, cmd_silence, dict_silence, dict_max) {
-                    Ok((rec, dict, aec_pipeline)) => {
-                        runtime.set_command_recognizer(rec);
-                        runtime.set_dictation_transcriber(dict);
-                        // Wire the playback engine's reference signal into the
-                        // AEC pipeline so echo cancellation has something to subtract.
-                        // We extract the render sender (which is Send) instead of
-                        // moving the whole pipeline (cpal::Stream is !Send).
-                        let render_tx = aec_pipeline.render_sender();
-                        if let Some(ref mut pe) = playback_engine {
-                            pe.set_play_samples_callback(Box::new(move |samples| {
-                                use marginalia_stt_apple::aec_pipeline::RenderCommand;
-                                let _ = render_tx.try_send(RenderCommand::SetReference(samples));
-                            }));
-                        }
-                        // Keep the pipeline alive for the entire process. The
-                        // AecPipeline holds cpal::Stream (!Send) so we can't
-                        // store it in BackendClient (Arc<Mutex>). Leaking is
-                        // the standard pattern for process-scoped audio streams.
-                        _waveform_data = Some(aec_pipeline.waveform_data());
-                        Box::leak(Box::new(aec_pipeline));
-                        runtime.set_provider_doctor_blob(
-                            "apple_stt",
-                            json!({
-                                "ready": true,
-                                "language": language,
-                                "cmd_silence_timeout": cmd_silence,
-                                "dict_silence_timeout": dict_silence,
-                                "dict_max_seconds": dict_max,
-                            }),
-                        );
-                        stt_label = "apple";
-                        dictation_label = "apple";
-                    }
-                    Err(e) => {
-                        runtime.set_provider_doctor_blob(
-                            "apple_stt",
-                            json!({ "ready": false, "error": e }),
-                        );
-                        log::error!("[apple-stt] {e}");
-                    }
-                }
-            }
-            #[cfg(not(feature = "apple-stt"))]
-            log::warn!("[stt] engine=apple but apple-stt feature is not built in");
-        } else if stt_engine == "whisper" {
-            #[cfg(feature = "whisper-stt")]
-            if let Some(model_path) = config.stt.whisper.model_path.clone() {
-                // Whisper wants ISO ("it"). Accept BCP-47 ("it-IT") and downgrade.
-                let language = config
-                    .stt
-                    .language
-                    .clone()
-                    .map(|l| l.split('-').next().unwrap_or("it").to_string())
-                    .unwrap_or_else(|| "it".to_string());
-
-                // Command-context Whisper: short defaults tuned for trigger words.
-                let mut whisper_command_config = WhisperConfig::new(&model_path);
-                whisper_command_config.language = language.clone();
-                whisper_command_config.max_duration_seconds = 4.0;
-                whisper_command_config.silence_timeout_seconds = 0.8;
-                if let Some(v) = config.stt.commands.silence_timeout {
-                    whisper_command_config.silence_timeout_seconds = v;
-                }
-                if let Some(v) = config.stt.commands.max_record_seconds {
-                    whisper_command_config.max_duration_seconds = v;
-                }
-                if let Some(v) = config.stt.commands.speech_threshold {
-                    whisper_command_config.speech_threshold = v;
-                }
-                let cmd_commands = config.voice_commands.all_words();
-                let whisper_cmd_rec = WhisperCommandRecognizer::new(
-                    whisper_command_config,
-                    cmd_commands,
-                );
-
-                // Dictation-context Whisper: long defaults from WhisperConfig::new
-                // (60s, 1.5s, 500), then [stt.dictation] overrides.
-                let mut whisper_dictation_config = WhisperConfig::new(&model_path);
-                whisper_dictation_config.language = language;
-                if let Some(v) = config.stt.dictation.silence_timeout {
-                    whisper_dictation_config.silence_timeout_seconds = v;
-                }
-                if let Some(v) = config.stt.dictation.max_record_seconds {
-                    whisper_dictation_config.max_duration_seconds = v;
-                }
-                if let Some(v) = config.stt.dictation.speech_threshold {
-                    whisper_dictation_config.speech_threshold = v;
-                }
-                let whisper_dict = WhisperDictationTranscriber::new(
-                    whisper_dictation_config.clone(),
-                );
-                runtime.set_stt_engine(marginalia_runtime::SttEngineOutput {
-                    command_recognizer: Box::new(whisper_cmd_rec),
-                    dictation_transcriber: Box::new(whisper_dict),
-                    engine_label: "whisper".to_string(),
-                });
-                stt_label = "whisper";
-                runtime.set_provider_doctor_blob(
-                    "whisper_dictation_stt",
-                    json!({
-                        "ready": true,
-                        "model_path": model_path.display().to_string(),
-                        "max_record_seconds": whisper_dictation_config.max_duration_seconds,
-                        "silence_timeout": whisper_dictation_config.silence_timeout_seconds,
-                    }),
-                );
-                dictation_label = "whisper";
-            }
-            #[cfg(not(feature = "whisper-stt"))]
-            log::warn!("[stt] engine=whisper but whisper-stt feature is not built in");
-        } else {
-            log::error!(
-                "[stt] unknown engine '{stt_engine}' — valid choices: \"apple\", \"whisper\""
-            );
-        }
-
-        // Now hand the playback engine to the runtime (after AEC callback is wired).
-        if let Some(pe) = playback_engine {
-            runtime.set_playback_engine(pe);
-        }
-
-        // Voice command monitor — open and run in background thread.
-        // The monitor is independent from the runtime after creation (owns its own audio stream).
-        // Thread exits automatically when voice_cmd_rx is dropped (tx.send fails).
-        let stt_debug = config.stt.debug;
+        // Voice command monitor — stays in the app (TUI-specific thread).
         let voice_cmd_rx = {
             let mut monitor = runtime.open_command_monitor();
             // Channel sends (raw_text, command). raw_text is for debug logging.
@@ -605,36 +357,16 @@ impl BetaBackendClient {
             voice_cmd_rx,
             async_result_rx: None,
             #[cfg(feature = "apple-stt")]
-            waveform_data: _waveform_data,
+            waveform_data: output.sidecar.waveform_data,
         };
         client.push_log(format!(
-            "beta-runtime ready db={} playback={} tts={} stt={} dictation={}",
+            "ready db={} playback={} tts={} stt={} dictation={}",
             db_path.display(),
-            playback_label,
-            tts_label,
-            stt_label,
-            dictation_label,
+            output.playback_label,
+            output.tts_label,
+            output.stt_label,
+            output.dictation_label,
         ));
-
-        // Try to restore the last active session so the user picks up where
-        // they left off. The session resumes in Paused state — /resume or
-        // "riprendi" starts playback.
-        let restore = client.send_request("command", "restore_session", json!({}));
-        if restore.status == "ok" {
-            if let Some(session) = restore.payload.get("session") {
-                if !session.is_null() {
-                    let doc = session
-                        .get("document_id")
-                        .and_then(Value::as_str)
-                        .unwrap_or("?");
-                    let sec = session.get("section_index").and_then(Value::as_u64).unwrap_or(0);
-                    let chk = session.get("chunk_index").and_then(Value::as_u64).unwrap_or(0);
-                    client.push_log(format!(
-                        "Restored session: document={doc} section={sec} chunk={chk}. Type /resume to continue."
-                    ));
-                }
-            }
-        }
 
         Ok(client)
     }
