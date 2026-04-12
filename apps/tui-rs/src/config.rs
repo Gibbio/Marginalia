@@ -9,6 +9,11 @@ use std::path::PathBuf;
 pub struct TuiConfig {
     /// Path to the SQLite database. Default: `.marginalia/beta.sqlite3`.
     pub database_path: Option<PathBuf>,
+    /// Target characters per chunk when splitting imported documents.
+    /// Lower values = shorter TTS utterances (faster response on slow TTS).
+    /// Higher values = fewer chunks, less navigation overhead.
+    /// Default: 300.
+    pub chunk_target_chars: Option<usize>,
     /// Trigger words mapped to actions (`pause`, `next`, etc.).
     #[serde(default)]
     pub voice_commands: VoiceCommandsSection,

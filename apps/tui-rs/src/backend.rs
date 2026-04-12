@@ -288,7 +288,11 @@ impl BetaBackendClient {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        let mut runtime = SqliteRuntime::open(&db_path)
+        let mut runtime_config = marginalia_runtime::RuntimeConfig::default();
+        if let Some(v) = config.chunk_target_chars {
+            runtime_config.chunk_target_chars = v;
+        }
+        let mut runtime = SqliteRuntime::open_with_config(&db_path, runtime_config)
             .map_err(|err| format!("Unable to open beta runtime database: {err}"))?;
 
         // Playback: HostPlaybackEngine di default, fake se config.playback.fake = true
@@ -546,6 +550,27 @@ impl BetaBackendClient {
             stt_label,
             dictation_label,
         ));
+
+        // Try to restore the last active session so the user picks up where
+        // they left off. The session resumes in Paused state — /resume or
+        // "riprendi" starts playback.
+        let restore = client.send_request("command", "restore_session", json!({}));
+        if restore.status == "ok" {
+            if let Some(session) = restore.payload.get("session") {
+                if !session.is_null() {
+                    let doc = session
+                        .get("document_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("?");
+                    let sec = session.get("section_index").and_then(Value::as_u64).unwrap_or(0);
+                    let chk = session.get("chunk_index").and_then(Value::as_u64).unwrap_or(0);
+                    client.push_log(format!(
+                        "Restored session: document={doc} section={sec} chunk={chk}. Type /resume to continue."
+                    ));
+                }
+            }
+        }
+
         Ok(client)
     }
 

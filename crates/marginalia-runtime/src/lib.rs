@@ -5,7 +5,8 @@ use marginalia_core::application::{
     SessionQueryService,
 };
 use marginalia_core::domain::{
-    ReaderState, ReadingPosition, ReadingSession, VoiceNote, DEFAULT_CHUNK_TARGET_CHARS,
+    PlaybackState, ReaderState, ReadingPosition, ReadingSession, VoiceNote,
+    DEFAULT_CHUNK_TARGET_CHARS,
 };
 use marginalia_core::events::{DomainEvent, EventName};
 use marginalia_core::frontend::{
@@ -384,6 +385,43 @@ impl SqliteRuntime {
         );
 
         Ok(session)
+    }
+
+    /// Restore the last active session from the database, if any. This is
+    /// called once at startup so the user picks up where they left off.
+    /// The session is restored in **Paused** state with command listening
+    /// active — the user can then `/resume` or say "riprendi" to start
+    /// playback. Returns `None` if no active session was found or the
+    /// document no longer exists.
+    pub fn restore_session(&mut self) -> Option<ReadingSession> {
+        let mut session = self.session_repository.get_active_session()?;
+
+        // Guard: does the document still exist?
+        if self
+            .document_repository
+            .get_document(&session.document_id)
+            .is_none()
+        {
+            session.is_active = false;
+            session.touch();
+            let _ = self.session_repository.save_session(session);
+            return None;
+        }
+
+        // Set to Paused so the TUI shows the document without auto-playing.
+        session.state = ReaderState::Paused;
+        session.playback_state = PlaybackState::Stopped;
+        session.command_listening_active = true;
+        session.last_command = Some("restore_session".to_string());
+        session.runtime_status = Some("active".to_string());
+        session.voice = session
+            .voice
+            .or_else(|| Some(self.config.default_voice.clone()));
+        session.touch();
+        if let Err(e) = self.session_repository.save_session(session.clone()) {
+            eprintln!("WARNING: failed to save restored session: {e}");
+        }
+        Some(session)
     }
 
     pub fn app_snapshot(&mut self) -> AppSnapshot {
