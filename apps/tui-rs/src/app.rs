@@ -618,6 +618,10 @@ impl App {
         (self.launched_at.elapsed().as_millis() / 90) as usize
     }
 
+    pub fn waveform_levels(&self) -> (Vec<f32>, Vec<f32>) {
+        self.backend.waveform_levels()
+    }
+
     fn graceful_shutdown(&mut self) {
         let _ = self.backend.stop_session();
         self.should_quit = true;

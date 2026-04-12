@@ -403,10 +403,13 @@ fn render(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_waveform_lines(app: &App, width: u16) -> Vec<Line<'static>> {
-    let bars = "▁▂▃▄▅▆▇█";
-    let bar_chars: Vec<char> = bars.chars().collect();
+    let bars: Vec<char> = "▁▂▃▄▅▆▇█".chars().collect();
     let w = width.saturating_sub(4) as usize;
-    let tick = app.animation_tick();
+    if w == 0 {
+        return vec![];
+    }
+
+    let (tts_levels, mic_levels) = app.waveform_levels();
 
     let is_playing = app
         .session_snapshot
@@ -421,35 +424,32 @@ fn render_waveform_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     };
     let mic_style = Style::default().fg(Color::Green);
 
-    // TTS waveform: simulated from playback state.
-    let tts_bar: String = (0..w)
-        .map(|i| {
-            if !is_playing {
-                bar_chars[0]
-            } else {
-                let v = ((tick + i) as f64 * 0.3).sin().abs();
-                bar_chars[(v * 7.0) as usize % bar_chars.len()]
-            }
-        })
-        .collect();
+    let levels_to_bar = |levels: &[f32]| -> String {
+        if levels.is_empty() {
+            return (0..w).map(|_| bars[0]).collect();
+        }
+        let len = levels.len();
+        (0..w)
+            .map(|i| {
+                let idx = if len > w {
+                    len - w + i
+                } else if i >= w - len {
+                    i - (w - len)
+                } else {
+                    return bars[0];
+                };
+                let v = levels[idx].clamp(0.0, 1.0);
+                bars[(v * 7.0) as usize % bars.len()]
+            })
+            .collect()
+    };
 
-    // Mic waveform: simulated from animation tick.
-    let mic_bar: String = (0..w)
-        .map(|i| {
-            let v = ((tick + i) as f64 * 0.5 + 1.7).sin().abs() * 0.6;
-            bar_chars[(v * 7.0) as usize % bar_chars.len()]
-        })
-        .collect();
+    let tts_bar = levels_to_bar(&tts_levels);
+    let mic_bar = levels_to_bar(&mic_levels);
 
     vec![
-        Line::from(Span::styled(
-            format!(" 🔊 {tts_bar}"),
-            tts_style,
-        )),
-        Line::from(Span::styled(
-            format!(" 🎤 {mic_bar}"),
-            mic_style,
-        )),
+        Line::from(Span::styled(format!(" 🔊 {tts_bar}"), tts_style)),
+        Line::from(Span::styled(format!(" 🎤 {mic_bar}"), mic_style)),
         Line::from(""),
     ]
 }
