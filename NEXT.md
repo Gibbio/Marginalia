@@ -15,7 +15,7 @@
 ### Reading flow
 - [ ] **Auto-play next chunk** when current finishes (rodio `sink.empty()` callback). This is the most requested feature — continuous reading without pressing /next.
 - [ ] **Reading speed control**: voice commands "piu' veloce" / "piu' lento" that adjust TTS speed parameter and/or rodio playback rate.
-- [ ] **Resume where you left off**: persist reading position in SQLite, auto-resume on `/play`.
+- [x] **Resume where you left off**: reading position persisted in SQLite; last active session auto-restored on TUI startup in Paused state. Type `/resume` or say "riprendi" to continue.
 - [ ] **Sentence-level navigation**: skip/repeat single sentences within a chunk, not just whole chunks.
 
 ### Echo cancellation — voice commands during playback
@@ -55,8 +55,6 @@
 - [ ] Voice commands already configurable in toml — no code changes for new languages.
 
 ### TTS quality
-- [ ] **StyleTTS2 fine-tune** with Italian dataset (Mozilla Common Voice IT).
-- [ ] **Better Italian voice embeddings** from professional speaker samples.
 - [ ] **espeak-rs**: compiled Rust binding to eliminate system espeak-ng dependency.
 - [ ] **TTS cloud premium**: ElevenLabs / OpenAI as optional paid backend.
 

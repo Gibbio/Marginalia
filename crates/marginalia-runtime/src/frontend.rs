@@ -43,6 +43,7 @@ impl SqliteRuntime {
                 "previous_chunk",
                 "repeat_chunk",
                 "restart_chapter",
+                "restore_session",
                 "resume_session",
                 "start_session",
                 "stop_session",
@@ -198,6 +199,20 @@ impl SqliteRuntime {
                     Err(err) => error_response(err.to_string()),
                 }
             }
+            "restore_session" => match self.restore_session() {
+                Some(session) => ok_response(
+                    "Session restored.",
+                    json!({
+                        "session": {
+                            "session_id": session.session_id,
+                            "document_id": session.document_id,
+                            "section_index": session.position.section_index,
+                            "chunk_index": session.position.chunk_index,
+                        }
+                    }),
+                ),
+                None => ok_response("No active session to restore.", json!(null)),
+            },
             "start_session" => {
                 let target = payload
                     .get("target")

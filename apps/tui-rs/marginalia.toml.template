@@ -4,6 +4,7 @@
 # Date:         __DATE__
 
 database_path = ".marginalia/beta.sqlite3"
+# chunk_target_chars = 300   # target characters per chunk for document import (default 300)
 
 # ── TTS ───────────────────────────────────────────────────────
 __TTS_SECTION__
