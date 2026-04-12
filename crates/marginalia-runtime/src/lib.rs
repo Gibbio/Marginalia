@@ -1,3 +1,4 @@
+pub mod builder;
 mod events;
 mod frontend;
 
@@ -36,6 +37,7 @@ use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub use builder::{BuildOutput, RuntimeBuilder, RuntimeSidecar};
 pub use events::{EventCallback, RuntimeEvent, RuntimeEventSink};
 pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
 pub use marginalia_core::ports::SttEngineOutput;

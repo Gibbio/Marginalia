@@ -6,23 +6,18 @@ description = "Rust TUI frontend for Marginalia"
 
 [features]
 default = []
-whisper-stt       = ["dep:marginalia-stt-whisper"]
-whisper-stt-metal = ["whisper-stt", "marginalia-stt-whisper/metal"]
-whisper-stt-cuda  = ["dep:marginalia-stt-whisper", "marginalia-stt-whisper/cuda"]
+whisper-stt       = ["marginalia-runtime/whisper-stt"]
+whisper-stt-metal = ["whisper-stt", "marginalia-runtime/whisper-stt-metal"]
 kokoro-coreml     = ["marginalia-tts-kokoro/coreml"]
 kokoro-cuda       = ["marginalia-tts-kokoro/cuda"]
-mlx-tts           = ["dep:marginalia-tts-mlx"]
-apple-stt         = ["dep:marginalia-stt-apple"]
+mlx-tts           = ["marginalia-runtime/mlx-tts"]
+apple-stt         = ["marginalia-runtime/apple-stt"]
 
 [dependencies]
-marginalia-stt-apple = { path = "../../crates/marginalia-stt-apple", optional = true }
-marginalia-stt-whisper = { path = "../../crates/marginalia-stt-whisper", optional = true }
 crossterm = "0.28"
 log = "0.4"
 marginalia-config = { path = "../../crates/marginalia-config" }
-marginalia-playback-host = { path = "../../crates/marginalia-playback-host" }
-marginalia-runtime = { path = "../../crates/marginalia-runtime" }
-marginalia-tts-mlx = { path = "../../crates/marginalia-tts-mlx", optional = true }
+marginalia-runtime = { path = "../../crates/marginalia-runtime", features = ["host-playback"] }
 marginalia-tts-kokoro = { path = "../../crates/marginalia-tts-kokoro" }
 ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
 serde = { version = "1", features = ["derive"] }

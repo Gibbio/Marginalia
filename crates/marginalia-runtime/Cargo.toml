@@ -4,13 +4,27 @@ version = "0.1.0"
 edition = "2021"
 description = "Host-neutral runtime composition for the Marginalia Beta engine"
 
+[features]
+default = []
+apple-stt = ["dep:marginalia-stt-apple"]
+whisper-stt = ["dep:marginalia-stt-whisper"]
+whisper-stt-metal = ["whisper-stt", "marginalia-stt-whisper/metal"]
+mlx-tts = ["dep:marginalia-tts-mlx"]
+host-playback = ["dep:marginalia-playback-host"]
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log = "0.4"
+marginalia-config = { path = "../marginalia-config" }
 marginalia-core = { path = "../marginalia-core" }
 marginalia-import-text = { path = "../marginalia-import-text" }
+marginalia-playback-host = { path = "../marginalia-playback-host", optional = true }
 marginalia-provider-fake = { path = "../marginalia-provider-fake" }
+marginalia-stt-apple = { path = "../marginalia-stt-apple", optional = true }
+marginalia-stt-whisper = { path = "../marginalia-stt-whisper", optional = true }
 marginalia-storage-sqlite = { path = "../marginalia-storage-sqlite" }
+marginalia-tts-kokoro = { path = "../marginalia-tts-kokoro" }
+marginalia-tts-mlx = { path = "../marginalia-tts-mlx", optional = true }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
 sha2 = "0.10"
