@@ -8,8 +8,8 @@ Current responsibilities:
 - validate whether the expected model and voice assets are present
 - load `config.json` vocabulary and map phoneme symbols to token IDs
 - resolve an ONNX Runtime dynamic library for local probing
-- expose a doctor report that desktop hosts and devtools can use during the
-  Python removal migration
+- expose a doctor report that desktop hosts and devtools can use to verify asset
+  readiness
 - attempt to open the Kokoro ONNX model and report whether a session can be
   created
 - run low-level ONNX inference from either phoneme strings or precomputed token

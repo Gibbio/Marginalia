@@ -26,7 +26,8 @@ with [mlx-rs](https://github.com/oxideai/mlx-rs) from git for MLX C++ v0.31+.
 
 | Crate | Description |
 |---|---|
-| `marginalia-stt-vosk` | Vosk speech recognition (needs libvosk) |
+| `marginalia-stt-apple` | Apple SFSpeechRecognizer — commands + dictation (macOS) |
+| `marginalia-stt-vosk` | Vosk speech recognition (legacy, needs libvosk) |
 | `marginalia-stt-whisper` | Whisper speech recognition (needs cmake + C++) |
 
 ## Other
@@ -36,3 +37,5 @@ with [mlx-rs](https://github.com/oxideai/mlx-rs) from git for MLX C++ v0.31+.
 | `marginalia-playback-host` | Audio playback abstraction |
 | `marginalia-provider-fake` | Fake providers for testing |
 | `marginalia-devtools` | Development/diagnostic utilities |
+| `marginalia-config` | Shared configuration types (voice commands, STT, TTS, playback) |
+| `marginalia-models` | Model discovery, download, and cache management |

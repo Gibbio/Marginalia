@@ -1,15 +1,9 @@
 # marginalia-playback-host
 
-Host-side playback engine for Marginalia Beta desktop runtimes.
+Host-side playback engine using rodio for in-process audio on
+macOS, Linux, and Windows.
 
-The first implementation is command-based:
-
-- resolves a local player command template
-- launches playback as a child process
-- tracks basic playback state for pause, resume, stop, and seek
-
-Default command detection currently prefers:
-
-- `afplay` on macOS
-- `aplay` on Linux
-- `ffplay` as a fallback when available
+Implements the `PlaybackEngine` trait with pause, resume, stop,
+and playback-finished detection (`sink.empty()`). Includes a
+callback hook for feeding TTS audio samples to the AEC pipeline
+as a render reference signal.

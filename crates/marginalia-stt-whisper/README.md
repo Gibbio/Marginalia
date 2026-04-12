@@ -1,3 +1,3 @@
 # marginalia-stt-whisper
 
-Planned shared engine crate for Whisper-based dictation transcription.
+Whisper STT engine for voice commands and note dictation.
