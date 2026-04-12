@@ -512,41 +512,78 @@ fn render_vertical_separator(frame: &mut Frame, area: Rect, style: Style) {
 fn render_header_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let dinosaur = match app.animation_frame() {
         0 => [
-            "            __",
-            "           / _)",
+            "             __",
+            "            / _)",
             "    _.----./ / ",
             " __/         / ",
             "<__.-'|_|-|_|  ",
         ],
         1 => [
-            "            __",
-            "           / _)",
+            "             __",
+            "            / _)",
             "    _.----./ / ",
             " __/         / ",
             "<__.-'|_|-|-|  ",
         ],
         _ => [
-            "            __",
-            "           / _)",
+            "             __",
+            "            / _)",
             "    _.----./ / ",
             " __/         / ",
             "<__.-'|-|_|_|  ",
         ],
     };
 
+    let trex = match app.animation_frame() {
+        0 => [
+            "        ___   ",
+            " __/{  o_o}  ",
+            "~<_/|  _J    ",
+            "    | /| |\\  ",
+            "    [_] [_]  ",
+        ],
+        1 => [
+            "        ___   ",
+            " __/{  o_o}  ",
+            "~<_/|  _J    ",
+            "    |/ | |\\  ",
+            "   [_]  [_]  ",
+        ],
+        _ => [
+            "        ___   ",
+            " __/{  o_o}  ",
+            "~<_/|  _J    ",
+            "    | /|  |\\ ",
+            "    [_] [_]  ",
+        ],
+    };
+
     let content_width = width.saturating_sub(2) as usize;
-    let style = Style::default()
-        .fg(Color::Green)
-        .add_modifier(Modifier::BOLD);
+    let tick = app.animation_tick();
+    let trex_gap = 20;
 
     dinosaur
         .iter()
-        .map(|line| {
-            Line::from(Span::styled(
-                wrap_sprite_line(line, app.animation_tick(), content_width),
-                style,
-            ))
+        .zip(trex.iter())
+        .map(|(dino_line, trex_line)| {
+            let dino_part = wrap_sprite_line(dino_line, tick, content_width);
+            let trex_part = wrap_sprite_line(trex_line, tick.wrapping_sub(trex_gap), content_width);
+            let merged = merge_sprite_layers(&dino_part, &trex_part);
+            Line::from(vec![
+                Span::styled(
+                    merged.clone(),
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                ),
+            ])
         })
+        .collect()
+}
+
+fn merge_sprite_layers(front: &str, back: &str) -> String {
+    front
+        .chars()
+        .zip(back.chars())
+        .map(|(f, b)| if f != ' ' { f } else { b })
         .collect()
 }
 
