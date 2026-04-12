@@ -64,18 +64,14 @@ build on top of the infrastructure.
 - [ ] **Sentence-level navigation**: skip/repeat single sentences within a chunk, not just whole chunks.
 
 ### Echo cancellation — voice commands during playback
-- [x] **Text-based echo rejection** (v1, shipped): `stt-echo-filter` external crate, post-STT word-count delta filter wired in `App::handle_voice_command`. Strips TTS playback words from the STT transcript before resolving the action. Repo: https://github.com/Gibbio/stt-echo-filter
-- [ ] **Platform-specific acoustic echo cancellation — evaluation matrix**: the text-based filter handles ~90% of false positives but has a known false negative (user says a word also in the chunk → dropped as echo). For the harder cases we need real acoustic AEC, and the right tool is different on each platform. Produce a comparison table covering:
-    - **macOS**: AVAudioSession `voiceChat` mode (system AEC, iOS-ported to macOS?); AudioUnit `kAudioUnitSubType_VoiceProcessingIO`; WebRTC AEC3 via `webrtc-audio-processing` crate
-    - **iOS**: `AVAudioSession.Category.playAndRecord` + `.voiceChat` mode (activates built-in AEC on the Neural Engine)
-    - **Linux**: PipeWire `echo-cancel` module (WebRTC-based, system-wide); PulseAudio `module-echo-cancel`; WebRTC AEC3 via `webrtc-audio-processing` crate
-    - **Windows**: Windows Communications APO (system-provided AEC); WASAPI loopback + WebRTC AEC3
-    - **Android**: `AcousticEchoCanceler` framework class (backed by hardware DSP on most devices)
-    - **Web**: `getUserMedia({audio: {echoCancellation: true}})` — browser built-in, "free"
-    - **Cross-platform baseline**: `webrtc-audio-processing` / `aec3` / `aec-rs` Rust crates when the OS doesn't provide AEC
-    For each row capture: availability, quality, CPU cost, integration effort, whether it requires owning the mic pipeline (which on macOS conflicts with Apple's `SFSpeechRecognizer` — see NEXT item on mic pipeline refactor).
-- [ ] **Mic pipeline refactor** (prerequisite for real AEC on Apple STT): today `marginalia-stt-apple` lets the Swift helper own the mic via `AVAudioEngine.installTap`. To insert real AEC we need to either (a) run the AEC inside the Swift helper before appending buffers to `SFSpeechAudioBufferRecognitionRequest`, or (b) move mic capture into Rust (cpal), run AEC there, and feed cleaned PCM frames into the helper via a binary stdin protocol. Pick one after the evaluation matrix is done.
-- [ ] Research notes: how Teams (WebRTC AEC3 + AI noise suppression), Zoom (ML isolation), Apple (Neural Engine via `voiceChat`), Alexa (DSP + multi-mic beamforming) handle this — already partly captured, finalize after the matrix above.
+- [x] **Text-based echo rejection** (v1): `stt-echo-filter` external crate, post-STT word-count delta filter. Active as fallback layer. Repo: https://github.com/Gibbio/stt-echo-filter
+- [x] **Acoustic AEC on macOS** (shipped): WebRTC AEC3 via `aec3` crate (pure Rust). Mic captured by cpal in Rust, processed through AEC3 (render reference = TTS WAV chunk), cleaned audio fed to Swift helper via TLV binary stdin. Helper no longer owns the mic. Trigger fast-path removed (silence timer only, fixes multi-word triggers like "prossimo capitolo").
+- [ ] **Platform-specific AEC for other targets**: evaluate per-platform AEC options when building apps for those platforms:
+    - **iOS**: `AVAudioSession.voiceChat` (hardware AEC on Neural Engine)
+    - **Linux**: PipeWire `echo-cancel` module or `aec3` crate
+    - **Windows**: Communications APO or `aec3` crate
+    - **Android**: `AcousticEchoCanceler` framework class
+    - **Web**: `getUserMedia({echoCancellation: true})`
 
 ### Study features
 - [ ] **Voice note dictation**: "nota" command activates Whisper/Apple STT in transcription mode, records until silence, saves as note attached to current position.

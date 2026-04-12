@@ -155,42 +155,66 @@ max_record_seconds = 60
 speech_threshold   = 500
 ```
 
-### Apple STT — single Swift helper, dual mode
+### Apple STT — architecture (AEC3 + Swift helper)
 
-This is the crucial bit to get right when extending Apple STT (and the model
-to copy when we add other hosts). **ONE** Swift helper process (`stt-helper`,
-spawned by `marginalia-stt-apple`) handles both command recognition and note
-dictation. Mode is switched at runtime via stdin control lines:
+The Apple STT pipeline has three layers:
 
-- Rust writes `MODE COMMAND\n` / `MODE DICTATION\n` to the helper's stdin
-- Swift helper reads on a background queue, dispatches the mode change to
-  main queue, calls `scheduleRestart()` so the new mode takes effect on the
-  next recognition task
-- Output lines are PREFIXED so the Rust reader can route them:
-  - `CMD <text>` → command channel (cmd_rx)
-  - `DICT_END <text>` → dictation channel (dict_rx)
-- A single `std::thread` on the Rust side reads stdout and dispatches lines
-  to the right mpsc channel based on prefix
+```
+WAV chunk ──callback──→ AEC3 (render reference)
+                              │
+Mic (cpal) ──resample 24k──→ AEC3 (capture) ──cleaned──→ Swift helper (TLV stdin)
+                                                              │
+                                                     SFSpeechRecognizer
+                                                              │
+                                                     CMD/DICT_END (stdout)
+                                                              │
+                                                     Rust reader thread
+```
 
-In **command mode**: short silence timer, fast-path emits immediately when a
-partial already contains a trigger word ("avanti", "stop", …).
+**Layer 1 — Acoustic echo cancellation** (`aec_pipeline.rs`):
+Rust captures the mic via `cpal`, resamples to 24kHz mono, and feeds each
+10ms frame through `aec3::voip::VoipAec3` (pure-Rust port of WebRTC AEC3).
+The render reference (what the TTS is playing) comes from a callback on
+`HostPlaybackEngine`: when a chunk starts playing, the WAV samples are sent
+to the AEC thread, which advances through them frame-by-frame in lockstep
+with the mic capture. AEC3 subtracts the reference from the mic → the Swift
+helper never sees the TTS echo.
 
-In **dictation mode**: longer silence timer, NO trigger fast-path (user might
-legitimately say "stop" in a note), accumulates text until silence, emits the
-finalized utterance as `DICT_END <full text>`.
+**Layer 2 — Swift helper** (`SWIFT_HELPER_SOURCE`, compiled to `stt-helper-vN`):
+No longer owns the mic (no AVAudioEngine, no installTap). Reads cleaned
+audio from stdin via a binary TLV protocol:
+- Type `0x41` ('A'): audio frame (f32 samples, little-endian, 10ms @ 24kHz)
+- Type `0x4D` ('M'): mode command ("COMMAND" or "DICTATION")
 
-Both consumers share the same child process through `Arc<AppleHelperShared>`:
-`stdin: Mutex<ChildStdin>` for serialized mode commands, `child: Mutex<Child>`
-kept alive until the last Arc drops (at which point Drop kills the process).
+Wraps audio frames in `AVAudioPCMBuffer` and feeds them to
+`SFSpeechAudioBufferRecognitionRequest`. Emits recognized text to stdout
+with prefixes:
+- `CMD <text>` — command mode utterance
+- `DICT_END <text>` — finalized dictation
 
-Constructor returns BOTH sides together — do not build them separately:
+Mode switching: triggers `scheduleRestart()` which ends the current
+recognition task and starts a fresh one with the new mode's silence timer.
+
+**Layer 3 — Rust consumers** (same as before):
+Both `AppleCommandRecognizer` (commands) and `AppleDictationTranscriber`
+(notes) share the helper process via `Arc<AppleHelperShared>`. A single
+reader thread routes stdout lines to two mpsc channels based on prefix.
+
+Constructor returns all three — do not build them separately:
 ```rust
-let (recognizer, dict_transcriber) = new_apple_stt(
+let (recognizer, dict_transcriber, aec_pipeline) = new_apple_stt(
     language, commands, cmd_silence, dict_silence, dict_max
 )?;
 runtime.set_command_recognizer(recognizer);
 runtime.set_dictation_transcriber(dict_transcriber);
+// aec_pipeline is Box::leaked to keep the cpal stream alive for the process
 ```
+
+**No trigger fast-path**: all emissions go through the silence timer
+(configurable via `[stt.commands] silence_timeout`). This was changed when
+AEC3 was added — the fast-path caused multi-word triggers like "prossimo
+capitolo" to fire prematurely (the first word "prossimo" matched the
+single-word trigger "next" before the user could say "capitolo").
 
 ### Apple STT — audio feedback on mode change
 
@@ -221,57 +245,36 @@ Both engines keep the microphone stream open for the entire session
 (no permission icon flickering). Command monitor thread runs independently
 from the runtime, so there's no lock contention while navigating or replaying.
 
-### Echo filter — the TTS talking to itself
+### Echo cancellation — two layers
 
-When the TTS reads a document aloud and the mic picks up the playback, the
-STT transcribes the TTS audio as if the user had spoken. Trigger words inside
-the document would then fire spurious commands.
+Echo cancellation prevents the TTS from triggering its own voice commands
+when the mic picks up the playback audio. Marginalia uses two layers:
 
-To prevent this, `apps/tui-rs` depends on **`stt-echo-filter`** (external
-crate, https://github.com/Gibbio/stt-echo-filter), a tiny pure-Rust library
-that strips playback echo from STT transcripts at the WORD level. It's a
-**post-STT** filter, not an acoustic one — it doesn't touch audio, only text.
+**Layer 1 — Acoustic AEC (primary, macOS)**. The `aec3` crate (pure-Rust
+port of WebRTC AEC3) removes the TTS audio from the mic signal BEFORE it
+reaches SFSpeechRecognizer. See "Apple STT — architecture" above. The
+render reference is the WAV chunk being played; the capture is the resampled
+mic. AEC3 subtracts one from the other per 10ms frame. This handles the
+vast majority of echo with zero false negatives.
 
-Algorithm: per-word budget. Each word in the currently-playing chunk
-"consumes" one occurrence in the STT output. Surplus words form a delta that
-represents what the user actually said, in order. Multi-word triggers like
-`"prossimo capitolo"` still work because the delta preserves order.
+For **other platforms**, the AEC approach will differ:
+- **iOS**: `AVAudioSession.voiceChat` (hardware AEC on Neural Engine)
+- **Linux**: PipeWire `echo-cancel` module or `aec3` crate
+- **Windows**: Communications APO or `aec3` crate
+- **Android**: `AcousticEchoCanceler` framework class
+- **Web**: `getUserMedia({echoCancellation: true})`
 
-Where it's wired: `App::handle_voice_command(raw: &str)` takes the raw STT
-utterance, looks up `session_snapshot.chunk_text` and `playback_state`, and
-— only when `playback_state == "playing"` — calls `stt_echo_filter::strip_echo`
-before passing the result to `voice_commands.resolve_action`. If the filter
-absorbs everything, a debug line is logged to the Log pane and no action is
-fired. The monitor thread still pre-matches a command internally but that
-pre-match is intentionally **ignored** by `main.rs`; the filtering happens
-later so it can see the playback state.
+The per-platform evaluation matrix lives in NEXT.md.
 
-Known trade-off: if the user legitimately says a word that is ALSO in the
-current chunk text, the budget absorbs it as echo and the command is
-dropped. Mitigation: use synonyms in `[voice_commands]`, or speak between
-chunks.
+**Layer 2 — Post-STT text filter (fallback)**. The external crate
+`stt-echo-filter` (https://github.com/Gibbio/stt-echo-filter) strips
+playback words from the STT transcript at the WORD level using a per-word
+budget. Wired in `App::handle_voice_command(raw)` — only active when
+`playback_state == "playing"`. This catches residual echo that AEC3 might
+miss (e.g. reverberation, AEC adaptation lag).
 
-For harder cases we eventually want real **acoustic** echo cancellation in
-front of the STT — this needs a per-platform evaluation because the right
-tool differs: Apple/iOS have `AVAudioSession.voiceChat` + `VoiceProcessingIO`,
-Linux has PipeWire's `echo-cancel` module, Android has `AcousticEchoCanceler`,
-Windows has the Communications APO, Web has `getUserMedia echoCancellation`,
-and the cross-platform baseline is WebRTC AEC3 via `webrtc-audio-processing`
-or the `aec3` Rust crate.
-
-On macOS specifically, wiring real AEC in front of `SFSpeechRecognizer`
-requires a mic-pipeline refactor: either link an AEC library inside the
-Swift helper and apply it before `request.append(buffer)`, or move mic
-capture into Rust (cpal) and feed pre-cleaned PCM frames to the helper
-via a binary stdin protocol. Picking the approach is a separate decision —
-see the "Echo cancellation" section in NEXT.md for the full evaluation
-matrix and the mic pipeline refactor task that gates it.
-
-**Do not** try to apply the filter inside the STT monitor thread — it
-doesn't know about playback state. It lives in `App` where session state is
-available. And **do not** remove the `_cmd` channel field in
-`poll_voice_event` even though main.rs ignores it — other future consumers
-(e.g. a pre-playback command prompt) may still want the pre-matched hint.
+Both layers operate independently: AEC3 cleans the audio, the text filter
+cleans the transcript. Together they provide robust echo rejection.
 
 ## Key conventions
 
@@ -299,9 +302,15 @@ available. And **do not** remove the `_cmd` channel field in
   section above is stable. Add fields inside existing sections; don't create
   new top-level roots.
 - Don't spawn multiple Swift helper processes for Apple STT. The single
-  shared process with mode-switch-via-stdin is the deliberate architecture
-  (no mic contention, no duplicate recognition, no doubled memory). Extend
-  `SWIFT_HELPER_SOURCE` instead of spawning another helper.
+  shared process with mode-switch-via-stdin is the deliberate architecture.
+  Extend `SWIFT_HELPER_SOURCE` instead of spawning another helper.
+- Don't let the Swift helper capture the mic — it reads AEC-cleaned audio
+  from stdin via TLV binary. The mic is owned by cpal on the Rust side.
+  No `AVAudioEngine`, no `installTap`, no `audioEngine.start()` in the helper.
+- Don't re-add a trigger fast-path to the Swift helper. It was removed
+  because it fired multi-word triggers prematurely (e.g. "prossimo"
+  matching before the user could say "capitolo"). With AEC3 handling echo,
+  the silence timer alone (0.8s default) gives correct trigger matching.
 - Don't capture `currentMode` inside a `DispatchWorkItem` closure as a local —
   read it at fire-time so mode switches during the silence window are honored.
 - Don't take `AppleCommandRecognizer::cmd_rx` or `AppleDictationTranscriber::dict_rx`
@@ -311,12 +320,10 @@ available. And **do not** remove the `_cmd` channel field in
 - Don't bump `HELPER_VERSION` without also changing `SWIFT_HELPER_SOURCE`, and
   vice versa: they must move together, otherwise users run a stale cached binary.
 - Don't link AppKit/NSSound into the Swift helper — stick to Foundation,
-  Speech, AVFoundation, AudioToolbox. No GUI runtime dependency.
-- Don't apply the `stt-echo-filter` inside the STT crates or the monitor
-  thread — it lives in `App::handle_voice_command` where the session
-  snapshot (chunk text + playback state) is reachable. The monitor thread
-  is deliberately dumb about playback.
+  Speech, AudioToolbox. No AVFoundation needed anymore (no mic capture).
+- Don't drop the `AecPipeline` — it holds the `cpal::Stream` that keeps the
+  mic open. It's `Box::leak`ed in `backend.rs` because `cpal::Stream` is
+  `!Send` and can't be stored in `BackendClient` (behind `Arc<Mutex>`).
 - Don't vendor `stt-echo-filter` into the Marginalia tree — it is an
   independent crate at https://github.com/Gibbio/stt-echo-filter, pulled
-  via git dependency in `apps/tui-rs/Cargo.toml`. Changes to the algorithm
-  go there, then we bump the git reference here.
+  via git dependency in `apps/tui-rs/Cargo.toml`.

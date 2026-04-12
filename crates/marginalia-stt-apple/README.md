@@ -5,10 +5,14 @@ command recognition AND note dictation. macOS only.
 
 ## What it does
 
-Spawns a persistent Swift helper subprocess that keeps the microphone open for
-the entire session and streams recognized text via stdout. A single helper
-process handles both short-utterance command recognition and long-form
-dictation, switching between the two modes on demand via stdin control lines.
+Captures the microphone via `cpal` on the Rust side, processes it through
+**WebRTC AEC3** (via the `aec3` crate, pure Rust) to remove TTS playback
+echo, and feeds the cleaned audio to a persistent Swift helper subprocess
+that runs `SFSpeechRecognizer`. The helper no longer touches the mic itself
+— it receives pre-processed PCM frames via a binary stdin protocol.
+
+A single helper process handles both short-utterance command recognition and
+long-form dictation, switching between the two modes on demand.
 
 No models to download — uses the Neural Engine via the system dictation
 framework. Requires macOS Dictation to be enabled
@@ -19,7 +23,7 @@ framework. Requires macOS Dictation to be enabled
 ```rust
 use marginalia_stt_apple::new_apple_stt;
 
-let (recognizer, dict_transcriber) = new_apple_stt(
+let (recognizer, dict_transcriber, aec_pipeline) = new_apple_stt(
     "it-IT",                                  // BCP-47 language
     vec!["avanti".into(), "stop".into()],     // trigger words
     0.8,                                       // cmd_silence_timeout (s)
