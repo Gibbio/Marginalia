@@ -295,10 +295,12 @@ impl BetaBackendClient {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        let tts_cache_dir = db_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(".marginalia-tts-cache");
+        let tts_cache_dir = config.tts_cache_dir.clone().unwrap_or_else(|| {
+            db_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("tts-cache")
+        });
         std::fs::create_dir_all(&tts_cache_dir).ok();
         let mut runtime_config = marginalia_runtime::RuntimeConfig::default();
         if let Some(v) = config.chunk_target_chars {
