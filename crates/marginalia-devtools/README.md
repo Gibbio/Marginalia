@@ -2,8 +2,7 @@
 
 Development tooling for the Marginalia Beta engine.
 
-The first tool is a small Rust CLI for exercising the runtime without the
-Python backend or the TUI.
+The first tool is a small Rust CLI for exercising the runtime without the full TUI runtime.
 
 Current commands:
 

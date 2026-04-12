@@ -32,6 +32,8 @@ crates/
   marginalia-runtime/          Orchestration: core + storage + providers
   marginalia-storage-sqlite/   SQLite persistence
   marginalia-import-text/      Text/Markdown document importer
+  marginalia-config/           Shared configuration types (voice commands, STT, TTS, playback)
+  marginalia-models/           Model discovery, download, and cache management
   marginalia-tts-mlx/          Kokoro TTS via MLX Metal GPU (macOS Apple Silicon)
   marginalia-tts-kokoro/       Kokoro TTS via ONNX Runtime (cross-platform)
   marginalia-stt-apple/        Apple SFSpeechRecognizer — commands + dictation (macOS)

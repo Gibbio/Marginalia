@@ -1,3 +1,3 @@
 # marginalia-stt-vosk
 
-Planned shared engine crate for Vosk-based command recognition.
+Legacy STT engine crate (no longer wired in tui-rs).

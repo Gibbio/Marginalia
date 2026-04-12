@@ -13,7 +13,7 @@ The first implementation in this crate is intentionally small:
 Current runtime entry points:
 
 - `FakeRuntime`: in-memory repositories plus fake providers
-- `SqliteRuntime`: SQLite repositories plus fake providers
+- `SqliteRuntime`: SQLite repositories, configurable providers via RuntimeBuilder
 
 `apps/tui-rs` can now run directly against `SqliteRuntime` by setting
 `MARGINALIA_TUI_BACKEND=beta`.
@@ -24,12 +24,9 @@ Current runtime entry points:
 - query handling for snapshots, document views, doctor report, capabilities,
   note listing, and basic search
 
-This moves the frontend contract out of the legacy Python backend path and into
-the shared Rust runtime.
-
 The runtime can now also accept a replacement playback engine at construction
 time, which allows desktop hosts such as `apps/tui-rs` to swap the fake
-playback implementation for a host-side subprocess playback adapter.
+playback implementation for a host-side playback engine (rodio).
 
 The same runtime boundary now supports replacing the speech synthesizer, so the
 future Kokoro ONNX provider can be wired into the same desktop and mobile host
