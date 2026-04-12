@@ -24,16 +24,50 @@ ifndef MARGINALIA_LANG
   endif
 endif
 
-# Map language → default voice and voices to download.
-# English voices (af_bella, am_adam, …) are embedded in the binary — no download needed.
-# Non-English voices must be fetched from HuggingFace via bootstrap-mlx.
-ifeq ($(MARGINALIA_LANG),it)
-  MLX_VOICE_DEFAULT ?= if_sara
-  MLX_VOICES        ?= if_sara im_nicola
-else
-  MLX_VOICE_DEFAULT ?= af_bella
-  MLX_VOICES        ?=
+# ---------------------------------------------------------------------------
+# Voice table (source: hexgrad/Kokoro-82M/VOICES.md)
+# Format: MLX_VOICE_DEFAULT_<lang> = best voice for that language
+#         MLX_VOICES_<lang>        = all voices to download (space-separated)
+#
+# English voices (af_*, am_*, bf_*, bm_*) are embedded in the binary —
+# no download needed; MLX_VOICES_en is intentionally empty.
+# All other voices must be fetched from HuggingFace via bootstrap-mlx.
+# ---------------------------------------------------------------------------
+MLX_VOICE_DEFAULT_en := af_heart
+MLX_VOICES_en        :=
+
+MLX_VOICE_DEFAULT_it := if_sara
+MLX_VOICES_it        := if_sara im_nicola
+
+MLX_VOICE_DEFAULT_ja := jf_alpha
+MLX_VOICES_ja        := jf_alpha jf_gongitsune jf_nezumi jf_tebukuro jm_kumo
+
+MLX_VOICE_DEFAULT_zh := zf_xiaoxiao
+MLX_VOICES_zh        := zf_xiaobei zf_xiaoni zf_xiaoxiao zf_xiaoyi zm_yunjian zm_yunxi zm_yunxia zm_yunyang
+
+MLX_VOICE_DEFAULT_es := ef_dora
+MLX_VOICES_es        := ef_dora em_alex em_santa
+
+MLX_VOICE_DEFAULT_fr := ff_siwis
+MLX_VOICES_fr        := ff_siwis
+
+MLX_VOICE_DEFAULT_hi := hf_alpha
+MLX_VOICES_hi        := hf_alpha hf_beta hm_omega hm_psi
+
+MLX_VOICE_DEFAULT_pt := pf_dora
+MLX_VOICES_pt        := pf_dora pm_alex pm_santa
+
+# Resolve for the detected language; fall back to English if unsupported.
+_VOICE_DEFAULT_RESOLVED := $(MLX_VOICE_DEFAULT_$(MARGINALIA_LANG))
+ifeq ($(_VOICE_DEFAULT_RESOLVED),)
+  _VOICE_DEFAULT_RESOLVED := $(MLX_VOICE_DEFAULT_en)
 endif
+
+_VOICES_RESOLVED := $(MLX_VOICES_$(MARGINALIA_LANG))
+# (no fallback needed for voices: unsupported lang → empty → no download)
+
+MLX_VOICE_DEFAULT ?= $(_VOICE_DEFAULT_RESOLVED)
+MLX_VOICES        ?= $(_VOICES_RESOLVED)
 VOSK_MODEL_URL     ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
 VOSK_MODEL_NAME    ?= vosk-model-small-it-0.22
 MODELS_DIR         ?= models/stt
