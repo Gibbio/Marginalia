@@ -391,6 +391,7 @@ impl BetaBackendClient {
             ) {
                 Ok(synth) => {
                     runtime.set_speech_synthesizer(synth);
+                    runtime.set_default_voice(&config.mlx.voice);
                     tts_label = "kokoro-mlx";
                 }
                 Err(e) => {

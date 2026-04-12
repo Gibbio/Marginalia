@@ -268,6 +268,10 @@ impl SqliteRuntime {
         })
     }
 
+    pub fn set_default_voice(&mut self, voice: &str) {
+        self.config.default_voice = voice.to_string();
+    }
+
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
     }
