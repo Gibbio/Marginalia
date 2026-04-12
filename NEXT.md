@@ -33,7 +33,7 @@ descoped before tagging `v0.1.0-beta`.
 | 21 | **Crates.io** | Publish core + runtime + storage (or stable git tags) | **TODO** | Developers need a stable dependency reference |
 | 22 | **Model management** | `marginalia-models` crate: discovery, download, cache | **TODO** | Mobile apps can't run `make bootstrap-*` |
 | 23 | **Unified STT factory** | `SttEngineOutput` struct + `runtime.set_stt_engine()` | Done | Defined in core, re-exported by runtime. Whisper backend uses it; Apple uses it + extra AEC wiring |
-| 24 | **espeak-rs** | Compiled Rust binding to eliminate system espeak-ng dep | **TODO** | System dep is a barrier for packaging and mobile |
+| 24 | **espeak-rs** | Compiled Rust binding to eliminate system espeak-ng dep | Done | MLX TTS uses `espeak-rs` (compiles espeak-ng from source via CMake). ONNX path still uses external `phonemizer_program`. |
 | 25 | **Auto-play next chunk** | Continuous reading without pressing /next | Done | `try_auto_advance()` checks sink.empty(), advances or stops at end of doc. Called every 100ms in TUI main loop |
 
 ### Release criteria summary
