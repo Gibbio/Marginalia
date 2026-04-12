@@ -9,6 +9,7 @@ use marginalia_core::domain::{
     DEFAULT_CHUNK_TARGET_CHARS,
 };
 use marginalia_core::events::{DomainEvent, EventName};
+use std::path::PathBuf;
 use marginalia_core::frontend::{
     AppSnapshot, DocumentChunkView, DocumentListItem, DocumentSectionView, DocumentView,
     SessionSnapshot,
@@ -46,6 +47,10 @@ pub struct RuntimeConfig {
     pub chunk_target_chars: usize,
     pub default_language: String,
     pub default_voice: String,
+    /// Directory for TTS WAV cache. When set, synthesize_cached uses
+    /// deterministic filenames (SHA-256 of the cache key) so WAVs
+    /// persist across process restarts.
+    pub tts_cache_dir: Option<PathBuf>,
 }
 
 impl Default for RuntimeConfig {
@@ -54,6 +59,7 @@ impl Default for RuntimeConfig {
             chunk_target_chars: DEFAULT_CHUNK_TARGET_CHARS,
             default_language: "it".to_string(),
             default_voice: "narrator".to_string(),
+            tts_cache_dir: None,
         }
     }
 }
@@ -278,8 +284,9 @@ impl SqliteRuntime {
         self.provider_doctor_blobs.insert(key.into(), blob);
     }
 
-    /// Synthesize with cache. Returns cached result if the chunk was already
-    /// synthesized with the same voice and the WAV file still exists on disk.
+    /// Synthesize with cache. Uses a deterministic filename based on the
+    /// SHA-256 of the cache key so WAVs survive process restarts. Falls back
+    /// to in-memory HashMap if `tts_cache_dir` is not set.
     fn synthesize_cached(
         &mut self,
         document_id: &str,
@@ -290,14 +297,57 @@ impl SqliteRuntime {
         let voice = request.voice.clone().unwrap_or_default();
         let cache_key = format!("{document_id}:{section_index}:{chunk_index}:{voice}");
 
-        // Check cache: result exists and WAV file is still on disk
+        // 1. Check in-memory cache (hot path for same session).
         if let Some(cached) = self.tts_cache.get(&cache_key) {
             if std::path::Path::new(&cached.audio_reference).exists() {
                 return Ok(cached.clone());
             }
         }
 
-        let result = self.tts.synthesize(request)?;
+        // 2. Check on-disk cache by deterministic filename (cross-session).
+        if let Some(ref cache_dir) = self.config.tts_cache_dir {
+            use sha2::{Digest, Sha256};
+            let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
+            let cached_path = cache_dir.join(format!("{hash}.wav"));
+            if cached_path.exists() {
+                let result = SynthesisResult {
+                    provider_name: self.tts.describe_capabilities().provider_name,
+                    voice: voice.clone(),
+                    content_type: "audio/wav".to_string(),
+                    audio_reference: cached_path.display().to_string(),
+                    byte_length: cached_path
+                        .metadata()
+                        .map(|m| m.len() as usize)
+                        .unwrap_or(0),
+                    text_excerpt: request.text.chars().take(50).collect(),
+                    metadata: HashMap::new(),
+                };
+                self.tts_cache.insert(cache_key, result.clone());
+                return Ok(result);
+            }
+        }
+
+        // 3. Synthesize and cache the result.
+        let mut result = self.tts.synthesize(request)?;
+
+        // 4. Rename to deterministic path so it persists across restarts.
+        if let Some(ref cache_dir) = self.config.tts_cache_dir {
+            use sha2::{Digest, Sha256};
+            let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
+            let stable_path = cache_dir.join(format!("{hash}.wav"));
+            if let Err(e) = std::fs::rename(&result.audio_reference, &stable_path) {
+                // rename may fail cross-device; try copy + delete
+                if std::fs::copy(&result.audio_reference, &stable_path).is_ok() {
+                    let _ = std::fs::remove_file(&result.audio_reference);
+                } else {
+                    log::warn!("tts cache rename failed: {e}");
+                }
+            }
+            if stable_path.exists() {
+                result.audio_reference = stable_path.display().to_string();
+            }
+        }
+
         self.tts_cache.insert(cache_key, result.clone());
         Ok(result)
     }
