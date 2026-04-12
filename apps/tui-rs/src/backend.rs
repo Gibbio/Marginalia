@@ -295,13 +295,15 @@ impl BetaBackendClient {
         let mut runtime = SqliteRuntime::open_with_config(&db_path, runtime_config)
             .map_err(|err| format!("Unable to open beta runtime database: {err}"))?;
 
-        // Playback: HostPlaybackEngine di default, fake se config.playback.fake = true
-        let playback_label = if config.playback.fake {
-            "fake"
+        // Playback engine: created here, but NOT passed to the runtime yet.
+        // We set the AEC render callback (if needed) after STT init, then hand
+        // it off to the runtime.
+        let mut playback_engine = if config.playback.fake {
+            None
         } else {
-            runtime.set_playback_engine(HostPlaybackEngine::default());
-            "host"
+            Some(HostPlaybackEngine::default())
         };
+        let playback_label = if playback_engine.is_some() { "host" } else { "fake" };
 
         // TTS: Kokoro se [kokoro] assets_root è configurato
         let mut tts_label = "fake";
@@ -406,14 +408,22 @@ impl BetaBackendClient {
                 let dict_silence = config.stt.dictation.silence_timeout.unwrap_or(1.5);
                 let dict_max = config.stt.dictation.max_record_seconds.unwrap_or(60.0);
                 match new_apple_stt(&language, commands, cmd_silence, dict_silence, dict_max) {
-                    Ok((rec, dict, _aec_pipeline)) => {
+                    Ok((rec, dict, aec_pipeline)) => {
                         runtime.set_command_recognizer(rec);
                         runtime.set_dictation_transcriber(dict);
-                        // TODO: connect _aec_pipeline.render_sender() to the
-                        // playback engine so TTS reference signal feeds into
-                        // AEC3. For now the pipeline runs but without render
-                        // frames — AEC passes mic through with no cancellation
-                        // until the render channel is wired.
+                        // Wire the playback engine's reference signal into the
+                        // AEC pipeline so echo cancellation has something to subtract.
+                        // We extract the render sender (which is Send) instead of
+                        // moving the whole pipeline (cpal::Stream is !Send).
+                        let render_tx = aec_pipeline.render_sender();
+                        if let Some(ref mut pe) = playback_engine {
+                            pe.set_play_samples_callback(Box::new(move |samples| {
+                                use marginalia_stt_apple::aec_pipeline::RenderCommand;
+                                let _ = render_tx.try_send(RenderCommand::SetReference(samples));
+                            }));
+                        }
+                        // Keep the pipeline alive for the session lifetime.
+                        let _aec_keepalive = aec_pipeline;
                         runtime.set_provider_doctor_blob(
                             "apple_stt",
                             json!({
@@ -503,6 +513,11 @@ impl BetaBackendClient {
             log::error!(
                 "[stt] unknown engine '{stt_engine}' — valid choices: \"apple\", \"whisper\""
             );
+        }
+
+        // Now hand the playback engine to the runtime (after AEC callback is wired).
+        if let Some(pe) = playback_engine {
+            runtime.set_playback_engine(pe);
         }
 
         // Voice command monitor — open and run in background thread.

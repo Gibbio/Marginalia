@@ -2,7 +2,7 @@ use marginalia_core::domain::{Document, PlaybackState, ReadingPosition};
 use marginalia_core::ports::{
     PlaybackEngine, PlaybackSnapshot, ProviderCapabilities, ProviderExecutionMode, SynthesisResult,
 };
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::fs::File;
 use std::io::BufReader;
 
@@ -22,6 +22,10 @@ pub struct HostPlaybackEngine {
     stream_handle: Option<OutputStreamHandle>,
     sink: Option<Sink>,
     snapshot: PlaybackSnapshot,
+    /// Optional callback invoked with the f32 mono samples of each WAV chunk
+    /// right before playback starts. Used by the AEC pipeline as the render
+    /// reference signal.
+    on_play_samples: Option<Box<dyn Fn(Vec<f32>) + Send>>,
 }
 
 impl Default for HostPlaybackEngine {
@@ -37,6 +41,7 @@ impl Default for HostPlaybackEngine {
             _stream: stream,
             stream_handle: handle,
             sink: None,
+            on_play_samples: None,
             snapshot: PlaybackSnapshot {
                 state: PlaybackState::Stopped,
                 last_action: "initialized".to_string(),
@@ -54,6 +59,13 @@ impl Default for HostPlaybackEngine {
 impl HostPlaybackEngine {
     pub fn new(_config: HostPlaybackConfig) -> Self {
         Self::default()
+    }
+
+    /// Register a callback to receive the f32 mono samples of each WAV chunk
+    /// right before playback starts. The AEC pipeline uses this as its render
+    /// reference. Pass `None` to clear.
+    pub fn set_play_samples_callback(&mut self, cb: Box<dyn Fn(Vec<f32>) + Send>) {
+        self.on_play_samples = Some(cb);
     }
 
     /// Check if current playback has finished (for auto-advance).
@@ -141,6 +153,27 @@ impl PlaybackEngine for HostPlaybackEngine {
                 return self.snapshot();
             }
         };
+
+        // Feed the WAV samples to the AEC render callback (if set) BEFORE
+        // starting playback, so the AEC thread has the reference ready.
+        if let Some(ref cb) = self.on_play_samples {
+            if let Ok(f2) = File::open(&synthesis.audio_reference) {
+                if let Ok(decoder) = Decoder::new(BufReader::new(f2)) {
+                    let channels = decoder.channels() as usize;
+                    let samples_i16: Vec<i16> = decoder.collect();
+                    // Convert to f32 mono.
+                    let samples_f32: Vec<f32> = if channels <= 1 {
+                        samples_i16.iter().map(|&s| s as f32 / 32768.0).collect()
+                    } else {
+                        samples_i16
+                            .chunks(channels)
+                            .map(|frame| frame[0] as f32 / 32768.0)
+                            .collect()
+                    };
+                    cb(samples_f32);
+                }
+            }
+        }
 
         sink.append(source);
         self.sink = Some(sink);
