@@ -176,7 +176,6 @@ impl BackendClient {
     fn send_async(&mut self, name: &str, payload: Value) {
         let Self::Beta(client) = self;
         if client.is_busy() {
-            client.push_log(format!("beta command {name} => dropped (busy)"));
             return;
         }
         client.send_command_async(name.to_string(), payload);
@@ -752,10 +751,9 @@ impl BetaBackendClient {
         };
         drop(runtime);
 
-        // Log commands and query errors — skip routine polling (queries + auto_advance).
-        let is_silent = name == "auto_advance";
-        if (request_type == "command" && !is_silent) || response.status != "ok" {
-            self.push_log(format!("beta {request_type} {name} => {}", response.status));
+        // Only log errors to the user-facing Log pane.
+        if response.status != "ok" {
+            self.push_log(format!("{name}: {}", response.message));
         }
         ResponseEnvelope {
             status: response.status,
@@ -769,7 +767,7 @@ impl BetaBackendClient {
     fn send_command_async(&mut self, name: String, payload: Value) {
         let runtime = Arc::clone(&self.runtime);
         let (tx, rx) = mpsc::channel();
-        let cmd_name = name.clone();
+        let _cmd_name = name.clone();
         std::thread::spawn(move || {
             let mut rt = runtime.lock().expect("runtime lock poisoned");
             let response = rt.execute_frontend_command(&name, payload);
@@ -783,7 +781,6 @@ impl BetaBackendClient {
                 },
             });
         });
-        self.push_log(format!("beta command {cmd_name} => dispatched (async)"));
         self.async_result_rx = Some(rx);
     }
 
@@ -825,10 +822,6 @@ impl BetaBackendClient {
         let rx = self.async_result_rx.as_ref()?;
         match rx.try_recv() {
             Ok(result) => {
-                self.push_log(format!(
-                    "beta command {} => {} (async complete)",
-                    result.name, result.response.status
-                ));
 
                 // On successful navigation, prefetch next chunk in background
                 if result.response.status == "ok" && Self::is_navigation_command(&result.name) {
