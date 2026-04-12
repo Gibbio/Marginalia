@@ -422,8 +422,11 @@ impl BetaBackendClient {
                                 let _ = render_tx.try_send(RenderCommand::SetReference(samples));
                             }));
                         }
-                        // Keep the pipeline alive for the session lifetime.
-                        let _aec_keepalive = aec_pipeline;
+                        // Keep the pipeline alive for the entire process. The
+                        // AecPipeline holds cpal::Stream (!Send) so we can't
+                        // store it in BackendClient (Arc<Mutex>). Leaking is
+                        // the standard pattern for process-scoped audio streams.
+                        Box::leak(Box::new(aec_pipeline));
                         runtime.set_provider_doctor_blob(
                             "apple_stt",
                             json!({
