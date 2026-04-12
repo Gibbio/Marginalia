@@ -1,0 +1,20 @@
+[package]
+name = "marginalia-stt-whisper"
+version = "0.1.0"
+edition = "2021"
+description = "Whisper-based dictation transcriber for Marginalia Beta"
+
+[features]
+# GPU / hardware acceleration — passed through to whisper-rs/whisper.cpp.
+# metal:  macOS Metal GPU (Apple Silicon & Intel Mac with dedicated GPU). Auto-enabled by `make tui-rs` on Darwin.
+# coreml: Apple Neural Engine (requires a separate CoreML model export step — not enabled by default).
+# cuda:   NVIDIA CUDA GPU (Linux/Windows). Enable with --features cuda when building on a CUDA machine.
+metal  = ["whisper-rs/metal"]
+coreml = ["whisper-rs/coreml"]
+cuda   = ["whisper-rs/cuda"]
+
+[dependencies]
+cpal = "0.15"
+log = "0.4"
+marginalia-core = { path = "../marginalia-core" }
+whisper-rs = "0.14"

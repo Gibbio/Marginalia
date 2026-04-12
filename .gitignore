@@ -1,0 +1,64 @@
+# Build
+target/
+build/
+dist/
+
+# Python (benchmark scripts only — no Python in main codebase)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv-kokoro/
+.bench-venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local state
+.marginalia/
+.whisper-cpp/
+/marginalia.toml
+apps/tui-rs/marginalia.toml
+tmp/
+
+# SQLite
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Downloaded model assets (large binaries — use make bootstrap-beta to install)
+models/stt/vosk/vosk-model-*/
+models/stt/vosk/libvosk.*
+models/stt/whisper/*.bin
+models/tts/kokoro/*.onnx
+models/tts/kokoro/config.json
+models/tts/kokoro/voices/
+models/tts/kokoro/lib/
+models/tts/piper/*.onnx
+models/tts/piper/*.json
+
+# Benchmark artifacts
+benchmark/macos-apple-silicon/rust/target/
+benchmark/macos-apple-silicon/rust-voice/target/
+benchmark/macos-apple-silicon/rust-mlx/target/
+benchmark/macos-apple-silicon/kokoro-mlx-rs/
+benchmark/macos-apple-silicon/voice-fork/
+benchmark/macos-apple-silicon/voice-patch/
+
+# Cloned repos inside workspace
+voice-mlx/
+
+# Log files
+*.log
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/*.code-workspace
+
+# Devcontainer cache
+.devcontainer/.cache/

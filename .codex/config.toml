@@ -1,0 +1,14 @@
+[project]
+name = "Marginalia"
+primary_language = "rust"
+
+[paths]
+core = "crates/marginalia-core/src"
+runtime = "crates/marginalia-runtime/src"
+tui = "apps/tui-rs/src"
+cli = "apps/cli-rs/src"
+
+[commands]
+build = "cargo build --release"
+test = "cargo test"
+run = "make tui-rs"

@@ -1,0 +1,259 @@
+//! Kokoro TTS via MLX Metal GPU — macOS Apple Silicon only.
+//!
+//! Implements `SpeechSynthesizer` trait using voice-tts (mlx-rs backend)
+//! with `enable_compile()` for Metal kernel fusion.
+//!
+//! Performance: ~1000ms for 164-char chunk (12x realtime) on M4.
+
+// MLX C API — memory management functions not yet exposed by mlx-rs.
+// The symbols are already linked via mlx-sys; we just need the declaration.
+extern "C" {
+    fn mlx_clear_cache() -> std::ffi::c_int;
+}
+
+use marginalia_core::ports::{
+    ProviderCapabilities, ProviderExecutionMode, SpeechSynthesizer, SynthesisError,
+    SynthesisRequest, SynthesisResult,
+};
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static AUDIO_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+pub struct MlxSpeechSynthesizer {
+    model: voice_tts::KokoroModel,
+    voice: mlx_rs::Array,
+    output_dir: PathBuf,
+    default_voice: String,
+}
+
+impl MlxSpeechSynthesizer {
+    /// Create a new MLX synthesizer.
+    ///
+    /// * `model_repo` - HuggingFace repo or local path (e.g. "prince-canuma/Kokoro-82M")
+    /// * `voice_name` - Voice preset name (e.g. "af_bella")
+    /// * `output_dir` - Directory for WAV output files
+    pub fn new(
+        model_repo: &str,
+        voice_name: &str,
+        output_dir: impl AsRef<Path>,
+    ) -> Result<Self, String> {
+        let model = voice_tts::load_model(model_repo)
+            .map_err(|e| format!("failed to load Kokoro MLX model: {e}"))?;
+
+        let voice = voice_tts::load_voice(voice_name, None)
+            .map_err(|e| format!("failed to load voice '{voice_name}': {e}"))?;
+
+        let output_dir = output_dir.as_ref().to_path_buf();
+        fs::create_dir_all(&output_dir).map_err(|e| format!("failed to create output dir: {e}"))?;
+
+        Ok(Self {
+            model,
+            voice,
+            output_dir,
+            default_voice: voice_name.to_string(),
+        })
+    }
+}
+
+impl SpeechSynthesizer for MlxSpeechSynthesizer {
+    fn describe_capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            provider_name: "kokoro-mlx".to_string(),
+            interface_kind: "tts".to_string(),
+            supported_languages: vec![
+                "it".into(),
+                "en".into(),
+                "fr".into(),
+                "de".into(),
+                "es".into(),
+                "pt".into(),
+                "ja".into(),
+                "ko".into(),
+                "zh".into(),
+                "hi".into(),
+            ],
+            supports_streaming: false,
+            supports_partial_results: false,
+            supports_timestamps: false,
+            low_latency_suitable: true,
+            offline_capable: true,
+            execution_mode: ProviderExecutionMode::Local,
+        }
+    }
+
+    fn synthesize(&mut self, request: SynthesisRequest) -> Result<SynthesisResult, SynthesisError> {
+        let err = |msg: String| SynthesisError::new("kokoro-mlx", msg);
+
+        // Phonemize with espeak-ng
+        let phonemes = phonemize(&request.text, &request.language)
+            .map_err(|e| err(format!("phonemization failed: {e}")))?;
+
+        // Synthesize with MLX compile enabled (fused Metal kernels).
+        mlx_rs::transforms::compile::enable_compile();
+        let audio = voice_tts::generate(&mut self.model, &phonemes, &self.voice, 1.0)
+            .map_err(|e| err(format!("synthesis failed: {e}")))?;
+        mlx_rs::transforms::compile::disable_compile();
+
+        // Force evaluation, then release BOTH the JIT compilation cache AND the
+        // Metal buffer pool. Without this, MLX holds onto several GB of unified
+        // memory (GPU buffers that macOS reports as system memory pressure).
+        audio.eval().map_err(|e| err(format!("eval failed: {e}")))?;
+        let samples: &[f32] = audio.as_slice();
+
+        // Write WAV
+        let n = AUDIO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let voice = request.voice.as_deref().unwrap_or(&self.default_voice);
+        let wav_path = self.output_dir.join(format!("mlx-{voice}-{n}.wav"));
+        write_wav_16(&wav_path, 24000, samples)
+            .map_err(|e| err(format!("failed to write WAV: {e}")))?;
+
+        // WAV is on disk — now release all MLX caches. This frees the Metal
+        // buffer pool and the JIT compilation cache. The audio Array (and its
+        // backing Metal buffer) is dropped when it goes out of scope above.
+        drop(audio);
+        mlx_rs::transforms::compile::clear_cache();
+        unsafe { mlx_clear_cache(); }
+
+        let byte_length = wav_path.metadata().map(|m| m.len() as usize).unwrap_or(0);
+        let text_excerpt = request.text.chars().take(50).collect();
+
+        let mut metadata = HashMap::new();
+        metadata.insert("language".to_string(), request.language);
+        metadata.insert("phonemes".to_string(), phonemes);
+
+        Ok(SynthesisResult {
+            provider_name: "kokoro-mlx".to_string(),
+            voice: voice.to_string(),
+            content_type: "audio/wav".to_string(),
+            audio_reference: wav_path.display().to_string(),
+            byte_length,
+            text_excerpt,
+            metadata,
+        })
+    }
+}
+
+/// Phonemize text by clause, preserving punctuation for Kokoro prosody.
+///
+/// espeak-ng strips punctuation from IPA output. Kokoro needs `,` `.` `?` `!`
+/// in the phoneme stream for natural pauses and intonation.
+///
+/// Strategy: split text on clause boundaries (punctuation), phonemize each
+/// clause in a single espeak-ng call, and re-insert the punctuation.
+/// Works for any language espeak-ng supports — no language-specific code.
+fn phonemize(text: &str, language: &str) -> Result<String, String> {
+    // Normalize brackets/dashes to comma pauses before phonemization
+    let text = normalize_pauses(text);
+
+    let mut result = String::new();
+    let mut clause_start = 0;
+
+    for (i, ch) in text.char_indices() {
+        if is_clause_punct(ch) {
+            let clause = &text[clause_start..i];
+            let clean = clause.trim();
+            if !clean.is_empty() {
+                let phonemes = espeak_ipa(clean, language)?;
+                if !result.is_empty() && !phonemes.is_empty() {
+                    result.push(' ');
+                }
+                result.push_str(&phonemes);
+            }
+            result.push(ch);
+            clause_start = i + ch.len_utf8();
+        }
+    }
+
+    // Remaining text after last punctuation
+    let tail = text[clause_start..].trim();
+    if !tail.is_empty() {
+        let phonemes = espeak_ipa(tail, language)?;
+        if !result.is_empty() && !phonemes.is_empty() {
+            result.push(' ');
+        }
+        result.push_str(&phonemes);
+    }
+
+    Ok(result)
+}
+
+/// Normalize text before phonemization.
+///
+/// Based on misaki's EspeakG2P preprocessing (the official Kokoro G2P):
+/// - Parentheses/brackets → commas (Kokoro pauses on commas)
+/// - Dashes → commas
+/// - Curly quotes normalized
+/// - Multiple spaces collapsed
+fn normalize_pauses(text: &str) -> String {
+    text.replace('(', ", ")
+        .replace(')', ", ")
+        .replace('[', ", ")
+        .replace(']', ", ")
+        .replace('{', ", ")
+        .replace('}', ", ")
+        .replace(" — ", ", ")
+        .replace(" – ", ", ")
+        .replace("--", ", ")
+        .replace("\",", "…") // closing quote + comma → ellipsis (longer pause)
+        .replace('"', ", ") // other quotes → comma pause
+        .replace('\u{201C}', ", ") // left double quote "
+        .replace('\u{201D}', ", ") // right double quote "
+        .replace('\u{00AB}', ", ") // «
+        .replace('\u{00BB}', ", ") // »
+        .replace('\u{2018}', "'") // left single quote
+        .replace('\u{2019}', "'") // right single quote
+        .replace("  ", " ")
+        .replace(", ,", ",")
+        .replace(",,", ",")
+}
+
+fn is_clause_punct(c: char) -> bool {
+    matches!(
+        c,
+        '.' | ',' | '!' | '?' | ':' | ';' | '…'
+        | '。' | '、' | '！' | '？' | '；' | '：'  // CJK
+        | '¿' | '¡' // Spanish
+    )
+}
+
+/// Clean espeak IPA output to match Kokoro's expected phoneme format.
+/// Based on misaki's post-processing rules.
+fn clean_ipa(ipa: &str) -> String {
+    ipa.replace('^', "") // tie character
+        .replace('\u{0329}', "") // combining vertical line below
+        .replace('\u{032A}', "") // combining bridge below
+        .replace('-', "") // hyphens in IPA
+}
+
+fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
+    let clauses = espeak_rs::text_to_phonemes(text, language, None, false, false)
+        .map_err(|e| format!("espeak-rs phonemization failed: {e}"))?;
+    let raw = clauses.join(" ");
+    Ok(clean_ipa(raw.trim()))
+}
+
+fn write_wav_16(path: &Path, sample_rate: u32, samples: &[f32]) -> std::io::Result<()> {
+    let data_size = samples.len() * 2;
+    let mut bytes = Vec::with_capacity(44 + data_size);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_size as u32).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&(data_size as u32).to_le_bytes());
+    for &s in samples {
+        let pcm = (s.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+        bytes.extend_from_slice(&pcm.to_le_bytes());
+    }
+    fs::write(path, bytes)
+}

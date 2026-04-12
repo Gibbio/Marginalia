@@ -1,0 +1,11 @@
+[package]
+name = "marginalia-tts-mlx"
+version = "0.1.0"
+edition = "2021"
+description = "Kokoro TTS via MLX Metal GPU — macOS Apple Silicon only"
+
+[dependencies]
+espeak-rs = "0.1"
+marginalia-core = { path = "../marginalia-core" }
+voice-tts = { git = "https://github.com/Gibbio/voice-mlx.git" }
+mlx-rs = { git = "https://github.com/oxideai/mlx-rs.git" }

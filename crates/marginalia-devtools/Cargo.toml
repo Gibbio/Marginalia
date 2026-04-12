@@ -1,0 +1,10 @@
+[package]
+name = "marginalia-devtools"
+version = "0.1.0"
+edition = "2021"
+description = "Development tooling for the Marginalia Beta engine"
+
+[dependencies]
+marginalia-core = { path = "../marginalia-core" }
+marginalia-runtime = { path = "../marginalia-runtime" }
+marginalia-tts-kokoro = { path = "../marginalia-tts-kokoro" }

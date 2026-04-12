@@ -1,0 +1,33 @@
+# marginalia-runtime
+
+Host-neutral runtime composition for the Marginalia Beta engine.
+
+The first implementation in this crate is intentionally small:
+
+- assembles `marginalia-core`
+- uses `marginalia-import-text`
+- uses `marginalia-provider-fake`
+- exposes a fake bootstrap runtime for integration tests and early hosts
+- exposes a SQLite-backed runtime profile for Beta desktop tooling
+
+Current runtime entry points:
+
+- `FakeRuntime`: in-memory repositories plus fake providers
+- `SqliteRuntime`: SQLite repositories, configurable providers via RuntimeBuilder
+
+`apps/tui-rs` can now run directly against `SqliteRuntime` by setting
+`MARGINALIA_TUI_BACKEND=beta`.
+
+`SqliteRuntime` also exposes the first embedded frontend gateway for Beta:
+
+- command handling for ingest, playback navigation, and note creation
+- query handling for snapshots, document views, doctor report, capabilities,
+  note listing, and basic search
+
+The runtime can now also accept a replacement playback engine at construction
+time, which allows desktop hosts such as `apps/tui-rs` to swap the fake
+playback implementation for a host-side playback engine (rodio).
+
+The same runtime boundary now supports replacing the speech synthesizer, so the
+future Kokoro ONNX provider can be wired into the same desktop and mobile host
+paths without changing the runtime API again.

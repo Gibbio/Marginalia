@@ -1,0 +1,27 @@
+name: Architecture Decision
+description: Propose or track an architectural change that may require an ADR.
+title: "[ADR] "
+labels:
+  - type:adr
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What constraints or pressures are driving the decision?
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Proposed Decision
+      description: What are you proposing to standardize?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other options were evaluated?
+    validations:
+      required: true
