@@ -103,3 +103,189 @@ Verify setup:
 ```bash
 make beta-doctor
 ```
+
+## Build Your Own App
+
+Marginalia is a **library-first** project. The TUI is just one host app — you
+can build your own (GUI, mobile, web) using the runtime crates.
+
+### 1. Add dependencies
+
+```toml
+[dependencies]
+marginalia-runtime = { git = "https://github.com/Gibbio/Marginalia", tag = "v0.1.0-beta", features = ["host-playback"] }
+marginalia-config  = { git = "https://github.com/Gibbio/Marginalia", tag = "v0.1.0-beta" }
+
+# Optional — enable the providers you need:
+# marginalia-runtime features: apple-stt, whisper-stt, mlx-tts, host-playback
+```
+
+### 2. Build the runtime (5 lines)
+
+```rust
+use marginalia_runtime::{RuntimeBuilder, RuntimeConfig};
+use marginalia_config::*;
+
+let output = RuntimeBuilder::new(".marginalia/app.sqlite3")
+    .config(RuntimeConfig::default())
+    .voice_commands(VoiceCommandsSection::default())
+    .stt(SttSection::default())       // or configure engine = "apple"
+    .mlx(MlxSection::default())       // or kokoro() for ONNX
+    .playback(PlaybackSection::default())
+    .build()?;
+
+let runtime = output.runtime;
+// output.stt_label, output.tts_label etc. for logging
+```
+
+The builder handles: database setup, provider wiring (TTS, STT, playback),
+AEC echo cancellation, TTS cache, and session restore — all behind feature
+flags. Your app does 5-10 lines instead of 500.
+
+### 3. Execute commands and queries
+
+The runtime exposes a JSON-based frontend API via `RuntimeFrontend`:
+
+```rust
+use marginalia_runtime::RuntimeFrontend;
+use serde_json::json;
+
+// Commands (mutate state)
+let response = runtime.execute_frontend_command("start_session", json!({
+    "target": "/path/to/document.txt"
+}));
+
+// Queries (read state)
+let response = runtime.execute_frontend_query("get_session_snapshot", json!({}));
+let session = &response.payload["session"];
+println!("Reading: {} chunk {}", session["document_id"], session["chunk_index"]);
+```
+
+#### Available commands
+
+| Command | Payload | Description |
+|---|---|---|
+| `ingest_document` | `{ "path": "file.txt" }` | Import a document into the library |
+| `start_session` | `{ "target": "doc_id_or_path" }` | Start reading (auto-ingests if path) |
+| `pause_session` | `{}` | Pause playback |
+| `resume_session` | `{}` | Resume playback |
+| `stop_session` | `{}` | Stop session (deactivates it) |
+| `next_chunk` | `{}` | Advance to next chunk |
+| `previous_chunk` | `{}` | Go back one chunk |
+| `next_chapter` | `{}` | Skip to next chapter |
+| `previous_chapter` | `{}` | Go to previous chapter |
+| `repeat_chunk` | `{}` | Replay current chunk |
+| `restart_chapter` | `{}` | Restart current chapter from first chunk |
+| `create_note` | `{ "text": "..." }` | Attach a note to the current position |
+| `restore_session` | `{}` | Restore last active session (auto-called by builder) |
+
+#### Available queries
+
+| Query | Payload | Returns |
+|---|---|---|
+| `get_app_snapshot` | `{}` | `{ "app": { "state", "document_count", ... } }` |
+| `get_session_snapshot` | `{}` | `{ "session": { "document_id", "chunk_text", "playback_state", ... } }` |
+| `get_document_view` | `{ "document_id": "..." }` | `{ "document": { "sections": [...], "chunks": [...] } }` |
+| `list_documents` | `{}` | `{ "documents": [...] }` |
+| `list_notes` | `{ "document_id": "..." }` | `{ "notes": [...] }` |
+| `search_documents` | `{ "query": "..." }` | `{ "search": { "results": [...] } }` |
+| `search_notes` | `{ "query": "..." }` | `{ "search": { "results": [...] } }` |
+| `get_doctor_report` | `{}` | Provider health check report |
+| `get_backend_capabilities` | `{}` | List of supported commands/queries |
+| `auto_advance` | `{}` | Auto-advance if current chunk finished (returns `{ "advanced": bool }`) |
+
+### 4. Subscribe to events
+
+The runtime pushes typed events — no polling needed:
+
+```rust
+use marginalia_runtime::RuntimeEvent;
+
+// Option A: channel (for polling loops / TUI)
+let rx = runtime.subscribe_events();
+match rx.try_recv() {
+    Ok(RuntimeEvent::PlaybackFinished { document_id, chunk_index, .. }) => { ... }
+    Ok(RuntimeEvent::ChunkAdvanced { .. }) => { ... }
+    Ok(RuntimeEvent::SessionRestored { .. }) => { ... }
+    _ => {}
+}
+
+// Option B: callback (for mobile / FFI)
+runtime.on_event(Box::new(|event| {
+    match event {
+        RuntimeEvent::PlaybackFinished { .. } => { /* update UI */ }
+        _ => {}
+    }
+}));
+```
+
+#### Event types
+
+| Event | Fields | When |
+|---|---|---|
+| `PlaybackFinished` | `document_id, section_index, chunk_index` | A chunk finished playing naturally |
+| `ChunkAdvanced` | `document_id, section_index, chunk_index` | Reading moved to a new chunk |
+| `SessionRestored` | `session_id, document_id, section_index, chunk_index` | Session restored from database on startup |
+| `SessionStopped` | `document_id` | Session explicitly stopped |
+| `Error` | `message` | Runtime error the app should surface |
+
+### 5. Configure voice commands
+
+```rust
+use marginalia_config::VoiceCommandsSection;
+
+let mut vc = VoiceCommandsSection::default();
+vc.pause = vec!["pause".into(), "hold".into()];
+vc.next = vec!["next".into(), "forward".into()];
+
+// Resolve a recognized phrase to an action:
+match vc.resolve_action("go forward please") {
+    Some("next") => { /* advance */ }
+    Some("pause") => { /* pause */ }
+    _ => { /* not a command */ }
+}
+```
+
+### 6. Download models programmatically
+
+```rust
+use marginalia_models::ModelManager;
+
+let models = ModelManager::new()?;
+
+// Whisper STT model (~460MB, cached after first download)
+let whisper_path = models.ensure_whisper("ggml-small.bin")?;
+
+// Kokoro voice embedding
+let voice_path = models.ensure_kokoro_voice("if_sara")?;
+```
+
+### Minimal example: ingest + read
+
+```rust
+use marginalia_runtime::{RuntimeBuilder, RuntimeConfig};
+use marginalia_config::*;
+use serde_json::json;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let output = RuntimeBuilder::new(".marginalia/demo.sqlite3")
+        .config(RuntimeConfig::default())
+        .build()?;
+    let mut runtime = output.runtime;
+
+    // Import a document
+    runtime.execute_frontend_command("ingest_document", json!({
+        "path": "my-book.txt"
+    }));
+
+    // Start reading (auto-plays first chunk with TTS)
+    runtime.execute_frontend_command("start_session", json!({
+        "target": "my-book.txt"
+    }));
+
+    // The runtime handles: TTS synthesis, playback, auto-advance to next
+    // chunk, session persistence. Your app just needs to render the UI.
+
+    Ok(())
+}
+```
