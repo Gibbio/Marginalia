@@ -12,10 +12,13 @@ use crate::AppleHelperShared;
 use aec3::voip::VoipAec3;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Number of samples in a 10ms frame at the AEC sample rate.
 const FRAME_SAMPLES: usize = (crate::AEC_SAMPLE_RATE as usize) / 100; // 240 at 24kHz
+
+/// Max number of level entries in the waveform ring buffer (~1.3s at 10ms/frame).
+const WAVEFORM_HISTORY: usize = 128;
 
 /// Commands sent to the AEC thread to set/clear the render reference.
 pub enum RenderCommand {
@@ -25,10 +28,37 @@ pub enum RenderCommand {
     ClearReference,
 }
 
+/// Real-time audio level data for UI waveform visualization. Updated by the
+/// AEC thread every 10ms frame. Read by the TUI render loop.
+#[derive(Default)]
+pub struct WaveformData {
+    /// Peak amplitude (0.0–1.0) of recent TTS render frames.
+    pub tts_levels: Vec<f32>,
+    /// Peak amplitude (0.0–1.0) of recent mic capture frames.
+    pub mic_levels: Vec<f32>,
+}
+
+impl WaveformData {
+    fn push_tts(&mut self, level: f32) {
+        if self.tts_levels.len() >= WAVEFORM_HISTORY {
+            self.tts_levels.remove(0);
+        }
+        self.tts_levels.push(level);
+    }
+
+    fn push_mic(&mut self, level: f32) {
+        if self.mic_levels.len() >= WAVEFORM_HISTORY {
+            self.mic_levels.remove(0);
+        }
+        self.mic_levels.push(level);
+    }
+}
+
 /// Handle to the running AEC pipeline. Dropping it stops the mic stream.
 pub struct AecPipeline {
     _stream: cpal::Stream,
     render_tx: mpsc::SyncSender<RenderCommand>,
+    waveform: Arc<Mutex<WaveformData>>,
 }
 
 impl AecPipeline {
@@ -56,6 +86,8 @@ impl AecPipeline {
         let (mic_tx, mic_rx) = mpsc::sync_channel::<Vec<f32>>(64);
         // Channel: playback → AEC thread (render reference commands).
         let (render_tx, render_rx) = mpsc::sync_channel::<RenderCommand>(4);
+        // Shared waveform data for UI visualization.
+        let waveform = Arc::new(Mutex::new(WaveformData::default()));
 
         let stream = device
             .build_input_stream(
@@ -75,6 +107,7 @@ impl AecPipeline {
         let target_rate = crate::AEC_SAMPLE_RATE as usize;
 
         // AEC processing thread.
+        let waveform_writer = waveform.clone();
         std::thread::spawn(move || {
             let mut aec = match VoipAec3::builder(target_rate, 1, 1).build() {
                 Ok(a) => a,
@@ -145,6 +178,27 @@ impl AecPipeline {
                         }
                     }
 
+                    // Update waveform levels for UI visualization.
+                    if let Ok(mut wf) = waveform_writer.try_lock() {
+                        let mic_peak = frame.iter().fold(0.0f32, |a, &s| a.max(s.abs()));
+                        wf.push_mic(mic_peak.min(1.0));
+
+                        let tts_peak = if let Some(ref samples) = render_ref {
+                            let start = render_pos.saturating_sub(FRAME_SAMPLES);
+                            let end = start + FRAME_SAMPLES;
+                            if end <= samples.len() {
+                                samples[start..end]
+                                    .iter()
+                                    .fold(0.0f32, |a, &s| a.max(s.abs()))
+                            } else {
+                                0.0
+                            }
+                        } else {
+                            0.0
+                        };
+                        wf.push_tts(tts_peak.min(1.0));
+                    }
+
                     if let Err(e) = helper.write_audio_frame(&out_buf) {
                         log::error!("[aec] failed to write to helper: {e}");
                         return;
@@ -157,6 +211,7 @@ impl AecPipeline {
         Ok(Self {
             _stream: stream,
             render_tx,
+            waveform,
         })
     }
 
@@ -176,6 +231,12 @@ impl AecPipeline {
     /// engine or other components that need to feed the reference signal).
     pub fn render_sender(&self) -> mpsc::SyncSender<RenderCommand> {
         self.render_tx.clone()
+    }
+
+    /// Shared waveform data for UI visualization. The AEC thread updates this
+    /// every 10ms frame with peak levels; the UI reads it on each render cycle.
+    pub fn waveform_data(&self) -> Arc<Mutex<WaveformData>> {
+        self.waveform.clone()
     }
 }
 

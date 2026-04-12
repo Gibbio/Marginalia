@@ -262,6 +262,20 @@ impl BackendClient {
         client.poll_voice_event()
     }
 
+    /// Get current waveform levels (tts, mic) from the AEC pipeline.
+    /// Returns (tts_levels, mic_levels). Empty vecs if AEC not active.
+    pub fn waveform_levels(&self) -> (Vec<f32>, Vec<f32>) {
+        let Self::Beta(client) = self;
+        #[cfg(feature = "apple-stt")]
+        if let Some(ref wf) = client.waveform_data {
+            if let Ok(data) = wf.try_lock() {
+                return (data.tts_levels.clone(), data.mic_levels.clone());
+            }
+        }
+        let _ = client;
+        (vec![], vec![])
+    }
+
     /// Check if the current chunk finished playing. If so, auto-advance to
     /// the next chunk (or stop at end of document). Returns true if advanced.
     pub fn check_auto_advance(&mut self) -> bool {
@@ -277,6 +291,9 @@ pub(crate) struct BetaBackendClient {
     voice_cmd_rx: Option<mpsc::Receiver<(Option<String>, Option<String>)>>,
     /// Receiver for the result of a command running on a background thread.
     async_result_rx: Option<mpsc::Receiver<AsyncCommandResult>>,
+    /// Real-time audio waveform data from the AEC pipeline (if active).
+    #[cfg(feature = "apple-stt")]
+    pub waveform_data: Option<std::sync::Arc<std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>>>,
 }
 
 struct AsyncCommandResult {
@@ -405,6 +422,8 @@ impl BetaBackendClient {
         let mut stt_label = "fake";
         #[allow(unused_mut, unused_variables)]
         let mut dictation_label = "fake";
+        #[cfg(feature = "apple-stt")]
+        let mut _waveform_data: Option<std::sync::Arc<std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>>> = None;
         let stt_engine = config.stt.engine.to_lowercase();
 
         if stt_engine == "apple" {
@@ -441,6 +460,7 @@ impl BetaBackendClient {
                         // AecPipeline holds cpal::Stream (!Send) so we can't
                         // store it in BackendClient (Arc<Mutex>). Leaking is
                         // the standard pattern for process-scoped audio streams.
+                        _waveform_data = Some(aec_pipeline.waveform_data());
                         Box::leak(Box::new(aec_pipeline));
                         runtime.set_provider_doctor_blob(
                             "apple_stt",
@@ -584,6 +604,8 @@ impl BetaBackendClient {
             sequence: 0,
             voice_cmd_rx,
             async_result_rx: None,
+            #[cfg(feature = "apple-stt")]
+            waveform_data: _waveform_data,
         };
         client.push_log(format!(
             "beta-runtime ready db={} playback={} tts={} stt={} dictation={}",
