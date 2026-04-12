@@ -5,5 +5,7 @@ edition = "2021"
 description = "Apple native STT via SFSpeechRecognizer — macOS Neural Engine, zero models"
 
 [dependencies]
+aec3 = "0.1"
+cpal = "0.15"
 log = "0.4"
 marginalia-core = { path = "../marginalia-core" }
