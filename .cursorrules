@@ -245,17 +245,16 @@ Both engines keep the microphone stream open for the entire session
 (no permission icon flickering). Command monitor thread runs independently
 from the runtime, so there's no lock contention while navigating or replaying.
 
-### Echo cancellation — two layers
+### Echo cancellation — acoustic AEC3
 
 Echo cancellation prevents the TTS from triggering its own voice commands
-when the mic picks up the playback audio. Marginalia uses two layers:
+when the mic picks up the playback audio.
 
-**Layer 1 — Acoustic AEC (primary, macOS)**. The `aec3` crate (pure-Rust
-port of WebRTC AEC3) removes the TTS audio from the mic signal BEFORE it
-reaches SFSpeechRecognizer. See "Apple STT — architecture" above. The
-render reference is the WAV chunk being played; the capture is the resampled
-mic. AEC3 subtracts one from the other per 10ms frame. This handles the
-vast majority of echo with zero false negatives.
+On macOS, the `aec3` crate (pure-Rust port of WebRTC AEC3) removes the TTS
+audio from the mic signal BEFORE it reaches SFSpeechRecognizer. See "Apple
+STT — architecture" above. The render reference is the WAV chunk being
+played; the capture is the resampled mic. AEC3 subtracts one from the other
+per 10ms frame. This handles echo with zero false negatives.
 
 For **other platforms**, the AEC approach will differ:
 - **iOS**: `AVAudioSession.voiceChat` (hardware AEC on Neural Engine)
@@ -265,16 +264,6 @@ For **other platforms**, the AEC approach will differ:
 - **Web**: `getUserMedia({echoCancellation: true})`
 
 The per-platform evaluation matrix lives in NEXT.md.
-
-**Layer 2 — Post-STT text filter (fallback)**. The external crate
-`stt-echo-filter` (https://github.com/Gibbio/stt-echo-filter) strips
-playback words from the STT transcript at the WORD level using a per-word
-budget. Wired in `App::handle_voice_command(raw)` — only active when
-`playback_state == "playing"`. This catches residual echo that AEC3 might
-miss (e.g. reverberation, AEC adaptation lag).
-
-Both layers operate independently: AEC3 cleans the audio, the text filter
-cleans the transcript. Together they provide robust echo rejection.
 
 ## Key conventions
 
@@ -324,6 +313,3 @@ cleans the transcript. Together they provide robust echo rejection.
 - Don't drop the `AecPipeline` — it holds the `cpal::Stream` that keeps the
   mic open. It's `Box::leak`ed in `backend.rs` because `cpal::Stream` is
   `!Send` and can't be stored in `BackendClient` (behind `Arc<Mutex>`).
-- Don't vendor `stt-echo-filter` into the Marginalia tree — it is an
-  independent crate at https://github.com/Gibbio/stt-echo-filter, pulled
-  via git dependency in `apps/tui-rs/Cargo.toml`.

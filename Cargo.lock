@@ -1644,7 +1644,6 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
- "stt-echo-filter",
  "toml",
 ]
 
@@ -2721,11 +2720,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "stt-echo-filter"
-version = "0.1.0"
-source = "git+https://github.com/Gibbio/stt-echo-filter#2298ba716294de6dbe69ab5bd7c323108787ab9a"
 
 [[package]]
 name = "subtle"

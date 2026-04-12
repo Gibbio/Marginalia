@@ -681,15 +681,7 @@ impl App {
         self.backend.poll_voice_event()
     }
 
-    /// Handle a raw speech-to-text utterance as a potential voice command.
-    ///
-    /// If the session is actively playing a TTS chunk, the utterance is first
-    /// run through `stt_echo_filter` using the currently-playing chunk text as
-    /// reference — this strips words that the TTS "said to itself" via mic
-    /// bleed, so echoed trigger words don't fire spurious actions. If nothing
-    /// is playing, the raw utterance is passed through unchanged.
     pub fn handle_voice_command(&mut self, raw: &str) {
-        // Only act when a session is active and command listening is enabled.
         let listening = self
             .session_snapshot
             .as_ref()
@@ -699,22 +691,7 @@ impl App {
             return;
         }
 
-        // Post-STT echo filter (only active during playback).
-        let filtered: String = self
-            .session_snapshot
-            .as_ref()
-            .filter(|s| s.playback_state.eq_ignore_ascii_case("playing"))
-            .map(|s| stt_echo_filter::strip_echo(raw, &s.chunk_text))
-            .unwrap_or_else(|| raw.to_string());
-
-        // If the filter absorbed everything, it was pure echo — drop silently
-        // (but log in debug mode so the user can see what happened).
-        if filtered.trim().is_empty() {
-            self.push_message(format!("[echo] dropped: \"{raw}\""));
-            return;
-        }
-
-        match self.voice_commands.resolve_action(&filtered) {
+        match self.voice_commands.resolve_action(raw) {
             Some("pause") => self.run_shortcut_command(BackendClient::pause_session),
             Some("next") => self.navigate_next_chunk(),
             Some("back") => self.navigate_previous_chunk(),

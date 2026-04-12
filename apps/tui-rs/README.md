@@ -194,23 +194,10 @@ While the TTS is reading a chunk aloud, the microphone picks up the
 playback. Without protection, trigger words in the document would fire
 spurious commands as soon as the TTS pronounces them.
 
-Marginalia uses **two layers** of echo cancellation:
-
-1. **Acoustic AEC (primary)**: when `engine = "apple"`, the mic signal
-   passes through WebRTC AEC3 (`aec3` crate, pure Rust) before reaching
-   SFSpeechRecognizer. The TTS playback WAV is used as the render
-   reference. AEC3 subtracts it from the mic per 10ms frame, so the STT
-   never hears the echo. This handles the vast majority of cases with
-   zero false negatives.
-
-2. **Post-STT text filter (fallback)**: the external crate
-   [`stt-echo-filter`](https://github.com/Gibbio/stt-echo-filter)
-   strips residual playback words from the STT transcript at the word
-   level. Catches any echo that AEC3 might miss (e.g. reverberation,
-   AEC adaptation lag). Active only when `playback_state == "playing"`.
-
-Both layers operate independently — AEC3 cleans the audio, the text
-filter cleans the transcript.
+When `engine = "apple"`, the mic signal passes through **WebRTC AEC3**
+(`aec3` crate, pure Rust) before reaching SFSpeechRecognizer. The TTS
+playback WAV is used as the render reference. AEC3 subtracts it from
+the mic per 10ms frame, so the STT never hears the echo.
 
 ## Build features
 
