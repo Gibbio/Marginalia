@@ -163,7 +163,7 @@ impl WhisperDictationTranscriber {
                         .collect();
                     let _ = tx.try_send(samples);
                 },
-                |err| eprintln!("[whisper-stt] cpal stream error: {err}"),
+                |err| log::error!("[whisper-stt] cpal stream error: {err}"),
                 None,
             )
             .map_err(|e| format!("Cannot build input stream: {e}"))?;
@@ -409,7 +409,7 @@ impl CommandRecognizer for WhisperCommandRecognizer {
         match WhisperInterruptMonitor::new(self.config.clone(), self.commands.clone()) {
             Ok(monitor) => Box::new(monitor),
             Err(e) => {
-                eprintln!("[whisper-stt] Failed to open monitor: {e}");
+                log::error!("[whisper-stt] failed to open monitor: {e}");
                 Box::new(ErrorWhisperMonitor(e))
             }
         }
@@ -462,7 +462,7 @@ impl WhisperInterruptMonitor {
                         .collect();
                     let _ = tx.try_send(samples);
                 },
-                |err| eprintln!("[whisper-monitor] audio error: {err}"),
+                |err| log::error!("[whisper-monitor] audio error: {err}"),
                 None,
             )
             .map_err(|e| format!("Cannot build input stream: {e}"))?;

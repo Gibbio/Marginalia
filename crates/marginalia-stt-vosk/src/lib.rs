@@ -375,7 +375,7 @@ fn build_input_stream(
                     .collect();
                 let _ = tx.try_send(samples);
             },
-            |err| eprintln!("marginalia-stt-vosk audio error: {err}"),
+            |err| log::error!("[vosk-stt] audio error: {err}"),
             None,
         )
         .map_err(|e| format!("Failed to build audio stream: {e}"))

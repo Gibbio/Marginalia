@@ -31,22 +31,17 @@ descoped before tagging `v0.1.0-beta`.
 | 19 | **CI** | GitHub Actions: macOS (mlx, apple-stt) + Linux (onnx, whisper) | **TODO** | Compiles all crates, runs all tests on every push |
 | 20 | **Docs** | `cargo doc` builds cleanly, public items documented | **TODO** | Developers read the API docs. Currently many pub items lack doc comments |
 | 21 | **Crates.io** | Publish core + runtime + storage (or at minimum, stable git tags) | **TODO** | Developers need a stable dependency reference, not just `git = "..."` |
-
-### Infrastructure — nice to have (not blocking beta-dev)
-
-| # | Area | Task | Notes |
-|---|------|------|-------|
-| N1 | Shared config crate | Extract `marginalia-config` with reusable config types | Avoids each app re-defining SttSection etc. |
-| N2 | Model management | `marginalia-models` crate: discovery, download, cache | For mobile apps where `make bootstrap-*` doesn't exist |
-| N3 | Unified STT factory | Trait or function that returns `(CommandRecognizer, DictationTranscriber)` from one init | Apple already does this; formalize the pattern |
-| N4 | espeak-rs | Compiled Rust binding to eliminate system espeak-ng dep | Currently espeak-ng must be installed on the system |
-| N5 | Reading flow: auto-play next chunk | Continuous reading without pressing /next | Most-requested UX feature, but not infrastructure |
+| 22 | **Shared config** | Extract `marginalia-config` crate with reusable config types | **TODO** | Avoids each app re-defining SttSection, VoiceCommandsSection, etc. |
+| 23 | **Model management** | `marginalia-models` crate: discovery, download, cache | **TODO** | Mobile apps can't run `make bootstrap-*`; need programmatic model management |
+| 24 | **Unified STT factory** | Trait or function returning `(CommandRecognizer, DictationTranscriber)` from one init | **TODO** | Apple already does this via `new_apple_stt`; formalize the pattern for all engines |
+| 25 | **espeak-rs** | Compiled Rust binding to eliminate system espeak-ng dependency | **TODO** | System dep is a barrier for packaging and mobile |
+| 26 | **Auto-play next chunk** | Continuous reading without pressing /next | **TODO** | rodio `sink.empty()` callback; most-requested UX feature |
 
 ### Release criteria summary
 
-**Tag `v0.1.0-beta` when rows 1–21 in the must-have table are Done.** Rows
-N1–N5 are tracked but do NOT block the release. Features (study, annotations,
-AI, import formats) are post-beta — they build on top of the infrastructure.
+**Tag `v0.1.0-beta` when rows 1–26 in the must-have table are Done.**
+Features (study, annotations, AI, import formats) are post-beta — they
+build on top of the infrastructure.
 
 ---
 

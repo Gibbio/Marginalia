@@ -29,7 +29,7 @@ impl Default for HostPlaybackEngine {
         let (stream, handle) = match OutputStream::try_default() {
             Ok((s, h)) => (Some(SendOutputStream(s)), Some(h)),
             Err(e) => {
-                eprintln!("[playback] audio output not available: {e}");
+                log::warn!("[playback] audio output not available: {e}");
                 (None, None)
             }
         };

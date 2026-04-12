@@ -6,4 +6,5 @@ description = "Shared Marginalia Beta engine core"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+log = "0.4"
 sha2 = "0.10"

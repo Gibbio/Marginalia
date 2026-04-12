@@ -64,7 +64,7 @@ fn ensure_helper() -> Result<PathBuf, String> {
             .status();
         match status {
             Ok(s) if s.success() => {}
-            _ => eprintln!("[apple-stt] Failed to compile Swift helper"),
+            _ => log::error!("[apple-stt] failed to compile Swift helper"),
         }
     });
     if path.exists() {
@@ -388,7 +388,7 @@ impl DictationTranscriber for AppleDictationTranscriber {
         // Always switch back to command mode so the monitor resumes catching
         // commands, even if dictation errored out.
         if let Err(e) = self.helper.switch_to_command() {
-            eprintln!("[apple-stt] mode switch back to command failed: {e}");
+            log::warn!("[apple-stt] mode switch back to command failed: {e}");
         }
 
         match result {
