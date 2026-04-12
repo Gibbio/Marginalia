@@ -1160,4 +1160,125 @@ mod tests {
 
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn sqlite_runtime_pause_resume_stop() {
+        let path = temp_path("md");
+        fs::write(&path, "# Intro\n\nAlpha beta gamma.").unwrap();
+
+        let mut runtime = SqliteRuntime::open_in_memory().unwrap();
+        let outcome = runtime.ingest_path(&path).unwrap();
+        runtime
+            .start_session(&outcome.document.document_id)
+            .unwrap();
+
+        runtime.pause_session().unwrap();
+        let paused = runtime.session_snapshot().unwrap().unwrap();
+        assert_eq!(paused.state, "paused");
+
+        runtime.resume_session().unwrap();
+        let resumed = runtime.session_snapshot().unwrap().unwrap();
+        assert_eq!(resumed.state, "reading");
+
+        runtime.stop_session().unwrap();
+        let stopped = runtime.session_snapshot();
+        assert!(
+            stopped.unwrap().is_none(),
+            "no active session after stop"
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_runtime_restore_session() {
+        let path = temp_path("md");
+        fs::write(
+            &path,
+            "Alpha beta gamma delta epsilon zeta eta theta.",
+        )
+        .unwrap();
+
+        let mut runtime = SqliteRuntime::open_in_memory_with_config(super::RuntimeConfig {
+            chunk_target_chars: 20,
+            ..super::RuntimeConfig::default()
+        })
+        .unwrap();
+        let outcome = runtime.ingest_path(&path).unwrap();
+        runtime
+            .start_session(&outcome.document.document_id)
+            .unwrap();
+        runtime.next_chunk().unwrap();
+        let pos_before = runtime.session_snapshot().unwrap().unwrap();
+
+        // Simulate app restart: restore_session picks up where we left off.
+        let restored = runtime.restore_session();
+        assert!(restored.is_some(), "should restore the active session");
+        let session = restored.unwrap();
+        assert_eq!(session.document_id, outcome.document.document_id);
+        assert_eq!(
+            session.position.chunk_index,
+            pos_before.chunk_index as usize
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_runtime_full_end_to_end_flow() {
+        let path = temp_path("txt");
+        fs::write(
+            &path,
+            "Alpha beta gamma delta epsilon zeta eta theta iota kappa.\n\n\
+             Lambda mu nu xi omicron pi rho sigma tau upsilon.",
+        )
+        .unwrap();
+
+        let mut runtime = SqliteRuntime::open_in_memory_with_config(super::RuntimeConfig {
+            chunk_target_chars: 20,
+            ..super::RuntimeConfig::default()
+        })
+        .unwrap();
+
+        // 1. Ingest
+        let outcome = runtime.ingest_path(&path).unwrap();
+        let doc_id = &outcome.document.document_id;
+        assert!(runtime.list_documents().len() == 1);
+
+        // 2. Start session
+        let session = runtime.start_session(doc_id).unwrap();
+        assert_eq!(session.position.chunk_index, 0);
+
+        // 3. Navigate: next, back
+        runtime.next_chunk().unwrap();
+        let after_next = runtime.session_snapshot().unwrap().unwrap();
+        assert!(after_next.chunk_index >= 1, "next_chunk advanced");
+        runtime.previous_chunk().unwrap();
+
+        // 4. Create a note
+        let note = runtime.create_note("test note").unwrap();
+        assert_eq!(note.transcript, "test note");
+
+        // 5. Pause + resume
+        runtime.pause_session().unwrap();
+        assert_eq!(
+            runtime.session_snapshot().unwrap().unwrap().state,
+            "paused"
+        );
+        runtime.resume_session().unwrap();
+        assert_eq!(
+            runtime.session_snapshot().unwrap().unwrap().state,
+            "reading"
+        );
+
+        // 6. Stop
+        runtime.stop_session().unwrap();
+        assert!(runtime.session_snapshot().unwrap().is_none());
+
+        // 7. Restore
+        // After stop, is_active = false, so restore returns None.
+        assert!(runtime.restore_session().is_none());
+
+        let _ = fs::remove_file(path);
+    }
 }

@@ -27,7 +27,7 @@ descoped before tagging `v0.1.0-beta`.
 | 15 | **RuntimeBuilder** | Builder pattern for provider wiring | Done | `RuntimeBuilder::new(path).stt(cfg).build()` — ~290 lines removed from TUI backend. Feature flags forwarded to runtime. |
 | 16 | **Events / callbacks** | Runtime event system (not just polling) | Done | `RuntimeEvent` enum + `RuntimeEventSink` (channels + callbacks). Emits: PlaybackFinished, ChunkAdvanced, SessionRestored, SessionStopped. |
 | 17 | **FFI** | C-compatible API or UniFFI bindings | **TODO** | Required for iOS (Swift), Android (Kotlin), Windows (C#) |
-| 18 | **Testing** | Core trait tests + integration tests | **TODO** | Developers need to trust the library before building on it |
+| 18 | **Testing** | Core trait tests + integration tests | Done | 83 tests across 8 crates. Runtime: pause/resume/stop, restore session, full e2e flow (ingest → navigate → note → stop → restore). |
 | 19 | **CI** | GitHub Actions: macOS + Linux | Done | Linux: build + test + clippy + fmt. macOS-14 (M1): TUI with apple-stt + mlx-tts + doc check. Triggers on main + beta. |
 | 20 | **Docs** | `cargo doc` builds cleanly, public items documented | Done | All pub types, fields, methods in core/runtime/config/models documented. Zero doc warnings. |
 | 21 | **Crates.io** | Publish core + runtime + storage (or stable git tags) | **TODO** | Developers need a stable dependency reference |
