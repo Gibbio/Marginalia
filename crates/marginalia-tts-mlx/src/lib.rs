@@ -5,6 +5,12 @@
 //!
 //! Performance: ~1000ms for 164-char chunk (12x realtime) on M4.
 
+// MLX C API — memory management functions not yet exposed by mlx-rs.
+// The symbols are already linked via mlx-sys; we just need the declaration.
+extern "C" {
+    fn mlx_clear_cache() -> std::ffi::c_int;
+}
+
 use marginalia_core::ports::{
     ProviderCapabilities, ProviderExecutionMode, SpeechSynthesizer, SynthesisError,
     SynthesisRequest, SynthesisResult,
@@ -93,11 +99,10 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
             .map_err(|e| err(format!("synthesis failed: {e}")))?;
         mlx_rs::transforms::compile::disable_compile();
 
-        // Force evaluation and release the Metal compilation cache + intermediate
-        // buffers. Without this, the JIT cache accumulates across synthesis calls
-        // and can consume several GB of unified memory.
+        // Force evaluation, then release BOTH the JIT compilation cache AND the
+        // Metal buffer pool. Without this, MLX holds onto several GB of unified
+        // memory (GPU buffers that macOS reports as system memory pressure).
         audio.eval().map_err(|e| err(format!("eval failed: {e}")))?;
-        mlx_rs::transforms::compile::clear_cache();
         let samples: &[f32] = audio.as_slice();
 
         // Write WAV
@@ -106,6 +111,13 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
         let wav_path = self.output_dir.join(format!("mlx-{voice}-{n}.wav"));
         write_wav_16(&wav_path, 24000, samples)
             .map_err(|e| err(format!("failed to write WAV: {e}")))?;
+
+        // WAV is on disk — now release all MLX caches. This frees the Metal
+        // buffer pool and the JIT compilation cache. The audio Array (and its
+        // backing Metal buffer) is dropped when it goes out of scope above.
+        drop(audio);
+        mlx_rs::transforms::compile::clear_cache();
+        unsafe { mlx_clear_cache(); }
 
         let byte_length = wav_path.metadata().map(|m| m.len() as usize).unwrap_or(0);
         let text_excerpt = request.text.chars().take(50).collect();
