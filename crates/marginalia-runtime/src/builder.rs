@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 /// Side resources that must outlive the runtime but can't live inside it
 /// (e.g. `cpal::Stream` is `!Send` and `SqliteRuntime` is behind `Arc<Mutex>`).
 pub struct RuntimeSidecar {
+    /// Shared waveform data for AEC visualization (Apple STT only).
     #[cfg(feature = "apple-stt")]
     pub waveform_data: Option<
         std::sync::Arc<
@@ -27,17 +28,27 @@ pub struct RuntimeSidecar {
     _private: (),
 }
 
+/// Result of `RuntimeBuilder::build()`, containing the runtime and metadata.
 pub struct BuildOutput {
+    /// The fully configured runtime instance.
     pub runtime: SqliteRuntime,
+    /// Side resources that must outlive the runtime (e.g. audio streams).
     pub sidecar: RuntimeSidecar,
+    /// Label of the selected TTS provider (e.g. "kokoro-mlx", "fake").
     pub tts_label: String,
+    /// Label of the selected command STT provider (e.g. "apple", "whisper").
     pub stt_label: String,
+    /// Label of the selected dictation STT provider.
     pub dictation_label: String,
+    /// Label of the selected playback provider (e.g. "host", "fake").
     pub playback_label: String,
+    /// Whether STT debug logging is enabled.
     pub stt_debug: bool,
+    /// Voice command configuration for the app's command loop.
     pub voice_commands: VoiceCommandsSection,
 }
 
+/// Fluent builder for constructing a fully-wired `SqliteRuntime`.
 pub struct RuntimeBuilder {
     db_path: PathBuf,
     config: RuntimeConfig,
@@ -49,6 +60,7 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
+    /// Create a new builder with the given database path.
     pub fn new(db_path: impl Into<PathBuf>) -> Self {
         Self {
             db_path: db_path.into(),
@@ -61,36 +73,43 @@ impl RuntimeBuilder {
         }
     }
 
+    /// Set the runtime configuration.
     pub fn config(mut self, config: RuntimeConfig) -> Self {
         self.config = config;
         self
     }
 
+    /// Set the voice commands configuration.
     pub fn voice_commands(mut self, vc: VoiceCommandsSection) -> Self {
         self.voice_commands = vc;
         self
     }
 
+    /// Set the STT engine configuration.
     pub fn stt(mut self, stt: SttSection) -> Self {
         self.stt = stt;
         self
     }
 
+    /// Set the Kokoro ONNX TTS configuration.
     pub fn kokoro(mut self, kokoro: KokoroSection) -> Self {
         self.kokoro = kokoro;
         self
     }
 
+    /// Set the MLX Metal TTS configuration.
     pub fn mlx(mut self, mlx: MlxSection) -> Self {
         self.mlx = mlx;
         self
     }
 
+    /// Set the playback engine configuration.
     pub fn playback(mut self, playback: PlaybackSection) -> Self {
         self.playback = playback;
         self
     }
 
+    /// Build the runtime, wiring all providers based on configuration.
     pub fn build(self) -> Result<BuildOutput, String> {
         if let Some(parent) = self.db_path.parent() {
             std::fs::create_dir_all(parent).ok();
@@ -111,6 +130,7 @@ impl RuntimeBuilder {
 
         // ── Playback (created early, AEC callback wired later) ──
         #[cfg(feature = "host-playback")]
+        #[allow(unused_mut)]
         let mut playback_engine = if self.playback.fake {
             None
         } else {
@@ -190,7 +210,9 @@ impl RuntimeBuilder {
         }
 
         // ── STT ──
+        #[allow(unused_mut)]
         let mut stt_label = "fake";
+        #[allow(unused_mut)]
         let mut dictation_label = "fake";
         #[cfg(feature = "apple-stt")]
         let mut _waveform_data: Option<

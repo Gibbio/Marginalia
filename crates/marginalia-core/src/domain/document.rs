@@ -2,27 +2,41 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+/// Default target size in characters for text chunks (~300).
 pub const DEFAULT_CHUNK_TARGET_CHARS: usize = 300;
 
+/// A section of raw imported text before chunking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedSection {
+    /// Section heading text.
     pub title: String,
+    /// Raw paragraphs within this section.
     pub paragraphs: Vec<String>,
+    /// Optional anchor linking back to the source document location.
     pub source_anchor: Option<String>,
 }
 
+/// A raw document as returned by the importer, before chunking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedDocument {
+    /// Document title extracted from the source, if available.
     pub title: Option<String>,
+    /// Filesystem path of the source file.
     pub source_path: PathBuf,
+    /// Sections of raw imported text.
     pub sections: Vec<ImportedSection>,
 }
 
+/// A chunk of text within a document section, sized for TTS synthesis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentChunk {
+    /// Zero-based index of this chunk within its section.
     pub index: usize,
+    /// The chunk's text content.
     pub text: String,
+    /// Character offset where this chunk starts in the section text.
     pub char_start: usize,
+    /// Character offset where this chunk ends in the section text.
     pub char_end: usize,
 }
 
@@ -32,11 +46,16 @@ impl DocumentChunk {
     }
 }
 
+/// A section (chapter) of a document, containing one or more chunks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentSection {
+    /// Zero-based index of this section within the document.
     pub index: usize,
+    /// Section heading text.
     pub title: String,
+    /// Ordered chunks of text within this section.
     pub chunks: Vec<DocumentChunk>,
+    /// Optional anchor linking back to the source document location.
     pub source_anchor: Option<String>,
 }
 
@@ -58,12 +77,18 @@ impl DocumentSection {
     }
 }
 
+/// A fully imported and chunked document, ready for reading.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
+    /// Unique identifier (truncated SHA-256 hash).
     pub document_id: String,
+    /// Document title (from source or derived from filename).
     pub title: String,
+    /// Filesystem path of the original source file.
     pub source_path: PathBuf,
+    /// Ordered sections (chapters) of the document.
     pub sections: Vec<DocumentSection>,
+    /// Timestamp when the document was imported.
     pub imported_at: DateTime<Utc>,
 }
 
@@ -113,6 +138,7 @@ impl ImportedDocument {
     }
 }
 
+/// Build a `Document` from an `ImportedDocument` by chunking each section.
 pub fn build_document_from_import(
     imported: ImportedDocument,
     chunk_target_chars: usize,
