@@ -1,5 +1,55 @@
 # Next Steps
 
+## Beta-dev release checklist
+
+First public release aimed at developers who want to build apps on top of
+Marginalia (desktop, mobile, web). Everything below must be done or explicitly
+descoped before tagging `v0.1.0-beta`.
+
+### Infrastructure — must-have
+
+| # | Area | Task | Status | Notes |
+|---|------|------|--------|-------|
+| 1 | **Architecture** | Hexagonal core, all I/O via traits | Done | marginalia-core has zero platform deps |
+| 2 | **Architecture** | Stable config schema (`[voice_commands]`, `[stt]`, `[stt.*]`) | Done | Final layout, documented in CLAUDE.md |
+| 3 | **Persistence** | SQLite storage for documents, sessions, notes | Done | Cross-platform, portable |
+| 4 | **Persistence** | Session auto-restore on startup | Done | Active session resumes in Paused state |
+| 5 | **TTS** | Kokoro via MLX (macOS Apple Silicon) | Done | ~1s/chunk, 12x realtime |
+| 6 | **TTS** | Kokoro via ONNX Runtime (cross-platform) | Done | ~5.7s/chunk, CPU |
+| 7 | **TTS** | Cache + background prefetch | Done | Revisiting a chunk is instant |
+| 8 | **STT** | Apple SFSpeechRecognizer, commands + dictation | Done | Single Swift helper, mode-switch via stdin |
+| 9 | **STT** | Whisper, commands + dictation | Done | Two WhisperConfig profiles |
+| 10 | **STT** | Trigger fast-path (~200ms command latency) | Done | Apple only; Whisper limited by inference |
+| 11 | **Playback** | rodio in-process audio (macOS/Linux/Windows) | Done | Pause, resume, stop, sink.empty() |
+| 12 | **Echo** | stt-echo-filter (text-level, post-STT) | Done | External crate, zero deps |
+| 13 | **Config** | Configurable chunk size (`chunk_target_chars`) | Done | Per-platform tuning |
+| 14 | **RuntimeBuilder** | Builder pattern for provider wiring | **TODO** | Eliminates 500 lines of duplicated wiring per app. Without this, every new app copy-pastes backend.rs |
+| 15 | **Events / callbacks** | Runtime event system (not just polling) | **TODO** | Mobile apps need push notifications: playback finished, command recognized, synthesis ready. TUI can also benefit (replace try_recv polling) |
+| 16 | **Logging** | Replace `eprintln!` with `log` crate | **TODO** | On mobile there's no stderr. Mechanical change, zero risk. Each app picks its log backend (env_logger, oslog, android_logger) |
+| 17 | **FFI** | C-compatible API or UniFFI bindings | **TODO** | Required for iOS (Swift), Android (Kotlin), Windows (C#). The RuntimeFrontend JSON contract is already FFI-friendly — needs a thin `extern "C"` wrapper |
+| 18 | **Testing** | Core trait tests + integration tests | **TODO** | See Testing & CI section below. Developers need to trust the library before building on it |
+| 19 | **CI** | GitHub Actions: macOS (mlx, apple-stt) + Linux (onnx, whisper) | **TODO** | Compiles all crates, runs all tests on every push |
+| 20 | **Docs** | `cargo doc` builds cleanly, public items documented | **TODO** | Developers read the API docs. Currently many pub items lack doc comments |
+| 21 | **Crates.io** | Publish core + runtime + storage (or at minimum, stable git tags) | **TODO** | Developers need a stable dependency reference, not just `git = "..."` |
+
+### Infrastructure — nice to have (not blocking beta-dev)
+
+| # | Area | Task | Notes |
+|---|------|------|-------|
+| N1 | Shared config crate | Extract `marginalia-config` with reusable config types | Avoids each app re-defining SttSection etc. |
+| N2 | Model management | `marginalia-models` crate: discovery, download, cache | For mobile apps where `make bootstrap-*` doesn't exist |
+| N3 | Unified STT factory | Trait or function that returns `(CommandRecognizer, DictationTranscriber)` from one init | Apple already does this; formalize the pattern |
+| N4 | espeak-rs | Compiled Rust binding to eliminate system espeak-ng dep | Currently espeak-ng must be installed on the system |
+| N5 | Reading flow: auto-play next chunk | Continuous reading without pressing /next | Most-requested UX feature, but not infrastructure |
+
+### Release criteria summary
+
+**Tag `v0.1.0-beta` when rows 1–21 in the must-have table are Done.** Rows
+N1–N5 are tracked but do NOT block the release. Features (study, annotations,
+AI, import formats) are post-beta — they build on top of the infrastructure.
+
+---
+
 ## In progress
 
 - **Phonemizer tuning** — refine text normalization for natural Italian prosody (dialogue, parentheses, punctuation). Reference: `hexgrad/misaki/misaki/espeak.py`.
