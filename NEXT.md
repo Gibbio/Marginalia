@@ -1,78 +1,51 @@
 # Next Steps
 
-## Beta-dev release checklist
+## Beta-dev release — v0.1.0-beta (tagged)
 
-First public release aimed at developers who want to build apps on top of
-Marginalia (desktop, mobile, web). Everything below must be done or explicitly
-descoped before tagging `v0.1.0-beta`.
+24/25 infrastructure tasks done. Tag: `v0.1.0-beta` on beta branch.
 
-### Infrastructure — must-have
+| # | Area | Task | Status |
+|---|------|------|--------|
+| 1 | Architecture | Hexagonal core, all I/O via traits | Done |
+| 2 | Architecture | Stable config schema (`[voice_commands]`, `[stt]`, `[stt.*]`) | Done |
+| 3 | Persistence | SQLite storage for documents, sessions, notes | Done |
+| 4 | Persistence | Session auto-restore on startup | Done |
+| 5 | TTS | Kokoro via MLX (macOS Apple Silicon, ~1s/chunk) | Done |
+| 6 | TTS | Kokoro via ONNX Runtime (cross-platform, ~5.7s/chunk) | Done |
+| 7 | TTS | Cache + background prefetch (persistent across restarts) | Done |
+| 8 | STT | Apple SFSpeechRecognizer, commands + dictation | Done |
+| 9 | STT | Whisper, commands + dictation | Done |
+| 10 | Echo | Acoustic AEC3 (WebRTC, pure Rust, cpal → aec3 → Swift helper) | Done |
+| 11 | Playback | rodio in-process audio + AEC render callback | Done |
+| 12 | Config | Configurable chunk size, TTS cache dir | Done |
+| 13 | Logging | `log` crate across all library crates | Done |
+| 14 | Shared config | `marginalia-config` crate | Done |
+| 15 | RuntimeBuilder | Builder pattern, ~290 lines removed from TUI | Done |
+| 16 | Events | `RuntimeEvent` enum + `RuntimeEventSink` (channels + callbacks) | Done |
+| 17 | FFI | C-compatible API or UniFFI bindings | **Deferred** |
+| 18 | Testing | 83 tests, full e2e flow | Done |
+| 19 | CI | GitHub Actions: macOS-14 + Linux | Done |
+| 20 | Docs | `cargo doc` zero warnings, all pub items documented | Done |
+| 21 | Publish | Git tag `v0.1.0-beta` (crates.io deferred to stable) | Done |
+| 22 | Models | `marginalia-models` crate (HuggingFace download + cache) | Done |
+| 23 | STT factory | `SttEngineOutput` + `runtime.set_stt_engine()` | Done |
+| 24 | espeak-rs | Compiled binding, no system espeak-ng needed | Done |
+| 25 | Auto-play | Continuous reading, auto-advance on chunk end | Done |
 
-| # | Area | Task | Status | Notes |
-|---|------|------|--------|-------|
-| 1 | **Architecture** | Hexagonal core, all I/O via traits | Done | marginalia-core has zero platform deps |
-| 2 | **Architecture** | Stable config schema (`[voice_commands]`, `[stt]`, `[stt.*]`) | Done | Final layout, documented in CLAUDE.md |
-| 3 | **Persistence** | SQLite storage for documents, sessions, notes | Done | Cross-platform, portable |
-| 4 | **Persistence** | Session auto-restore on startup | Done | Active session resumes in Paused state |
-| 5 | **TTS** | Kokoro via MLX (macOS Apple Silicon) | Done | ~1s/chunk, 12x realtime |
-| 6 | **TTS** | Kokoro via ONNX Runtime (cross-platform) | Done | ~5.7s/chunk, CPU |
-| 7 | **TTS** | Cache + background prefetch | Done | Revisiting a chunk is instant |
-| 8 | **STT** | Apple SFSpeechRecognizer, commands + dictation | Done | Single Swift helper, mode-switch via stdin |
-| 9 | **STT** | Whisper, commands + dictation | Done | Two WhisperConfig profiles |
-| 10 | **Echo** | Acoustic AEC3 (WebRTC, pure Rust) | Done | cpal mic → aec3 → TLV binary stdin → Swift helper. Render ref from playback WAV |
-| 11 | **Playback** | rodio in-process audio (macOS/Linux/Windows) | Done | Pause, resume, stop, sink.empty() + AEC render callback |
-| 12 | **Config** | Configurable chunk size (`chunk_target_chars`) | Done | Per-platform tuning |
-| 13 | **Logging** | Replace `eprintln!` with `log` crate | Done | All library crates + TUI migrated |
-| 14 | **Shared config** | Extract `marginalia-config` crate with reusable config types | Done | VoiceCommandsSection, SttSection, etc. extracted |
-| 15 | **RuntimeBuilder** | Builder pattern for provider wiring | Done | `RuntimeBuilder::new(path).stt(cfg).build()` — ~290 lines removed from TUI backend. Feature flags forwarded to runtime. |
-| 16 | **Events / callbacks** | Runtime event system (not just polling) | Done | `RuntimeEvent` enum + `RuntimeEventSink` (channels + callbacks). Emits: PlaybackFinished, ChunkAdvanced, SessionRestored, SessionStopped. |
-| 17 | **FFI** | C-compatible API or UniFFI bindings | **TODO** | Required for iOS (Swift), Android (Kotlin), Windows (C#) |
-| 18 | **Testing** | Core trait tests + integration tests | Done | 83 tests across 8 crates. Runtime: pause/resume/stop, restore session, full e2e flow (ingest → navigate → note → stop → restore). |
-| 19 | **CI** | GitHub Actions: macOS + Linux | Done | Linux: build + test + clippy + fmt. macOS-14 (M1): TUI with apple-stt + mlx-tts + doc check. Triggers on main + beta. |
-| 20 | **Docs** | `cargo doc` builds cleanly, public items documented | Done | All pub types, fields, methods in core/runtime/config/models documented. Zero doc warnings. |
-| 21 | **Crates.io** | Publish core + runtime + storage (or stable git tags) | Done | Git tag `v0.1.0-beta` on beta branch. crates.io publish deferred to stable release. |
-| 22 | **Model management** | `marginalia-models` crate: discovery, download, cache | Done | Uses `hf_hub` API. ensure_whisper(), ensure_kokoro_onnx(), ensure_kokoro_voice(). HF cache at ~/.cache/huggingface/hub/. |
-| 23 | **Unified STT factory** | `SttEngineOutput` struct + `runtime.set_stt_engine()` | Done | Defined in core, re-exported by runtime. Whisper backend uses it; Apple uses it + extra AEC wiring |
-| 24 | **espeak-rs** | Compiled Rust binding to eliminate system espeak-ng dep | Done | MLX TTS uses `espeak-rs` (compiles espeak-ng from source via CMake). ONNX path still uses external `phonemizer_program`. |
-| 25 | **Auto-play next chunk** | Continuous reading without pressing /next | Done | `try_auto_advance()` checks sink.empty(), advances or stops at end of doc. Called every 100ms in TUI main loop |
-
-### Release criteria summary
-
-**Tag `v0.1.0-beta` when rows 1–25 in the must-have table are Done.**
-Features (study, annotations, AI, import formats) are post-beta — they
-build on top of the infrastructure.
+**FFI (#17)** deferred to when the first mobile/native app starts. The
+runtime is ready (RuntimeBuilder, events, JSON contract) — FFI is a thin
+`extern "C"` wrapper on top.
 
 ---
 
-## In progress
-
-- **Phonemizer tuning** — refine text normalization for natural Italian prosody (dialogue, parentheses, punctuation). Reference: `hexgrad/misaki/misaki/espeak.py`.
-
-## Short term
-
-### Testing & CI
-- [ ] **Core trait tests**: verify that changes to `SpeechSynthesizer`, `CommandRecognizer`, `DocumentRepository` etc. don't break implementations.
-- [ ] **Integration tests**: runtime with fake providers, full flow: ingest → start session → navigate → create note.
-- [ ] **CI compiles all crates**: macOS runner for mlx/apple-stt/whisper, Linux runner for the rest.
-- [ ] **Provider contract tests**: each TTS/STT implementation gets a basic smoke test.
+## Short term — next features
 
 ### Reading flow
-- [ ] **Auto-play next chunk** when current finishes (rodio `sink.empty()` callback). This is the most requested feature — continuous reading without pressing /next.
-- [ ] **Reading speed control**: voice commands "piu' veloce" / "piu' lento" that adjust TTS speed parameter and/or rodio playback rate.
-- [x] **Resume where you left off**: reading position persisted in SQLite; last active session auto-restored on TUI startup in Paused state. Type `/resume` or say "riprendi" to continue.
+- [ ] **Reading speed control**: voice commands "più veloce" / "più lento" that adjust TTS speed parameter and/or rodio playback rate.
 - [ ] **Sentence-level navigation**: skip/repeat single sentences within a chunk, not just whole chunks.
 
-### Echo cancellation — voice commands during playback
-- [x] **Acoustic AEC on macOS** (shipped): WebRTC AEC3 via `aec3` crate (pure Rust). Mic captured by cpal in Rust, processed through AEC3 (render reference = TTS WAV chunk), cleaned audio fed to Swift helper via TLV binary stdin. Helper no longer owns the mic. Trigger fast-path removed (silence timer only, fixes multi-word triggers like "prossimo capitolo").
-- [ ] **Platform-specific AEC for other targets**: evaluate per-platform AEC options when building apps for those platforms:
-    - **iOS**: `AVAudioSession.voiceChat` (hardware AEC on Neural Engine)
-    - **Linux**: PipeWire `echo-cancel` module or `aec3` crate
-    - **Windows**: Communications APO or `aec3` crate
-    - **Android**: `AcousticEchoCanceler` framework class
-    - **Web**: `getUserMedia({echoCancellation: true})`
-
 ### Study features
-- [ ] **Voice note dictation**: "nota" command activates Whisper/Apple STT in transcription mode, records until silence, saves as note attached to current position.
+- [ ] **Voice note dictation**: "nota" command activates STT in transcription mode, records until silence, saves as note attached to current position.
 - [ ] **Search within document**: `/search <text>` to find and jump to a passage.
 - [ ] **Notes review**: `/notes` command to list all notes and bookmarks, jump to any.
 - [ ] **Export notes**: export all notes/bookmarks for a document to markdown file.
@@ -84,18 +57,24 @@ build on top of the infrastructure.
 
 ### UX
 - [ ] **Visual indicator during synthesis** ("synthesizing..." in status bar).
-- [ ] **Progress bar** (chunk X/N, chapter X/N) in the TUI header.
+- [ ] **Progress bar** (chunk X/N, chapter X/N).
 - [ ] **Volume control** via voice command and keyboard (rodio `sink.set_volume()`).
 - [ ] **Reading timer**: show how long you've been reading this session.
 
 ### i18n / Localization
 - [ ] All core/backend messages in English. Create translation files (`apps/tui-rs/i18n/`).
 - [ ] TUI locale setting: `language = "it"` → loads Italian strings.
-- [ ] Voice commands already configurable in toml — no code changes for new languages.
 
 ### TTS quality
-- [ ] **espeak-rs**: compiled Rust binding to eliminate system espeak-ng dependency.
 - [ ] **TTS cloud premium**: ElevenLabs / OpenAI as optional paid backend.
+
+### Echo cancellation — other platforms
+- [ ] **iOS**: `AVAudioSession.voiceChat` (hardware AEC on Neural Engine)
+- [ ] **Linux**: PipeWire `echo-cancel` module or `aec3` crate
+- [ ] **Windows**: Communications APO or `aec3` crate
+- [ ] **Android**: `AcousticEchoCanceler` framework class
+
+---
 
 ## Medium term
 
@@ -108,9 +87,9 @@ build on top of the infrastructure.
 ### Audio export
 - [ ] **Generate audiobook**: export entire document as concatenated WAV/MP3.
 - [ ] **Per-chapter export**: one audio file per chapter.
-- [ ] Useful for offline listening (commute, gym) without the app running.
 
 ### Multi-platform
+- [ ] **FFI layer**: `extern "C"` or UniFFI bindings for iOS/Android/C#.
 - [ ] **Linux**: test Kokoro ONNX on CPU, Whisper STT.
 - [ ] **Tauri desktop app**: wraps a web UI, ships as native .app / .deb / .exe.
 - [ ] **Windows**: DirectML or CUDA for TTS.
@@ -124,12 +103,13 @@ build on top of the infrastructure.
 ### Dependencies
 - [ ] Monitor `mlx-rs` for crates.io updates (MLX C++ v0.31+).
 - [ ] Monitor `voice-tts` / `voice-nn` for upstream mlx-rs return.
-- [ ] Evaluate `compile_with_state` for JIT decoder when mlx-rs improves.
+
+---
 
 ## Long term
 
 ### Mobile
-- [ ] **iOS app**: CoreML Kokoro + SFSpeechRecognizer (native Neural Engine for both TTS and STT).
+- [ ] **iOS app**: CoreML Kokoro + SFSpeechRecognizer (native Neural Engine).
 - [ ] **Android app**: ONNX Runtime + Android SpeechRecognizer API.
 - [ ] **Reading position sync** across devices.
 
