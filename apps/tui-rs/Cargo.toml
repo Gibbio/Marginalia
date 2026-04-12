@@ -19,6 +19,7 @@ marginalia-stt-apple = { path = "../../crates/marginalia-stt-apple", optional = 
 marginalia-stt-whisper = { path = "../../crates/marginalia-stt-whisper", optional = true }
 crossterm = "0.28"
 log = "0.4"
+marginalia-config = { path = "../../crates/marginalia-config" }
 marginalia-playback-host = { path = "../../crates/marginalia-playback-host" }
 marginalia-runtime = { path = "../../crates/marginalia-runtime" }
 marginalia-tts-mlx = { path = "../../crates/marginalia-tts-mlx", optional = true }
