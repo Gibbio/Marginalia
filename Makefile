@@ -1,4 +1,7 @@
 KOKORO_ASSETS_DIR  ?= models/tts/kokoro
+MLX_MODEL_DIR      ?= models/tts/mlx
+MLX_HF_REPO        ?= prince-canuma/Kokoro-82M
+MLX_VOICES         ?= if_sara im_nicola
 VOSK_MODEL_URL     ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
 VOSK_MODEL_NAME    ?= vosk-model-small-it-0.22
 MODELS_DIR         ?= models/stt
@@ -11,8 +14,8 @@ WHISPER_MODEL_URL  ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/
 
 .PHONY: \
 	bootstrap-beta bootstrap-kokoro bootstrap-ort bootstrap-vosk bootstrap-vosk-lib \
-	_kokoro-hf-cli _kokoro-curl \
-	tui-rs beta-test beta-doctor \
+	bootstrap-mlx _kokoro-hf-cli _kokoro-curl \
+	check-deps tui-rs beta-test beta-doctor \
 	setup bootstrap bootstrap-runtime-deps bootstrap-providers \
 	bootstrap-kokoro-python bootstrap-whisper bootstrap-system-deps setup-config \
 	format lint test smoke run-cli-help doctor \
@@ -23,7 +26,7 @@ WHISPER_MODEL_URL  ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/
 # ---------------------------------------------------------------------------
 
 # Download all Beta providers in one shot.
-bootstrap-beta: bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib bootstrap-whisper
+bootstrap-beta: bootstrap-kokoro bootstrap-vosk bootstrap-vosk-lib bootstrap-whisper bootstrap-mlx
 	@echo ""
 	@echo "Beta providers ready. Run 'make beta-doctor' to verify."
 
@@ -185,6 +188,49 @@ bootstrap-whisper:
 		echo "Whisper model installed at $(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME)"; \
 	fi
 
+# Download MLX model weights and Italian voices to a local directory (macOS arm64 only).
+# Stores assets in $(MLX_MODEL_DIR) so the TUI never needs to reach HuggingFace at runtime.
+# The runtime picks up the local path via [mlx] model = "$(MLX_MODEL_DIR)" in marginalia.toml.
+bootstrap-mlx:
+	@OS=$$(uname -s); ARCH=$$(uname -m); \
+	if [ "$$OS" != "Darwin" ] || [ "$$ARCH" != "arm64" ]; then \
+		echo "bootstrap-mlx: MLX is macOS arm64 only — skipping."; \
+		exit 0; \
+	fi; \
+	echo "Downloading MLX model assets ($(MLX_HF_REPO))..."; \
+	mkdir -p $(MLX_MODEL_DIR)/voices; \
+	if command -v hf >/dev/null 2>&1; then HF_CLI=hf; \
+	elif command -v huggingface-cli >/dev/null 2>&1; then HF_CLI=huggingface-cli; \
+	else HF_CLI=""; fi; \
+	WEIGHTS="$(MLX_MODEL_DIR)/kokoro-v1_0.safetensors"; \
+	if [ -f "$$WEIGHTS" ]; then \
+		echo "  kokoro-v1_0.safetensors already present, skipping."; \
+	elif [ -n "$$HF_CLI" ]; then \
+		$$HF_CLI download $(MLX_HF_REPO) kokoro-v1_0.safetensors --local-dir $(MLX_MODEL_DIR); \
+	else \
+		echo "  Downloading via curl..."; \
+		curl -fL --progress-bar \
+			-o "$$WEIGHTS" \
+			"https://huggingface.co/$(MLX_HF_REPO)/resolve/main/kokoro-v1_0.safetensors" \
+			|| { echo "Failed to download model weights"; exit 1; }; \
+	fi; \
+	for VOICE in $(MLX_VOICES); do \
+		DEST="$(MLX_MODEL_DIR)/voices/$${VOICE}.safetensors"; \
+		if [ -f "$$DEST" ]; then \
+			echo "  voices/$${VOICE}.safetensors already present, skipping."; \
+		elif [ -n "$$HF_CLI" ]; then \
+			$$HF_CLI download $(MLX_HF_REPO) "voices/$${VOICE}.safetensors" --local-dir $(MLX_MODEL_DIR); \
+		else \
+			echo "  Downloading voices/$${VOICE}.safetensors via curl..."; \
+			curl -fL --progress-bar \
+				-o "$$DEST" \
+				"https://huggingface.co/$(MLX_HF_REPO)/resolve/main/voices/$${VOICE}.safetensors" \
+				|| { echo "  $$VOICE not available, skipping."; rm -f "$$DEST"; }; \
+		fi; \
+	done; \
+	echo ""; \
+	echo "MLX assets ready at $(MLX_MODEL_DIR)/."
+
 # ---------------------------------------------------------------------------
 # Beta — run and verify
 # ---------------------------------------------------------------------------
@@ -203,7 +249,7 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	PLATFORM="$$OS $$ARCH"; \
 	DATE=$$(date "+%Y-%m-%d %H:%M"); \
 	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-		TTS_SECTION='# Kokoro via MLX Metal GPU (auto-downloaded from HuggingFace)\n[mlx]\nvoice = "if_sara"    # Italian female (or: im_nicola, af_bella, am_adam)'; \
+		TTS_SECTION='# Kokoro via MLX Metal GPU (assets at $(MLX_MODEL_DIR))\n[mlx]\nmodel = "$(MLX_MODEL_DIR)"\nvoice = "if_sara"    # Italian female (or: im_nicola, af_bella, am_adam)'; \
 	elif [ -d "$(KOKORO_ASSETS_DIR)" ]; then \
 		TTS_SECTION='# Kokoro via ONNX Runtime CPU\n[kokoro]\nassets_root = "$(KOKORO_ASSETS_DIR)"\nphonemizer_program = "espeak-ng"\nphonemizer_args = ["-v", "it", "--ipa", "-q"]'; \
 	else \
@@ -232,7 +278,87 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	    $(TUI_TEMPLATE) > $(TUI_TOML); \
 	echo "Generated $(TUI_TOML) for $$PLATFORM"
 
-tui-rs: $(TUI_TOML)
+# ---------------------------------------------------------------------------
+# Pre-build dependency check
+# ---------------------------------------------------------------------------
+
+# Verify that all tools required to compile tui-rs are present.
+# Runs automatically before tui-rs; also callable standalone: make check-deps
+check-deps:
+	@echo "=== Pre-build dependency check ==="
+	@ERRORS=0; \
+	OS=$$(uname -s); ARCH=$$(uname -m); \
+	\
+	if command -v cargo >/dev/null 2>&1; then \
+		echo "  [OK] $$(cargo --version 2>&1 | head -1)"; \
+	else \
+		echo "  [MISSING] cargo/rustc — install via https://rustup.rs"; \
+		ERRORS=$$((ERRORS+1)); \
+	fi; \
+	\
+	if command -v cmake >/dev/null 2>&1; then \
+		echo "  [OK] $$(cmake --version | head -1)"; \
+	else \
+		echo "  [MISSING] cmake — brew install cmake"; \
+		ERRORS=$$((ERRORS+1)); \
+	fi; \
+	\
+	if command -v espeak-ng >/dev/null 2>&1; then \
+		echo "  [OK] $$(espeak-ng --version 2>&1 | head -1)"; \
+	else \
+		echo "  [MISSING] espeak-ng — brew install espeak-ng"; \
+		ERRORS=$$((ERRORS+1)); \
+	fi; \
+	\
+	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
+		XCODE_PATH=$$(xcode-select -p 2>/dev/null || true); \
+		if echo "$$XCODE_PATH" | grep -q "Xcode.app"; then \
+			echo "  [OK] Xcode at $$XCODE_PATH"; \
+		else \
+			echo "  [MISSING] Xcode.app — MLX Metal requires the full Xcode, not just CLT."; \
+			echo "             Install from the App Store, then: sudo xcode-select -s /Applications/Xcode.app"; \
+			ERRORS=$$((ERRORS+1)); \
+		fi; \
+		if xcrun -sdk macosx metal --version >/dev/null 2>&1; then \
+			echo "  [OK] Metal compiler ($$(xcrun -sdk macosx metal --version 2>&1 | head -1))"; \
+		else \
+			echo "  [MISSING] Metal compiler — open Xcode, go to Settings → Platforms and install macOS."; \
+			ERRORS=$$((ERRORS+1)); \
+		fi; \
+		if command -v swiftc >/dev/null 2>&1; then \
+			echo "  [OK] $$(swiftc --version 2>&1 | head -1)"; \
+		else \
+			echo "  [MISSING] swiftc — install Xcode from the App Store"; \
+			ERRORS=$$((ERRORS+1)); \
+		fi; \
+		if [ -f "$(MLX_MODEL_DIR)/kokoro-v1_0.safetensors" ]; then \
+			echo "  [OK] MLX model weights ($(MLX_MODEL_DIR)/kokoro-v1_0.safetensors)"; \
+		else \
+			echo "  [MISSING] MLX model weights — run: make bootstrap-mlx"; \
+			ERRORS=$$((ERRORS+1)); \
+		fi; \
+		for VOICE in $(MLX_VOICES); do \
+			if [ -f "$(MLX_MODEL_DIR)/voices/$${VOICE}.safetensors" ]; then \
+				echo "  [OK] MLX voice $${VOICE}"; \
+			else \
+				echo "  [MISSING] MLX voice '$${VOICE}' — run: make bootstrap-mlx"; \
+				ERRORS=$$((ERRORS+1)); \
+			fi; \
+		done; \
+	fi; \
+	\
+	echo ""; \
+	if [ "$$ERRORS" -gt 0 ]; then \
+		echo "  $$ERRORS missing dependency/dependencies. Install them and retry."; \
+		echo ""; \
+		exit 1; \
+	else \
+		echo "  All dependencies found."; \
+		echo ""; \
+	fi
+
+tui-rs: bootstrap-mlx check-deps
+	@$(MAKE) --no-print-directory $(TUI_TOML)
 	@OS=$$(uname -s); ARCH=$$(uname -m); \
 	WHISPER_MODEL=$(WHISPER_MODEL_DIR)/$(WHISPER_MODEL_NAME); \
 	FEATURES=""; \
