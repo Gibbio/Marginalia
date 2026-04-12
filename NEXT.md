@@ -64,7 +64,6 @@ build on top of the infrastructure.
 - [ ] **Sentence-level navigation**: skip/repeat single sentences within a chunk, not just whole chunks.
 
 ### Echo cancellation — voice commands during playback
-- [x] **Text-based echo rejection** (v1): `stt-echo-filter` external crate, post-STT word-count delta filter. Active as fallback layer. Repo: https://github.com/Gibbio/stt-echo-filter
 - [x] **Acoustic AEC on macOS** (shipped): WebRTC AEC3 via `aec3` crate (pure Rust). Mic captured by cpal in Rust, processed through AEC3 (render reference = TTS WAV chunk), cleaned audio fed to Swift helper via TLV binary stdin. Helper no longer owns the mic. Trigger fast-path removed (silence timer only, fixes multi-word triggers like "prossimo capitolo").
 - [ ] **Platform-specific AEC for other targets**: evaluate per-platform AEC options when building apps for those platforms:
     - **iOS**: `AVAudioSession.voiceChat` (hardware AEC on Neural Engine)
