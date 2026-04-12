@@ -1,0 +1,9 @@
+[package]
+name = "marginalia-models"
+version = "0.1.0"
+edition = "2021"
+description = "Model discovery, download, and cache management for Marginalia"
+
+[dependencies]
+hf-hub = "0.5"
+log = "0.4"

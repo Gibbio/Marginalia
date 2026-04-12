@@ -4,6 +4,7 @@ members = [
     "apps/tui-rs",
     "crates/marginalia-config",
     "crates/marginalia-core",
+    "crates/marginalia-models",
     "crates/marginalia-devtools",
     "crates/marginalia-import-text",
     "crates/marginalia-playback-host",
