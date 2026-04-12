@@ -25,13 +25,13 @@ descoped before tagging `v0.1.0-beta`.
 | 13 | **Config** | Configurable chunk size (`chunk_target_chars`) | Done | Per-platform tuning |
 | 14 | **RuntimeBuilder** | Builder pattern for provider wiring | **TODO** | Eliminates 500 lines of duplicated wiring per app. Without this, every new app copy-pastes backend.rs |
 | 15 | **Events / callbacks** | Runtime event system (not just polling) | **TODO** | Mobile apps need push notifications: playback finished, command recognized, synthesis ready. TUI can also benefit (replace try_recv polling) |
-| 16 | **Logging** | Replace `eprintln!` with `log` crate | **TODO** | On mobile there's no stderr. Mechanical change, zero risk. Each app picks its log backend (env_logger, oslog, android_logger) |
+| 16 | **Logging** | Replace `eprintln!` with `log` crate | Done | All library crates + TUI migrated. CLI binaries keep eprintln (appropriate for CLI). |
 | 17 | **FFI** | C-compatible API or UniFFI bindings | **TODO** | Required for iOS (Swift), Android (Kotlin), Windows (C#). The RuntimeFrontend JSON contract is already FFI-friendly — needs a thin `extern "C"` wrapper |
 | 18 | **Testing** | Core trait tests + integration tests | **TODO** | See Testing & CI section below. Developers need to trust the library before building on it |
 | 19 | **CI** | GitHub Actions: macOS (mlx, apple-stt) + Linux (onnx, whisper) | **TODO** | Compiles all crates, runs all tests on every push |
 | 20 | **Docs** | `cargo doc` builds cleanly, public items documented | **TODO** | Developers read the API docs. Currently many pub items lack doc comments |
 | 21 | **Crates.io** | Publish core + runtime + storage (or at minimum, stable git tags) | **TODO** | Developers need a stable dependency reference, not just `git = "..."` |
-| 22 | **Shared config** | Extract `marginalia-config` crate with reusable config types | **TODO** | Avoids each app re-defining SttSection, VoiceCommandsSection, etc. |
+| 22 | **Shared config** | Extract `marginalia-config` crate with reusable config types | Done | VoiceCommandsSection, SttSection, KokoroSection, MlxSection, PlaybackSection extracted. TUI re-exports them. |
 | 23 | **Model management** | `marginalia-models` crate: discovery, download, cache | **TODO** | Mobile apps can't run `make bootstrap-*`; need programmatic model management |
 | 24 | **Unified STT factory** | Trait or function returning `(CommandRecognizer, DictationTranscriber)` from one init | **TODO** | Apple already does this via `new_apple_stt`; formalize the pattern for all engines |
 | 25 | **espeak-rs** | Compiled Rust binding to eliminate system espeak-ng dependency | **TODO** | System dep is a barrier for packaging and mobile |

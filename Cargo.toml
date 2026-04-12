@@ -2,6 +2,7 @@
 members = [
     "apps/cli-rs",
     "apps/tui-rs",
+    "crates/marginalia-config",
     "crates/marginalia-core",
     "crates/marginalia-devtools",
     "crates/marginalia-import-text",
