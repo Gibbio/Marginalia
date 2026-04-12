@@ -17,9 +17,7 @@ use marginalia_core::ports::{
 };
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static AUDIO_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -231,29 +229,10 @@ fn clean_ipa(ipa: &str) -> String {
 }
 
 fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
-    let mut child = Command::new("espeak-ng")
-        .args(["-v", language, "--ipa", "-q"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("espeak-ng not found: {e}"))?;
-
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(text.as_bytes())
-        .map_err(|e| format!("espeak-ng write: {e}"))?;
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("espeak-ng failed: {e}"))?;
-
-    let raw = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .replace('\n', " ");
-    Ok(clean_ipa(&raw))
+    let clauses = espeak_rs::text_to_phonemes(text, language, None, false, false)
+        .map_err(|e| format!("espeak-rs phonemization failed: {e}"))?;
+    let raw = clauses.join(" ");
+    Ok(clean_ipa(raw.trim()))
 }
 
 fn write_wav_16(path: &Path, sample_rate: u32, samples: &[f32]) -> std::io::Result<()> {
