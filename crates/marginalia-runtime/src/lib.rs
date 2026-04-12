@@ -372,7 +372,7 @@ impl SqliteRuntime {
         session.runtime_status = Some("active".to_string());
         session.touch();
         if let Err(e) = self.session_repository.save_session(session.clone()) {
-            eprintln!("WARNING: failed to save session: {e}");
+            log::warn!("failed to save session: {e}");
         }
 
         self.publish_runtime_event(
@@ -419,7 +419,7 @@ impl SqliteRuntime {
             .or_else(|| Some(self.config.default_voice.clone()));
         session.touch();
         if let Err(e) = self.session_repository.save_session(session.clone()) {
-            eprintln!("WARNING: failed to save restored session: {e}");
+            log::warn!("failed to save restored session: {e}");
         }
         Some(session)
     }
@@ -483,7 +483,7 @@ impl SqliteRuntime {
         session.runtime_status = Some("paused".to_string());
         session.touch();
         if let Err(e) = self.session_repository.save_session(session) {
-            eprintln!("WARNING: failed to save session: {e}");
+            log::warn!("failed to save session: {e}");
         }
         Ok(())
     }
@@ -500,7 +500,7 @@ impl SqliteRuntime {
         session.runtime_status = Some("active".to_string());
         session.touch();
         if let Err(e) = self.session_repository.save_session(session) {
-            eprintln!("WARNING: failed to save session: {e}");
+            log::warn!("failed to save session: {e}");
         }
         Ok(())
     }
@@ -519,7 +519,7 @@ impl SqliteRuntime {
         session.is_active = false;
         session.touch();
         if let Err(e) = self.session_repository.save_session(session) {
-            eprintln!("WARNING: failed to save session: {e}");
+            log::warn!("failed to save session: {e}");
         }
         Ok(())
     }
@@ -573,12 +573,12 @@ impl SqliteRuntime {
             created_at: chrono::Utc::now(),
         };
         if let Err(e) = self.note_repository.save_note(note.clone()) {
-            eprintln!("WARNING: failed to save note: {e}");
+            log::warn!("failed to save note: {e}");
         }
         session.last_command = Some("create_note".to_string());
         session.touch();
         if let Err(e) = self.session_repository.save_session(session.clone()) {
-            eprintln!("WARNING: failed to save session: {e}");
+            log::warn!("failed to save session: {e}");
         }
         self.publish_runtime_event(
             EventName::NoteSaved,
@@ -791,7 +791,7 @@ impl SqliteRuntime {
         session.runtime_status = Some("active".to_string());
         session.touch();
         if let Err(e) = self.session_repository.save_session(session) {
-            eprintln!("WARNING: failed to save session: {e}");
+            log::warn!("failed to save session: {e}");
         }
         Ok(())
     }

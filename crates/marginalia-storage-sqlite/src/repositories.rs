@@ -226,14 +226,14 @@ impl DocumentRepository for SQLiteDocumentRepository {
             {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("WARNING: failed to list documents: {e}");
+                    log::warn!("failed to list documents: {e}");
                     return Vec::new();
                 }
             };
             let rows = match statement.query_map([], |row| row.get::<_, String>(0)) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("WARNING: failed to query documents: {e}");
+                    log::warn!("failed to query documents: {e}");
                     return Vec::new();
                 }
             };
@@ -280,7 +280,7 @@ impl DocumentRepository for SQLiteDocumentRepository {
         let mut statement = match connection.prepare(&sql) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("WARNING: failed to prepare document search: {e}");
+                log::warn!("failed to prepare document search: {e}");
                 return Vec::new();
             }
         };
@@ -299,7 +299,7 @@ impl DocumentRepository for SQLiteDocumentRepository {
         }) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("WARNING: failed to execute document search: {e}");
+                log::warn!("failed to execute document search: {e}");
                 return Vec::new();
             }
         };
@@ -520,7 +520,7 @@ impl SessionRepository for SQLiteSessionRepository {
         ) {
             Ok(count) => count as u32,
             Err(e) => {
-                eprintln!("WARNING: failed to deactivate stale sessions: {e}");
+                log::warn!("failed to deactivate stale sessions: {e}");
                 0
             }
         }
@@ -606,14 +606,14 @@ impl NoteRepository for SQLiteNoteRepository {
         {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("WARNING: failed to list notes for document {document_id}: {e}");
+                log::warn!("failed to list notes for document {document_id}: {e}");
                 return Vec::new();
             }
         };
         let rows = match statement.query_map(params![document_id], note_from_row) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("WARNING: failed to query notes for document {document_id}: {e}");
+                log::warn!("failed to query notes for document {document_id}: {e}");
                 return Vec::new();
             }
         };
@@ -648,7 +648,7 @@ impl NoteRepository for SQLiteNoteRepository {
         let mut statement = match connection.prepare(&sql) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("WARNING: failed to prepare note search: {e}");
+                log::warn!("failed to prepare note search: {e}");
                 return Vec::new();
             }
         };
@@ -671,7 +671,7 @@ impl NoteRepository for SQLiteNoteRepository {
         }) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("WARNING: failed to execute note search: {e}");
+                log::warn!("failed to execute note search: {e}");
                 return Vec::new();
             }
         };
@@ -757,7 +757,7 @@ impl RewriteDraftRepository for SQLiteRewriteDraftRepository {
         {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("WARNING: failed to list drafts for document {document_id}: {e}");
+                log::warn!("failed to list drafts for document {document_id}: {e}");
                 return Vec::new();
             }
         };
@@ -780,7 +780,7 @@ impl RewriteDraftRepository for SQLiteRewriteDraftRepository {
         }) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("WARNING: failed to query drafts for document {document_id}: {e}");
+                log::warn!("failed to query drafts for document {document_id}: {e}");
                 return Vec::new();
             }
         };

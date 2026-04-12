@@ -5,6 +5,7 @@ edition = "2021"
 description = "Vosk-based command recognition for Marginalia Beta"
 
 [dependencies]
-marginalia-core = { path = "../marginalia-core" }
 cpal = "0.15"
+log = "0.4"
+marginalia-core = { path = "../marginalia-core" }
 vosk = "0.3"

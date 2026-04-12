@@ -185,7 +185,7 @@ where
         session.playback_process_id = snapshot.process_id.or(session.playback_process_id);
         session.touch();
         if let Err(e) = self.session_repository.save_session(session.clone()) {
-            eprintln!("WARNING: failed to persist session state during playback hydration: {e}");
+            log::warn!("failed to persist session state during playback hydration: {e}");
         }
 
         snapshot

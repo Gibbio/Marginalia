@@ -308,12 +308,12 @@ impl TuiConfig {
 
         match std::fs::read_to_string(&path) {
             Err(e) => {
-                eprintln!("warning: cannot read config {}: {e}", path.display());
+                log::warn!("cannot read config {}: {e}", path.display());
                 Self::default()
             }
             Ok(content) => match toml::from_str(&content) {
                 Err(e) => {
-                    eprintln!("warning: cannot parse config {}: {e}", path.display());
+                    log::warn!("cannot parse config {}: {e}", path.display());
                     Self::default()
                 }
                 Ok(cfg) => cfg,

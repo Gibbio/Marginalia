@@ -377,7 +377,7 @@ impl BetaBackendClient {
                     tts_label = "kokoro-mlx";
                 }
                 Err(e) => {
-                    eprintln!("MLX TTS init failed, keeping {tts_label}: {e}");
+                    log::warn!("MLX TTS init failed, keeping {tts_label}: {e}");
                 }
             }
         }
@@ -427,12 +427,12 @@ impl BetaBackendClient {
                             "apple_stt",
                             json!({ "ready": false, "error": e }),
                         );
-                        eprintln!("[apple-stt] {e}");
+                        log::error!("[apple-stt] {e}");
                     }
                 }
             }
             #[cfg(not(feature = "apple-stt"))]
-            eprintln!("[stt] engine=apple but apple-stt feature is not built in");
+            log::warn!("[stt] engine=apple but apple-stt feature is not built in");
         } else if stt_engine == "whisper" {
             #[cfg(feature = "whisper-stt")]
             if let Some(model_path) = config.stt.whisper.model_path.clone() {
@@ -493,9 +493,9 @@ impl BetaBackendClient {
                 dictation_label = "whisper";
             }
             #[cfg(not(feature = "whisper-stt"))]
-            eprintln!("[stt] engine=whisper but whisper-stt feature is not built in");
+            log::warn!("[stt] engine=whisper but whisper-stt feature is not built in");
         } else {
-            eprintln!(
+            log::error!(
                 "[stt] unknown engine '{stt_engine}' — valid choices: \"apple\", \"whisper\""
             );
         }
@@ -514,7 +514,7 @@ impl BetaBackendClient {
                     // Log errors from the monitor (e.g. audio stream failures)
                     if let Some(raw) = &capture.raw_text {
                         if raw.starts_with("error:") {
-                            eprintln!("[voice-monitor] {raw}");
+                            log::warn!("[voice-monitor] {raw}");
                             std::thread::sleep(std::time::Duration::from_secs(5));
                             continue;
                         }
