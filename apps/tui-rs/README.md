@@ -160,11 +160,14 @@ per-context tuning in `[stt.commands]` and `[stt.dictation]`.
 | **Apple** | macOS | ~0.2-0.3s | Yes (same process, mode-switch) | macOS Dictation enabled |
 | **Whisper** | Cross-platform | ~2s | Yes (separate profile) | Whisper ggml model (~460MB) |
 
-**Apple** (recommended on macOS): uses `SFSpeechRecognizer` on the Neural Engine
-via a Swift helper subprocess. Zero models to download, fastest response.
-A single helper process handles both commands and dictation — it switches
-mode on demand, so there is exactly one mic stream open per session.
+**Apple** (recommended on macOS): uses `SFSpeechRecognizer` on the Neural
+Engine. The mic is captured by Rust (cpal), processed through **WebRTC AEC3**
+(via the `aec3` crate, pure Rust) to remove TTS playback echo, then fed to
+a Swift helper subprocess that runs SFSpeechRecognizer on the cleaned audio.
+Zero models to download, fastest response.
 
+- **Acoustic echo cancellation**: the TTS reference signal is subtracted
+  from the mic input per 10ms frame, so the STT never hears the playback
 - **Start of note**: a system Tink sound plays the moment dictation begins
 - **End of note**: a system Pop sound plays when dictation is committed
 - **Privacy requirement**: `System Settings → Keyboard → Dictation → ON`
@@ -185,27 +188,29 @@ mode automatically switches back to command recognition after each note.
 Dictation tuning is fully independent from command tuning — setting a short
 `silence_timeout` in `[stt.commands]` will NOT truncate dictated notes.
 
-### Echo filter
+### Echo cancellation
 
-While the TTS is reading a chunk aloud, the microphone inevitably picks up
-the playback. Without protection, trigger words that happen to appear in
-the document (e.g. the Italian word *"avanti"* = "next") would fire
+While the TTS is reading a chunk aloud, the microphone picks up the
+playback. Without protection, trigger words in the document would fire
 spurious commands as soon as the TTS pronounces them.
 
-The TUI wires the external crate
-[`stt-echo-filter`](https://github.com/Gibbio/stt-echo-filter) into
-`handle_voice_command` to do a **post-STT, word-level** echo rejection:
-every STT utterance is compared against the text of the currently-playing
-chunk, and any word already present in that chunk is "consumed" by a
-per-word budget before trigger matching. What's left is what the user
-actually said. If the filter absorbs everything, the utterance is dropped
-with an `[echo] dropped: ...` line in the Log pane (when `stt.debug = true`).
+Marginalia uses **two layers** of echo cancellation:
 
-This is a triage filter, not a true acoustic echo canceller. It has one
-known trade-off: if the user legitimately speaks a word that is also in
-the current chunk, the budget treats it as echo and the command is
-ignored. Use a synonym in `[voice_commands]` to work around it
-(e.g. `next = ["avanti", "prossimo"]`).
+1. **Acoustic AEC (primary)**: when `engine = "apple"`, the mic signal
+   passes through WebRTC AEC3 (`aec3` crate, pure Rust) before reaching
+   SFSpeechRecognizer. The TTS playback WAV is used as the render
+   reference. AEC3 subtracts it from the mic per 10ms frame, so the STT
+   never hears the echo. This handles the vast majority of cases with
+   zero false negatives.
+
+2. **Post-STT text filter (fallback)**: the external crate
+   [`stt-echo-filter`](https://github.com/Gibbio/stt-echo-filter)
+   strips residual playback words from the STT transcript at the word
+   level. Catches any echo that AEC3 might miss (e.g. reverberation,
+   AEC adaptation lag). Active only when `playback_state == "playing"`.
+
+Both layers operate independently — AEC3 cleans the audio, the text
+filter cleans the transcript.
 
 ## Build features
 
