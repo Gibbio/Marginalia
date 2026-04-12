@@ -46,10 +46,14 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+/// Configuration for the Marginalia runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
+    /// Target size in characters for text chunks.
     pub chunk_target_chars: usize,
+    /// Default language code for TTS and STT (e.g. "it").
     pub default_language: String,
+    /// Default TTS voice identifier (e.g. "if_sara").
     pub default_voice: String,
     /// Directory for TTS WAV cache. When set, synthesize_cached uses
     /// deterministic filenames (SHA-256 of the cache key) so WAVs
@@ -68,12 +72,18 @@ impl Default for RuntimeConfig {
     }
 }
 
+/// Errors that can occur during runtime operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
+    /// No active reading session exists.
     MissingActiveSession,
+    /// The requested document was not found in storage.
     MissingDocument { document_id: String },
+    /// The document exists but has no readable chunks.
     EmptyDocument { document_id: String },
+    /// TTS synthesis failed.
     Synthesis(SynthesisError),
+    /// A session query operation failed.
     Query(SessionQueryError),
 }
 
@@ -109,6 +119,7 @@ impl From<SynthesisError> for RuntimeError {
     }
 }
 
+/// The main runtime that orchestrates core services, storage, and providers.
 pub struct SqliteRuntime {
     config: RuntimeConfig,
     database: SQLiteDatabase,
@@ -215,10 +226,12 @@ where
 }
 
 impl SqliteRuntime {
+    /// Open a runtime backed by an in-memory SQLite database (for testing).
     pub fn open_in_memory() -> rusqlite::Result<Self> {
         Self::open_in_memory_with_config(RuntimeConfig::default())
     }
 
+    /// Open an in-memory runtime with a custom configuration.
     pub fn open_in_memory_with_config(config: RuntimeConfig) -> rusqlite::Result<Self> {
         let database = SQLiteDatabase::open_in_memory()?;
         let connection = database.connection();
@@ -244,10 +257,12 @@ impl SqliteRuntime {
         })
     }
 
+    /// Open a runtime backed by an on-disk SQLite database at the given path.
     pub fn open(path: impl AsRef<Path>) -> rusqlite::Result<Self> {
         Self::open_with_config(path, RuntimeConfig::default())
     }
 
+    /// Open an on-disk runtime with a custom configuration.
     pub fn open_with_config(
         path: impl AsRef<Path>,
         config: RuntimeConfig,
@@ -276,30 +291,37 @@ impl SqliteRuntime {
         })
     }
 
+    /// Override the default TTS voice for this runtime.
     pub fn set_default_voice(&mut self, voice: &str) {
         self.config.default_voice = voice.to_string();
     }
 
+    /// Subscribe to runtime events via an mpsc channel.
     pub fn subscribe_events(&mut self) -> std::sync::mpsc::Receiver<RuntimeEvent> {
         self.event_sink.subscribe_channel()
     }
 
+    /// Register a callback to be invoked on each runtime event.
     pub fn on_event(&mut self, callback: EventCallback) {
         self.event_sink.subscribe_callback(callback);
     }
 
+    /// Return a reference to the current runtime configuration.
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
     }
 
+    /// Replace the playback engine provider.
     pub fn set_playback_engine(&mut self, playback_engine: impl PlaybackEngine + Send + 'static) {
         self.playback_engine = Box::new(playback_engine);
     }
 
+    /// Replace the TTS speech synthesizer provider.
     pub fn set_speech_synthesizer(&mut self, synthesizer: impl SpeechSynthesizer + Send + 'static) {
         self.tts = Box::new(synthesizer);
     }
 
+    /// Store a provider diagnostic blob for the doctor report.
     pub fn set_provider_doctor_blob(&mut self, key: impl Into<String>, blob: serde_json::Value) {
         self.provider_doctor_blobs.insert(key.into(), blob);
     }
@@ -372,10 +394,12 @@ impl SqliteRuntime {
         Ok(result)
     }
 
+    /// Return a reference to the underlying SQLite database.
     pub fn database(&self) -> &SQLiteDatabase {
         &self.database
     }
 
+    /// Import a document from a file path into the runtime's storage.
     pub fn ingest_path(
         &mut self,
         source_path: &Path,
@@ -389,6 +413,7 @@ impl SqliteRuntime {
         service.ingest_path(source_path)
     }
 
+    /// Start a new reading session for the given document, synthesizing and playing the first chunk.
     pub fn start_session(&mut self, document_id: &str) -> Result<ReadingSession, RuntimeError> {
         let document = self
             .document_repository
@@ -531,6 +556,7 @@ impl SqliteRuntime {
         }
     }
 
+    /// Build a full application snapshot for the frontend.
     pub fn app_snapshot(&mut self) -> AppSnapshot {
         let mut service = SessionQueryService::new(
             &mut self.session_repository,
@@ -542,6 +568,7 @@ impl SqliteRuntime {
         service.app_snapshot()
     }
 
+    /// Build a snapshot of the active session, if one exists.
     pub fn session_snapshot(&mut self) -> Result<Option<SessionSnapshot>, RuntimeError> {
         let mut service = SessionQueryService::new(
             &mut self.session_repository,
@@ -553,10 +580,12 @@ impl SqliteRuntime {
         service.session_snapshot().map_err(RuntimeError::from)
     }
 
+    /// Return all domain events published during this runtime's lifetime.
     pub fn published_events(&self) -> Vec<DomainEvent> {
         self.event_publisher.published_events()
     }
 
+    /// List all imported documents as summary items.
     pub fn list_documents(&self) -> Vec<DocumentListItem> {
         self.document_repository
             .list_documents()
@@ -570,6 +599,7 @@ impl SqliteRuntime {
             .collect()
     }
 
+    /// Build a detailed document view for the frontend, optionally for a specific document.
     pub fn document_view(&self, document_id: Option<&str>) -> Option<DocumentView> {
         build_document_view(
             &self.document_repository,
@@ -578,6 +608,7 @@ impl SqliteRuntime {
         )
     }
 
+    /// Pause the active reading session.
     pub fn pause_session(&mut self) -> Result<(), RuntimeError> {
         let mut session = self
             .session_repository
@@ -595,6 +626,7 @@ impl SqliteRuntime {
         Ok(())
     }
 
+    /// Resume a paused reading session.
     pub fn resume_session(&mut self) -> Result<(), RuntimeError> {
         let mut session = self
             .session_repository
@@ -612,6 +644,7 @@ impl SqliteRuntime {
         Ok(())
     }
 
+    /// Stop the active reading session and mark it inactive.
     pub fn stop_session(&mut self) -> Result<(), RuntimeError> {
         let mut session = self
             .session_repository
@@ -633,30 +666,37 @@ impl SqliteRuntime {
         Ok(())
     }
 
+    /// Advance to the next chunk in the document.
     pub fn next_chunk(&mut self) -> Result<(), RuntimeError> {
         self.seek_relative_chunk(1)
     }
 
+    /// Go back to the previous chunk in the document.
     pub fn previous_chunk(&mut self) -> Result<(), RuntimeError> {
         self.seek_relative_chunk(-1)
     }
 
+    /// Advance to the first chunk of the next chapter (section).
     pub fn next_chapter(&mut self) -> Result<(), RuntimeError> {
         self.seek_chapter(1, false)
     }
 
+    /// Go back to the first chunk of the previous chapter (section).
     pub fn previous_chapter(&mut self) -> Result<(), RuntimeError> {
         self.seek_chapter(-1, false)
     }
 
+    /// Restart the current chapter from its first chunk.
     pub fn restart_chapter(&mut self) -> Result<(), RuntimeError> {
         self.seek_chapter(0, true)
     }
 
+    /// Re-synthesize and replay the current chunk.
     pub fn repeat_chunk(&mut self) -> Result<(), RuntimeError> {
         self.replay_current_position("repeat_chunk")
     }
 
+    /// Create a voice note attached to the current reading position.
     pub fn create_note(&mut self, text: &str) -> Result<VoiceNote, RuntimeError> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
@@ -700,6 +740,7 @@ impl SqliteRuntime {
         Ok(note)
     }
 
+    /// Generate a diagnostic report of all configured providers and their status.
     pub fn doctor_report(&self) -> serde_json::Value {
         let playback_name = self.playback_engine.describe_capabilities().provider_name;
         let tts_name = self.tts.describe_capabilities().provider_name;
@@ -742,14 +783,17 @@ impl SqliteRuntime {
         })
     }
 
+    /// Replace the command recognizer provider.
     pub fn set_command_recognizer(&mut self, recognizer: impl CommandRecognizer + Send + 'static) {
         self.command_recognizer = Box::new(recognizer);
     }
 
+    /// Open a persistent speech interrupt monitor for voice command detection.
     pub fn open_command_monitor(&mut self) -> Box<dyn SpeechInterruptMonitor> {
         self.command_recognizer.open_interrupt_monitor()
     }
 
+    /// Replace the dictation transcriber provider.
     pub fn set_dictation_transcriber(
         &mut self,
         transcriber: impl DictationTranscriber + Send + 'static,
@@ -765,14 +809,17 @@ impl SqliteRuntime {
         self.dictation_transcriber = output.dictation_transcriber;
     }
 
+    /// Return a reference to the active dictation transcriber.
     pub fn dictation_transcriber(&self) -> &dyn DictationTranscriber {
         self.dictation_transcriber.as_ref()
     }
 
+    /// Return a reference to the active rewrite generator.
     pub fn rewrite_generator(&self) -> &dyn RewriteGenerator {
         self.rewrite_generator.as_ref()
     }
 
+    /// Return a reference to the active topic summarizer.
     pub fn topic_summarizer(&self) -> &dyn TopicSummarizer {
         self.topic_summarizer.as_ref()
     }

@@ -1,21 +1,34 @@
 use chrono::{DateTime, Utc};
 
+/// State of the audio playback engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackState {
+    /// No audio is playing.
     Stopped,
+    /// Audio is currently playing.
     Playing,
+    /// Audio is paused and can be resumed.
     Paused,
 }
 
+/// High-level state of the reading session state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReaderState {
+    /// No active reading session.
     Idle,
+    /// Actively reading (TTS playing).
     Reading,
+    /// Reading is paused by the user.
     Paused,
+    /// Waiting for a voice command.
     ListeningForCommand,
+    /// Recording a voice note via dictation.
     RecordingNote,
+    /// Processing an AI rewrite of a chunk.
     ProcessingRewrite,
+    /// Reading aloud a rewritten chunk.
     ReadingRewrite,
+    /// The session encountered an error.
     Error,
 }
 
@@ -44,10 +57,14 @@ impl ReaderState {
     }
 }
 
+/// Position within a document, identifying section, chunk, and character offset.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReadingPosition {
+    /// Zero-based section (chapter) index.
     pub section_index: usize,
+    /// Zero-based chunk index within the section.
     pub chunk_index: usize,
+    /// Character offset within the chunk (for mid-chunk resume).
     pub char_offset: usize,
 }
 
@@ -83,30 +100,54 @@ impl ReadingPosition {
     }
 }
 
+/// A reading session tracking the user's progress through a document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadingSession {
+    /// Unique session identifier.
     pub session_id: String,
+    /// ID of the document being read.
     pub document_id: String,
+    /// Current high-level reader state.
     pub state: ReaderState,
+    /// Current audio playback state.
     pub playback_state: PlaybackState,
+    /// Current reading position within the document.
     pub position: ReadingPosition,
+    /// ID of the voice note currently being recorded, if any.
     pub active_note_id: Option<String>,
+    /// Name of the last command executed (e.g. "next_chunk").
     pub last_command: Option<String>,
+    /// Source of the last command (e.g. "runtime", "voice", "keyboard").
     pub last_command_source: Option<String>,
+    /// Raw recognized command string from STT, if applicable.
     pub last_recognized_command: Option<String>,
+    /// TTS voice identifier in use for this session.
     pub voice: Option<String>,
+    /// Name of the active TTS provider.
     pub tts_provider: Option<String>,
+    /// Name of the active command STT provider.
     pub command_stt_provider: Option<String>,
+    /// Name of the active playback provider.
     pub playback_provider: Option<String>,
+    /// Whether the session is actively listening for voice commands.
     pub command_listening_active: bool,
+    /// Language code for voice commands (e.g. "it").
     pub command_language: Option<String>,
+    /// File path or URI of the currently playing audio.
     pub audio_reference: Option<String>,
+    /// OS process ID of the playback process, if applicable.
     pub playback_process_id: Option<u32>,
+    /// OS process ID of the runtime process.
     pub runtime_process_id: Option<u32>,
+    /// Human-readable runtime status string.
     pub runtime_status: Option<String>,
+    /// Error message if the runtime is in an error state.
     pub runtime_error: Option<String>,
+    /// Summary of cleanup actions taken at startup (e.g. stale session recovery).
     pub startup_cleanup_summary: Option<String>,
+    /// Whether this session is the currently active one.
     pub is_active: bool,
+    /// Timestamp of the last update to this session.
     pub updated_at: DateTime<Utc>,
 }
 

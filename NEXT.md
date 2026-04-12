@@ -29,7 +29,7 @@ descoped before tagging `v0.1.0-beta`.
 | 17 | **FFI** | C-compatible API or UniFFI bindings | **TODO** | Required for iOS (Swift), Android (Kotlin), Windows (C#) |
 | 18 | **Testing** | Core trait tests + integration tests | **TODO** | Developers need to trust the library before building on it |
 | 19 | **CI** | GitHub Actions: macOS + Linux | **TODO** | Compiles all crates, runs all tests on every push |
-| 20 | **Docs** | `cargo doc` builds cleanly, public items documented | **TODO** | Currently many pub items lack doc comments |
+| 20 | **Docs** | `cargo doc` builds cleanly, public items documented | Done | All pub types, fields, methods in core/runtime/config/models documented. Zero doc warnings. |
 | 21 | **Crates.io** | Publish core + runtime + storage (or stable git tags) | **TODO** | Developers need a stable dependency reference |
 | 22 | **Model management** | `marginalia-models` crate: discovery, download, cache | Done | Uses `hf_hub` API. ensure_whisper(), ensure_kokoro_onnx(), ensure_kokoro_voice(). HF cache at ~/.cache/huggingface/hub/. |
 | 23 | **Unified STT factory** | `SttEngineOutput` struct + `runtime.set_stt_engine()` | Done | Defined in core, re-exported by runtime. Whisper backend uses it; Apple uses it + extra AEC wiring |

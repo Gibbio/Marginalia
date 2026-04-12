@@ -11,9 +11,12 @@
 use hf_hub::api::sync::Api;
 use std::path::PathBuf;
 
+/// Errors that can occur during model management operations.
 #[derive(Debug)]
 pub enum ModelError {
+    /// A model download from HuggingFace Hub failed.
     Download(String),
+    /// The requested model was not found locally or remotely.
     NotFound(String),
 }
 
@@ -35,6 +38,7 @@ pub struct ModelManager {
 }
 
 impl ModelManager {
+    /// Create a new model manager, initializing the HuggingFace Hub API.
     pub fn new() -> Result<Self, ModelError> {
         let api = Api::new().map_err(|e| ModelError::Download(e.to_string()))?;
         Ok(Self { api })
