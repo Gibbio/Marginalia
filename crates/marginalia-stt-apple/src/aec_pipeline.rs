@@ -4,9 +4,9 @@
 //! playback signal (render/reference) from the mic input (capture/near-end),
 //! and writes the cleaned audio frames to the Swift helper's stdin.
 //!
-//! The pipeline runs on its own thread. It consumes render frames from a
-//! crossbeam-style channel fed by the playback host whenever a TTS chunk
-//! is playing.
+//! The render reference is set as a whole buffer (the WAV being played) and
+//! advanced frame-by-frame in lockstep with the mic capture so that render
+//! and capture stay perfectly aligned in time.
 
 use crate::AppleHelperShared;
 use aec3::voip::VoipAec3;
@@ -17,10 +17,18 @@ use std::sync::Arc;
 /// Number of samples in a 10ms frame at the AEC sample rate.
 const FRAME_SAMPLES: usize = (crate::AEC_SAMPLE_RATE as usize) / 100; // 240 at 24kHz
 
+/// Commands sent to the AEC thread to set/clear the render reference.
+pub enum RenderCommand {
+    /// Full WAV samples (f32 mono at AEC_SAMPLE_RATE) of the chunk about to play.
+    SetReference(Vec<f32>),
+    /// Playback stopped — no more render to subtract.
+    ClearReference,
+}
+
 /// Handle to the running AEC pipeline. Dropping it stops the mic stream.
 pub struct AecPipeline {
     _stream: cpal::Stream,
-    render_tx: mpsc::SyncSender<Vec<f32>>,
+    render_tx: mpsc::SyncSender<RenderCommand>,
 }
 
 impl AecPipeline {
@@ -44,21 +52,16 @@ impl AecPipeline {
             buffer_size: cpal::BufferSize::Default,
         };
 
-        // Channel: cpal callback → AEC processing thread (mic frames).
+        // Channel: cpal callback → AEC thread (mic frames).
         let (mic_tx, mic_rx) = mpsc::sync_channel::<Vec<f32>>(64);
-        // Channel: playback host → AEC processing thread (render/reference frames).
-        let (render_tx, render_rx) = mpsc::sync_channel::<Vec<f32>>(64);
+        // Channel: playback → AEC thread (render reference commands).
+        let (render_tx, render_rx) = mpsc::sync_channel::<RenderCommand>(4);
 
-        // Mic capture stream — records f32 mono at device rate.
         let stream = device
             .build_input_stream(
                 &stream_config,
                 move |data: &[f32], _| {
-                    // Downmix to mono.
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| frame[0])
-                        .collect();
+                    let mono: Vec<f32> = data.chunks(channels).map(|frame| frame[0]).collect();
                     let _ = mic_tx.try_send(mono);
                 },
                 |err| log::error!("[aec] cpal stream error: {err}"),
@@ -73,11 +76,7 @@ impl AecPipeline {
 
         // AEC processing thread.
         std::thread::spawn(move || {
-            let mut aec = match VoipAec3::builder(target_rate, 1, 1)
-                .render_sample_rate_hz(target_rate)
-                .capture_sample_rate_hz(target_rate)
-                .build()
-            {
+            let mut aec = match VoipAec3::builder(target_rate, 1, 1).build() {
                 Ok(a) => a,
                 Err(e) => {
                     log::error!("[aec] failed to build AEC3 pipeline: {e}");
@@ -85,18 +84,34 @@ impl AecPipeline {
                 }
             };
 
-            // Accumulation buffers for resampled mic data.
             let mut mic_accum: Vec<f32> = Vec::with_capacity(FRAME_SAMPLES * 4);
             let mut out_buf = vec![0.0f32; FRAME_SAMPLES];
 
+            // Render reference: the full WAV samples and our read position.
+            let mut render_ref: Option<Vec<f32>> = None;
+            let mut render_pos: usize = 0;
+
             loop {
-                // Receive mic samples (may be at device_rate ≠ target_rate).
                 let raw_mic = match mic_rx.recv() {
                     Ok(v) => v,
                     Err(_) => break,
                 };
 
-                // Resample to target_rate if needed.
+                // Check for render commands (non-blocking).
+                while let Ok(cmd) = render_rx.try_recv() {
+                    match cmd {
+                        RenderCommand::SetReference(samples) => {
+                            render_ref = Some(samples);
+                            render_pos = 0;
+                        }
+                        RenderCommand::ClearReference => {
+                            render_ref = None;
+                            render_pos = 0;
+                        }
+                    }
+                }
+
+                // Resample mic to target_rate if needed.
                 let resampled = if device_rate as usize != target_rate {
                     linear_resample(&raw_mic, device_rate as usize, target_rate)
                 } else {
@@ -108,30 +123,28 @@ impl AecPipeline {
                 while mic_accum.len() >= FRAME_SAMPLES {
                     let frame: Vec<f32> = mic_accum.drain(..FRAME_SAMPLES).collect();
 
-                    // Drain any pending render frames first (AEC3 requirement:
-                    // render before capture).
-                    while let Ok(render) = render_rx.try_recv() {
-                        // Render frames should be at target_rate already
-                        // (Kokoro = 24kHz). Feed in FRAME_SAMPLES chunks.
-                        for chunk in render.chunks(FRAME_SAMPLES) {
-                            if chunk.len() == FRAME_SAMPLES {
-                                if let Err(e) = aec.handle_render_frame(chunk) {
-                                    log::warn!("[aec] render frame error: {e}");
-                                }
+                    // Feed the corresponding render frame (in lockstep with mic).
+                    if let Some(ref samples) = render_ref {
+                        if render_pos + FRAME_SAMPLES <= samples.len() {
+                            let render_frame = &samples[render_pos..render_pos + FRAME_SAMPLES];
+                            if let Err(e) = aec.handle_render_frame(render_frame) {
+                                log::warn!("[aec] render frame error: {e}");
                             }
+                            render_pos += FRAME_SAMPLES;
                         }
+                        // If reference is exhausted, no more render frames to feed
+                        // (silence period after chunk ends). AEC passes mic through.
                     }
 
                     // Process capture through AEC.
                     match aec.process_capture_frame(&frame, false, &mut out_buf) {
-                        Ok(_metrics) => {}
+                        Ok(_) => {}
                         Err(e) => {
                             log::warn!("[aec] capture frame error: {e}");
-                            out_buf.copy_from_slice(&frame); // pass through on error
+                            out_buf.copy_from_slice(&frame);
                         }
                     }
 
-                    // Send cleaned audio to the Swift helper.
                     if let Err(e) = helper.write_audio_frame(&out_buf) {
                         log::error!("[aec] failed to write to helper: {e}");
                         return;
@@ -147,22 +160,26 @@ impl AecPipeline {
         })
     }
 
-    /// Feed render (reference / far-end) audio samples to the AEC. Call this
-    /// when the playback engine is about to play a chunk — pass the WAV
-    /// samples (f32, mono, at AEC_SAMPLE_RATE). The AEC thread will drain
-    /// these before processing each mic frame.
-    pub fn feed_render(&self, samples: &[f32]) {
-        let _ = self.render_tx.try_send(samples.to_vec());
+    /// Set the render reference: the full WAV samples of the chunk about to
+    /// be played. Call this right when `PlaybackEngine::start()` is called.
+    /// Samples must be f32 mono at `AEC_SAMPLE_RATE`.
+    pub fn set_render_reference(&self, samples: Vec<f32>) {
+        let _ = self.render_tx.try_send(RenderCommand::SetReference(samples));
     }
 
-    /// Access the render channel sender (for passing to the playback host).
-    pub fn render_sender(&self) -> mpsc::SyncSender<Vec<f32>> {
+    /// Clear the render reference (playback stopped).
+    pub fn clear_render_reference(&self) {
+        let _ = self.render_tx.try_send(RenderCommand::ClearReference);
+    }
+
+    /// Get a clone of the render command sender (for passing to the playback
+    /// engine or other components that need to feed the reference signal).
+    pub fn render_sender(&self) -> mpsc::SyncSender<RenderCommand> {
         self.render_tx.clone()
     }
 }
 
-/// Simple linear interpolation resampling. Good enough for voice at these
-/// rates; no external dep needed.
+/// Simple linear interpolation resampling.
 fn linear_resample(input: &[f32], from_rate: usize, to_rate: usize) -> Vec<f32> {
     if from_rate == to_rate || input.is_empty() {
         return input.to_vec();
@@ -173,10 +190,10 @@ fn linear_resample(input: &[f32], from_rate: usize, to_rate: usize) -> Vec<f32> 
     for i in 0..out_len {
         let src_pos = i as f64 * ratio;
         let idx = src_pos as usize;
-        let frac = src_pos - idx as f64;
+        let frac = (src_pos - idx as f64) as f32;
         let a = input[idx.min(input.len() - 1)];
         let b = input[(idx + 1).min(input.len() - 1)];
-        output.push(a + (b - a) * frac as f32);
+        output.push(a + (b - a) * frac);
     }
     output
 }
