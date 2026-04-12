@@ -295,10 +295,16 @@ impl BetaBackendClient {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
+        let tts_cache_dir = db_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(".marginalia-tts-cache");
+        std::fs::create_dir_all(&tts_cache_dir).ok();
         let mut runtime_config = marginalia_runtime::RuntimeConfig::default();
         if let Some(v) = config.chunk_target_chars {
             runtime_config.chunk_target_chars = v;
         }
+        runtime_config.tts_cache_dir = Some(tts_cache_dir);
         let mut runtime = SqliteRuntime::open_with_config(&db_path, runtime_config)
             .map_err(|err| format!("Unable to open beta runtime database: {err}"))?;
 

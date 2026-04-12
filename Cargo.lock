@@ -1567,6 +1567,7 @@ dependencies = [
  "marginalia-storage-sqlite",
  "rusqlite",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

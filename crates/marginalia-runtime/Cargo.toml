@@ -13,3 +13,4 @@ marginalia-provider-fake = { path = "../marginalia-provider-fake" }
 marginalia-storage-sqlite = { path = "../marginalia-storage-sqlite" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
+sha2 = "0.10"
