@@ -30,7 +30,7 @@ descoped before tagging `v0.1.0-beta`.
 | 18 | **Testing** | Core trait tests + integration tests | Done | 83 tests across 8 crates. Runtime: pause/resume/stop, restore session, full e2e flow (ingest → navigate → note → stop → restore). |
 | 19 | **CI** | GitHub Actions: macOS + Linux | Done | Linux: build + test + clippy + fmt. macOS-14 (M1): TUI with apple-stt + mlx-tts + doc check. Triggers on main + beta. |
 | 20 | **Docs** | `cargo doc` builds cleanly, public items documented | Done | All pub types, fields, methods in core/runtime/config/models documented. Zero doc warnings. |
-| 21 | **Crates.io** | Publish core + runtime + storage (or stable git tags) | **TODO** | Developers need a stable dependency reference |
+| 21 | **Crates.io** | Publish core + runtime + storage (or stable git tags) | Done | Git tag `v0.1.0-beta` on beta branch. crates.io publish deferred to stable release. |
 | 22 | **Model management** | `marginalia-models` crate: discovery, download, cache | Done | Uses `hf_hub` API. ensure_whisper(), ensure_kokoro_onnx(), ensure_kokoro_voice(). HF cache at ~/.cache/huggingface/hub/. |
 | 23 | **Unified STT factory** | `SttEngineOutput` struct + `runtime.set_stt_engine()` | Done | Defined in core, re-exported by runtime. Whisper backend uses it; Apple uses it + extra AEC wiring |
 | 24 | **espeak-rs** | Compiled Rust binding to eliminate system espeak-ng dep | Done | MLX TTS uses `espeak-rs` (compiles espeak-ng from source via CMake). ONNX path still uses external `phonemizer_program`. |
