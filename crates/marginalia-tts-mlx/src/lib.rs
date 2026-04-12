@@ -43,8 +43,18 @@ impl MlxSpeechSynthesizer {
         let model = voice_tts::load_model(model_repo)
             .map_err(|e| format!("failed to load Kokoro MLX model: {e}"))?;
 
-        let voice = voice_tts::load_voice(voice_name, None)
-            .map_err(|e| format!("failed to load voice '{voice_name}': {e}"))?;
+        // Prefer a voice file bundled alongside the local model (avoids HF network access).
+        // Falls back to HF Hub only for builtin voices or if the local file is absent.
+        let local_voice = Path::new(model_repo)
+            .join("voices")
+            .join(format!("{voice_name}.safetensors"));
+        let voice = if local_voice.exists() {
+            voice_tts::voice::load_voice_from_file(&local_voice)
+                .map_err(|e| format!("failed to load voice '{voice_name}' from local path: {e}"))?
+        } else {
+            voice_tts::load_voice(voice_name, None)
+                .map_err(|e| format!("failed to load voice '{voice_name}': {e}"))?
+        };
 
         let output_dir = output_dir.as_ref().to_path_buf();
         fs::create_dir_all(&output_dir).map_err(|e| format!("failed to create output dir: {e}"))?;
