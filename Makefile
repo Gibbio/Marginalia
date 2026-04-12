@@ -25,7 +25,11 @@ ifndef MARGINALIA_LANG
 endif
 
 # ---------------------------------------------------------------------------
-# Voice table (source: hexgrad/Kokoro-82M/VOICES.md)
+# Voice table — sourced from:
+#   https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
+# (hexgrad/Kokoro-82M is the canonical repo; prince-canuma/Kokoro-82M is the
+# safetensors mirror used for download — hexgrad only ships .pth PyTorch files)
+#
 # Format: MLX_VOICE_DEFAULT_<lang> = best voice for that language
 #         MLX_VOICES_<lang>        = all voices to download (space-separated)
 #
