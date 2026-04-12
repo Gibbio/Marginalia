@@ -1,7 +1,39 @@
 KOKORO_ASSETS_DIR  ?= models/tts/kokoro
 MLX_MODEL_DIR      ?= models/tts/mlx
 MLX_HF_REPO        ?= prince-canuma/Kokoro-82M
-MLX_VOICES         ?= if_sara im_nicola
+
+# ---------------------------------------------------------------------------
+# Language detection
+# Reads the system locale to pick default TTS voice and STT language.
+# Override from the command line: make tui-rs MARGINALIA_LANG=it
+# Default: en (English).
+# ---------------------------------------------------------------------------
+ifndef MARGINALIA_LANG
+  ifeq ($(shell uname -s),Darwin)
+    MARGINALIA_LANG := $(shell defaults read -g AppleLocale 2>/dev/null \
+      | cut -d_ -f1 | cut -d@ -f1 | cut -d- -f1 \
+      | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z')
+  endif
+  ifeq ($(MARGINALIA_LANG),)
+    MARGINALIA_LANG := $(shell echo "$(LANG)" \
+      | cut -d_ -f1 | cut -d. -f1 \
+      | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z')
+  endif
+  ifeq ($(MARGINALIA_LANG),)
+    MARGINALIA_LANG := en
+  endif
+endif
+
+# Map language → default voice and voices to download.
+# English voices (af_bella, am_adam, …) are embedded in the binary — no download needed.
+# Non-English voices must be fetched from HuggingFace via bootstrap-mlx.
+ifeq ($(MARGINALIA_LANG),it)
+  MLX_VOICE_DEFAULT ?= if_sara
+  MLX_VOICES        ?= if_sara im_nicola
+else
+  MLX_VOICE_DEFAULT ?= af_bella
+  MLX_VOICES        ?=
+endif
 VOSK_MODEL_URL     ?= https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip
 VOSK_MODEL_NAME    ?= vosk-model-small-it-0.22
 MODELS_DIR         ?= models/stt
@@ -249,7 +281,7 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	PLATFORM="$$OS $$ARCH"; \
 	DATE=$$(date "+%Y-%m-%d %H:%M"); \
 	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
-		TTS_SECTION='# Kokoro via MLX Metal GPU (assets at $(MLX_MODEL_DIR))\n[mlx]\nmodel = "$(MLX_MODEL_DIR)"\nvoice = "if_sara"    # Italian female (or: im_nicola, af_bella, am_adam)'; \
+		TTS_SECTION='# Kokoro via MLX Metal GPU (assets at $(MLX_MODEL_DIR))\n[mlx]\nmodel = "$(MLX_MODEL_DIR)"\nvoice = "$(MLX_VOICE_DEFAULT)"'; \
 	elif [ -d "$(KOKORO_ASSETS_DIR)" ]; then \
 		TTS_SECTION='# Kokoro via ONNX Runtime CPU\n[kokoro]\nassets_root = "$(KOKORO_ASSETS_DIR)"\nphonemizer_program = "espeak-ng"\nphonemizer_args = ["-v", "it", "--ipa", "-q"]'; \
 	else \
@@ -260,7 +292,7 @@ $(TUI_TOML): $(TUI_TEMPLATE)
 	else \
 		DEFAULT_ENGINE="whisper"; \
 	fi; \
-	STT_SECTION="[stt]\nengine   = \"$$DEFAULT_ENGINE\"     # \"apple\" or \"whisper\"\nlanguage = \"it\"        # ISO (\"it\") or BCP-47 (\"it-IT\"); auto-converted per engine\ndebug    = true        # show raw transcript in the Log pane"; \
+	STT_SECTION="[stt]\nengine   = \"$$DEFAULT_ENGINE\"     # \"apple\" or \"whisper\"\nlanguage = \"$(MARGINALIA_LANG)\"        # ISO (\"it\") or BCP-47 (\"it-IT\"); auto-converted per engine\ndebug    = true        # show raw transcript in the Log pane"; \
 	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
 		STT_SECTION="$$STT_SECTION\n\n# Apple-engine settings.\n# Requires: System Settings → Keyboard → Dictation → ON.\n# NOTE: Apple dictation is not yet implemented — pick engine = \"whisper\" if\n# you need /note. See NEXT.md (\"Apple STT dictation mode\").\n[stt.apple]"; \
 	fi; \
