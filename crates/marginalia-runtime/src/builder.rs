@@ -111,6 +111,10 @@ impl RuntimeBuilder {
 
     /// Build the runtime, wiring all providers based on configuration.
     pub fn build(self) -> Result<BuildOutput, String> {
+        // Force offline mode: never contact HuggingFace at runtime.
+        // Models must be pre-downloaded via `make bootstrap-*` or ModelManager.
+        std::env::set_var("HF_HUB_OFFLINE", "1");
+
         if let Some(parent) = self.db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
