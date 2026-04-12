@@ -614,7 +614,12 @@ impl BetaBackendClient {
     }
 
     pub fn check_auto_advance(&mut self) -> bool {
-        let response = self.send_request("command", "auto_advance", json!({}));
+        // Use "query" (try_lock) instead of "command" (blocking lock) so we
+        // never stall the UI waiting for a synthesis to finish.
+        let response = self.send_request("query", "auto_advance", json!({}));
+        if response.status == "skipped" {
+            return false;
+        }
         response
             .payload
             .get("advanced")

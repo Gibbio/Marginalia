@@ -176,6 +176,17 @@ impl SqliteRuntime {
                     }),
                 )
             }
+            "auto_advance" => {
+                let advanced = self.try_auto_advance();
+                ok_response(
+                    if advanced {
+                        "Advanced to next chunk."
+                    } else {
+                        "No advance needed."
+                    },
+                    json!({ "advanced": advanced }),
+                )
+            }
             other => error_response(format!("Unsupported beta query: {other}")),
         }
     }
@@ -198,17 +209,6 @@ impl SqliteRuntime {
                     ),
                     Err(err) => error_response(err.to_string()),
                 }
-            }
-            "auto_advance" => {
-                let advanced = self.try_auto_advance();
-                ok_response(
-                    if advanced {
-                        "Advanced to next chunk."
-                    } else {
-                        "No advance needed."
-                    },
-                    json!({ "advanced": advanced }),
-                )
             }
             "restore_session" => match self.restore_session() {
                 Some(session) => ok_response(
