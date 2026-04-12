@@ -19,27 +19,26 @@ descoped before tagging `v0.1.0-beta`.
 | 7 | **TTS** | Cache + background prefetch | Done | Revisiting a chunk is instant |
 | 8 | **STT** | Apple SFSpeechRecognizer, commands + dictation | Done | Single Swift helper, mode-switch via stdin |
 | 9 | **STT** | Whisper, commands + dictation | Done | Two WhisperConfig profiles |
-| 10 | **STT** | Trigger fast-path (~200ms command latency) | Done | Apple only; Whisper limited by inference |
-| 11 | **Playback** | rodio in-process audio (macOS/Linux/Windows) | Done | Pause, resume, stop, sink.empty() |
-| 12 | **Echo** | stt-echo-filter (text-level, post-STT) | Done | External crate, zero deps |
-| 13 | **Config** | Configurable chunk size (`chunk_target_chars`) | Done | Per-platform tuning |
-| 14 | **RuntimeBuilder** | Builder pattern for provider wiring | **TODO** | Eliminates 500 lines of duplicated wiring per app. Without this, every new app copy-pastes backend.rs |
-| 15 | **Events / callbacks** | Runtime event system (not just polling) | **TODO** | Mobile apps need push notifications: playback finished, command recognized, synthesis ready. TUI can also benefit (replace try_recv polling) |
-| 16 | **Logging** | Replace `eprintln!` with `log` crate | Done | All library crates + TUI migrated. CLI binaries keep eprintln (appropriate for CLI). |
-| 17 | **FFI** | C-compatible API or UniFFI bindings | **TODO** | Required for iOS (Swift), Android (Kotlin), Windows (C#). The RuntimeFrontend JSON contract is already FFI-friendly — needs a thin `extern "C"` wrapper |
-| 18 | **Testing** | Core trait tests + integration tests | **TODO** | See Testing & CI section below. Developers need to trust the library before building on it |
-| 19 | **CI** | GitHub Actions: macOS (mlx, apple-stt) + Linux (onnx, whisper) | **TODO** | Compiles all crates, runs all tests on every push |
-| 20 | **Docs** | `cargo doc` builds cleanly, public items documented | **TODO** | Developers read the API docs. Currently many pub items lack doc comments |
-| 21 | **Crates.io** | Publish core + runtime + storage (or at minimum, stable git tags) | **TODO** | Developers need a stable dependency reference, not just `git = "..."` |
-| 22 | **Shared config** | Extract `marginalia-config` crate with reusable config types | Done | VoiceCommandsSection, SttSection, KokoroSection, MlxSection, PlaybackSection extracted. TUI re-exports them. |
-| 23 | **Model management** | `marginalia-models` crate: discovery, download, cache | **TODO** | Mobile apps can't run `make bootstrap-*`; need programmatic model management |
-| 24 | **Unified STT factory** | Trait or function returning `(CommandRecognizer, DictationTranscriber)` from one init | **TODO** | Apple already does this via `new_apple_stt`; formalize the pattern for all engines |
-| 25 | **espeak-rs** | Compiled Rust binding to eliminate system espeak-ng dependency | **TODO** | System dep is a barrier for packaging and mobile |
-| 26 | **Auto-play next chunk** | Continuous reading without pressing /next | **TODO** | rodio `sink.empty()` callback; most-requested UX feature |
+| 10 | **Echo** | Acoustic AEC3 (WebRTC, pure Rust) | Done | cpal mic → aec3 → TLV binary stdin → Swift helper. Render ref from playback WAV |
+| 11 | **Playback** | rodio in-process audio (macOS/Linux/Windows) | Done | Pause, resume, stop, sink.empty() + AEC render callback |
+| 12 | **Config** | Configurable chunk size (`chunk_target_chars`) | Done | Per-platform tuning |
+| 13 | **Logging** | Replace `eprintln!` with `log` crate | Done | All library crates + TUI migrated |
+| 14 | **Shared config** | Extract `marginalia-config` crate with reusable config types | Done | VoiceCommandsSection, SttSection, etc. extracted |
+| 15 | **RuntimeBuilder** | Builder pattern for provider wiring | **TODO** | Eliminates 500 lines of duplicated wiring per app |
+| 16 | **Events / callbacks** | Runtime event system (not just polling) | **TODO** | Mobile needs push: playback finished, command recognized, synthesis ready |
+| 17 | **FFI** | C-compatible API or UniFFI bindings | **TODO** | Required for iOS (Swift), Android (Kotlin), Windows (C#) |
+| 18 | **Testing** | Core trait tests + integration tests | **TODO** | Developers need to trust the library before building on it |
+| 19 | **CI** | GitHub Actions: macOS + Linux | **TODO** | Compiles all crates, runs all tests on every push |
+| 20 | **Docs** | `cargo doc` builds cleanly, public items documented | **TODO** | Currently many pub items lack doc comments |
+| 21 | **Crates.io** | Publish core + runtime + storage (or stable git tags) | **TODO** | Developers need a stable dependency reference |
+| 22 | **Model management** | `marginalia-models` crate: discovery, download, cache | **TODO** | Mobile apps can't run `make bootstrap-*` |
+| 23 | **Unified STT factory** | Trait or function returning `(Recognizer, Transcriber)` from one init | **TODO** | Apple does this; formalize for all engines |
+| 24 | **espeak-rs** | Compiled Rust binding to eliminate system espeak-ng dep | **TODO** | System dep is a barrier for packaging and mobile |
+| 25 | **Auto-play next chunk** | Continuous reading without pressing /next | **TODO** | rodio `sink.empty()` callback; most-requested UX feature |
 
 ### Release criteria summary
 
-**Tag `v0.1.0-beta` when rows 1–26 in the must-have table are Done.**
+**Tag `v0.1.0-beta` when rows 1–25 in the must-have table are Done.**
 Features (study, annotations, AI, import formats) are post-beta — they
 build on top of the infrastructure.
 
