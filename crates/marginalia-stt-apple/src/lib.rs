@@ -31,7 +31,7 @@ const COMMAND_PROVIDER_NAME: &str = "apple-stt";
 const DICTATION_PROVIDER_NAME: &str = "apple-dictation-stt";
 
 /// Bump when SWIFT_HELPER_SOURCE changes so the cached binary gets recompiled.
-const HELPER_VERSION: u32 = 8;
+const HELPER_VERSION: u32 = 9;
 
 static COMPILE_HELPER: Once = Once::new();
 
@@ -579,13 +579,6 @@ func startRecognitionTask() {
                 if !emitted { emit(lastText, mode: mode) }
                 lastText = ""
                 emitted = false
-                scheduleRestart()
-                return
-            }
-
-            if mode == .command && !emitted && containsTrigger(lastText) {
-                emit(lastText, mode: .command)
-                emitted = true
                 scheduleRestart()
                 return
             }
