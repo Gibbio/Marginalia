@@ -1624,6 +1624,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "marginalia-models"
+version = "0.1.0"
+dependencies = [
+ "hf-hub",
+ "log",
+]
+
+[[package]]
 name = "marginalia-playback-host"
 version = "0.1.0"
 dependencies = [
