@@ -618,10 +618,6 @@ impl App {
         (self.launched_at.elapsed().as_millis() / 90) as usize
     }
 
-    pub fn animation_frame(&self) -> usize {
-        self.animation_tick() % 3
-    }
-
     fn graceful_shutdown(&mut self) {
         let _ = self.backend.stop_session();
         self.should_quit = true;

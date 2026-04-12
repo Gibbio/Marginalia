@@ -286,16 +286,17 @@ fn render(frame: &mut Frame, app: &mut App) {
         return;
     }
 
+    // Main layout: body + separator + command input.
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(6),
-            Constraint::Length(1),
             Constraint::Min(12),
             Constraint::Length(1),
             Constraint::Length(6),
         ])
         .split(inner);
+
+    // Body: document (left) | separator | sidebar (right).
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -303,25 +304,20 @@ fn render(frame: &mut Frame, app: &mut App) {
             Constraint::Length(3),
             Constraint::Percentage(28),
         ])
-        .split(vertical[2]);
+        .split(vertical[0]);
+
+    // Sidebar: waveform (top) | log (middle) | session (bottom).
     let sidebar = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(70),
+            Constraint::Length(5),
+            Constraint::Percentage(60),
             Constraint::Length(1),
-            Constraint::Percentage(30),
+            Constraint::Percentage(40),
         ])
         .split(body[2]);
 
-    let overview_title = format!("Marginalia tui-rs {version}");
-    let header = Paragraph::new(section_lines(
-        &overview_title,
-        render_header_lines(app, vertical[0].width),
-        vertical[0].width,
-        title_style,
-        section_style,
-    ));
-
+    // Document pane — full left side.
     let document_area = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -331,7 +327,10 @@ fn render(frame: &mut Frame, app: &mut App) {
         document_area[1].width.saturating_sub(2).max(1) as usize,
     );
     let document_heading = Paragraph::new(section_heading(
-        &document_heading_title(app),
+        &format!(
+            "{} — Marginalia {version}",
+            document_heading_title(app)
+        ),
         document_area[0].width,
         title_style,
         section_style,
@@ -345,10 +344,15 @@ fn render(frame: &mut Frame, app: &mut App) {
     );
     let document = Paragraph::new(document_lines).scroll((app.document_scroll(), 0));
 
+    // Waveform pane (sidebar top).
+    let waveform = Paragraph::new(render_waveform_lines(app, sidebar[0].width))
+        .style(Style::default().fg(Color::Rgb(102, 118, 136)));
+
+    // Log pane (sidebar middle).
     let log_area = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
-        .split(sidebar[0]);
+        .split(sidebar[1]);
     let log_heading = Paragraph::new(section_heading_with_indent(
         "Log",
         log_area[0].width,
@@ -362,36 +366,92 @@ fn render(frame: &mut Frame, app: &mut App) {
     let messages_total = messages_widget.line_count(log_area[1].width) as u16;
     let messages = messages_widget.scroll((messages_total.saturating_sub(messages_viewport), 0));
 
+    // Session pane (sidebar bottom).
     let status = Paragraph::new(section_lines(
         "Session",
         render_status_lines(app),
-        sidebar[2].width,
+        sidebar[3].width,
         title_style,
         section_style,
     ))
     .wrap(Wrap { trim: true });
 
+    // Command input.
     let input = Paragraph::new(section_lines(
         "Command",
         render_input_lines(app),
-        vertical[4].width,
+        vertical[2].width,
         title_style,
         section_style,
     ))
     .style(Style::default().fg(Color::Yellow));
 
-    frame.render_widget(header, vertical[0]);
+    // Render all.
     frame.render_widget(document_heading, document_area[0]);
     frame.render_widget(document, document_area[1]);
     render_vertical_separator(frame, body[1], section_style);
+    frame.render_widget(waveform, sidebar[0]);
     frame.render_widget(log_heading, log_area[0]);
     frame.render_widget(messages, log_area[1]);
-    frame.render_widget(status, sidebar[2]);
-    frame.render_widget(input, vertical[4]);
+    render_vertical_separator(frame, sidebar[2], section_style);
+    frame.render_widget(status, sidebar[3]);
+    frame.render_widget(input, vertical[2]);
     frame.set_cursor_position((
-        vertical[4].x + 4 + app.input.chars().count() as u16,
-        vertical[4].y + 1,
+        vertical[2].x + 4 + app.input.chars().count() as u16,
+        vertical[2].y + 1,
     ));
+}
+
+fn render_waveform_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    let bars = "▁▂▃▄▅▆▇█";
+    let bar_chars: Vec<char> = bars.chars().collect();
+    let w = width.saturating_sub(4) as usize;
+    let tick = app.animation_tick();
+
+    let is_playing = app
+        .session_snapshot
+        .as_ref()
+        .map(|s| s.playback_state.eq_ignore_ascii_case("playing"))
+        .unwrap_or(false);
+
+    let tts_style = if is_playing {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let mic_style = Style::default().fg(Color::Green);
+
+    // TTS waveform: simulated from playback state.
+    let tts_bar: String = (0..w)
+        .map(|i| {
+            if !is_playing {
+                bar_chars[0]
+            } else {
+                let v = ((tick + i) as f64 * 0.3).sin().abs();
+                bar_chars[(v * 7.0) as usize % bar_chars.len()]
+            }
+        })
+        .collect();
+
+    // Mic waveform: simulated from animation tick.
+    let mic_bar: String = (0..w)
+        .map(|i| {
+            let v = ((tick + i) as f64 * 0.5 + 1.7).sin().abs() * 0.6;
+            bar_chars[(v * 7.0) as usize % bar_chars.len()]
+        })
+        .collect();
+
+    vec![
+        Line::from(Span::styled(
+            format!(" 🔊 {tts_bar}"),
+            tts_style,
+        )),
+        Line::from(Span::styled(
+            format!(" 🎤 {mic_bar}"),
+            mic_style,
+        )),
+        Line::from(""),
+    ]
 }
 
 fn sync_document_scroll(
@@ -507,97 +567,6 @@ fn render_vertical_separator(frame: &mut Frame, area: Rect, style: Style) {
         .map(|_| Line::from(Span::styled(" │ ", style)))
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn render_header_lines(app: &App, width: u16) -> Vec<Line<'static>> {
-    let dinosaur = match app.animation_frame() {
-        0 => [
-            "             __",
-            "            / _)",
-            "    _.----./ / ",
-            " __/         / ",
-            "<__.-'|_|-|_|  ",
-        ],
-        1 => [
-            "             __",
-            "            / _)",
-            "    _.----./ / ",
-            " __/         / ",
-            "<__.-'|_|-|-|  ",
-        ],
-        _ => [
-            "             __",
-            "            / _)",
-            "    _.----./ / ",
-            " __/         / ",
-            "<__.-'|-|_|_|  ",
-        ],
-    };
-
-    let trex = match app.animation_frame() {
-        0 => [
-            "        ___   ",
-            " __/{  o_o}  ",
-            "~<_/|  _J    ",
-            "    | /| |\\  ",
-            "    [_] [_]  ",
-        ],
-        1 => [
-            "        ___   ",
-            " __/{  o_o}  ",
-            "~<_/|  _J    ",
-            "    |/ | |\\  ",
-            "   [_]  [_]  ",
-        ],
-        _ => [
-            "        ___   ",
-            " __/{  o_o}  ",
-            "~<_/|  _J    ",
-            "    | /|  |\\ ",
-            "    [_] [_]  ",
-        ],
-    };
-
-    let content_width = width.saturating_sub(2) as usize;
-    let tick = app.animation_tick();
-    let trex_gap = 20;
-
-    dinosaur
-        .iter()
-        .zip(trex.iter())
-        .map(|(dino_line, trex_line)| {
-            let dino_part = wrap_sprite_line(dino_line, tick, content_width);
-            let trex_part = wrap_sprite_line(trex_line, tick.wrapping_sub(trex_gap), content_width);
-            let merged = merge_sprite_layers(&dino_part, &trex_part);
-            Line::from(vec![
-                Span::styled(
-                    merged.clone(),
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                ),
-            ])
-        })
-        .collect()
-}
-
-fn merge_sprite_layers(front: &str, back: &str) -> String {
-    front
-        .chars()
-        .zip(back.chars())
-        .map(|(f, b)| if f != ' ' { f } else { b })
-        .collect()
-}
-
-fn wrap_sprite_line(line: &str, offset: usize, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-
-    let mut cells = vec![' '; width];
-    for (index, ch) in line.chars().enumerate() {
-        let position = (offset + index) % width;
-        cells[position] = ch;
-    }
-    cells.into_iter().collect()
 }
 
 fn render_input_lines(app: &App) -> Vec<Line<'static>> {
