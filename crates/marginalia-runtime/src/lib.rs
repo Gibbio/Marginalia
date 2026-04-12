@@ -35,6 +35,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
+pub use marginalia_core::ports::SttEngineOutput;
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -424,6 +425,22 @@ impl SqliteRuntime {
         Some(session)
     }
 
+    /// Check if the current chunk finished playing naturally. If so, advance
+    /// to the next chunk and start playback. If at the end of the document,
+    /// stop the session. Returns `true` if it advanced.
+    pub fn try_auto_advance(&mut self) -> bool {
+        let snap = self.playback_engine.snapshot();
+        if snap.state != PlaybackState::Stopped || snap.last_action != "completed" {
+            return false;
+        }
+        if self.next_chunk().is_ok() {
+            true
+        } else {
+            let _ = self.stop_session();
+            false
+        }
+    }
+
     pub fn app_snapshot(&mut self) -> AppSnapshot {
         let mut service = SessionQueryService::new(
             &mut self.session_repository,
@@ -646,6 +663,14 @@ impl SqliteRuntime {
         transcriber: impl DictationTranscriber + Send + 'static,
     ) {
         self.dictation_transcriber = Box::new(transcriber);
+    }
+
+    /// Convenience: set both command recognizer and dictation transcriber from
+    /// an `SttEngineOutput`. Use this when the engine factory returns a matched
+    /// pair (e.g. `new_apple_stt`, or a future unified Whisper factory).
+    pub fn set_stt_engine(&mut self, output: SttEngineOutput) {
+        self.command_recognizer = output.command_recognizer;
+        self.dictation_transcriber = output.dictation_transcriber;
     }
 
     pub fn dictation_transcriber(&self) -> &dyn DictationTranscriber {

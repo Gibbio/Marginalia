@@ -207,6 +207,12 @@ impl App {
         }
     }
 
+    pub fn check_auto_advance(&mut self) {
+        if self.backend.check_auto_advance() {
+            let _ = self.refresh();
+        }
+    }
+
     pub fn poll_backend_logs(&mut self) {
         let entries = self
             .backend

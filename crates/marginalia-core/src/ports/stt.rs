@@ -61,3 +61,13 @@ pub trait DictationTranscriber {
         note_id: Option<&str>,
     ) -> DictationTranscript;
 }
+
+/// Output of an STT engine factory: a matched pair of command recognizer and
+/// dictation transcriber that share the same underlying engine (same mic
+/// stream, same model, same process). The factory pattern ensures the two
+/// sides are initialized together and can share resources.
+pub struct SttEngineOutput {
+    pub command_recognizer: Box<dyn CommandRecognizer + Send>,
+    pub dictation_transcriber: Box<dyn DictationTranscriber + Send>,
+    pub engine_label: String,
+}
