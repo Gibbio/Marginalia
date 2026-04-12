@@ -4,7 +4,8 @@
 # Date:         __DATE__
 
 database_path = ".marginalia/beta.sqlite3"
-# chunk_target_chars = 300   # target characters per chunk for document import (default 300)
+# tts_cache_dir = ".marginalia/tts-cache"   # directory for cached TTS WAV files
+# chunk_target_chars = 300                  # target characters per chunk (default 300)
 
 # ── TTS ───────────────────────────────────────────────────────
 __TTS_SECTION__

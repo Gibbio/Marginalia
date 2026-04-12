@@ -16,6 +16,8 @@ pub use marginalia_config::{
 pub struct TuiConfig {
     /// Path to the SQLite database. Default: `.marginalia/beta.sqlite3`.
     pub database_path: Option<PathBuf>,
+    /// Directory for cached TTS WAV files. Default: `.marginalia/tts-cache/`.
+    pub tts_cache_dir: Option<PathBuf>,
     /// Target characters per chunk when splitting imported documents.
     /// Lower values = shorter TTS utterances (faster response on slow TTS).
     /// Higher values = fewer chunks, less navigation overhead.
