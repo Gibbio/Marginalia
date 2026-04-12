@@ -5,6 +5,28 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+impl log::Log for AppLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let level = match record.level() {
+            log::Level::Error => "ERROR",
+            log::Level::Warn  => "WARN",
+            log::Level::Info  => "INFO",
+            log::Level::Debug => "DEBUG",
+            log::Level::Trace => "TRACE",
+        };
+        self.write(level, &record.args().to_string());
+    }
+
+    fn flush(&self) {}
+}
+
 #[derive(Clone)]
 pub struct AppLogger {
     file: Arc<Mutex<File>>,

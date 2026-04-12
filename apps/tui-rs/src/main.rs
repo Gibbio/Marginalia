@@ -28,6 +28,10 @@ use std::time::Instant;
 
 fn main() -> Result<(), String> {
     let logger = AppLogger::from_env()?;
+    // Wire the standard `log` crate to AppLogger so log::error!/warn!/info!
+    // from the runtime and providers land in the log file.
+    log::set_max_level(log::LevelFilter::Info);
+    let _ = log::set_logger(Box::leak(Box::new(logger.clone())));
     logger.info(format!(
         "Starting Marginalia tui-rs (version={}, log_file={})",
         env!("CARGO_PKG_VERSION"),
