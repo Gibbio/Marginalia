@@ -406,9 +406,14 @@ impl BetaBackendClient {
                 let dict_silence = config.stt.dictation.silence_timeout.unwrap_or(1.5);
                 let dict_max = config.stt.dictation.max_record_seconds.unwrap_or(60.0);
                 match new_apple_stt(&language, commands, cmd_silence, dict_silence, dict_max) {
-                    Ok((rec, dict)) => {
+                    Ok((rec, dict, _aec_pipeline)) => {
                         runtime.set_command_recognizer(rec);
                         runtime.set_dictation_transcriber(dict);
+                        // TODO: connect _aec_pipeline.render_sender() to the
+                        // playback engine so TTS reference signal feeds into
+                        // AEC3. For now the pipeline runs but without render
+                        // frames — AEC passes mic through with no cancellation
+                        // until the render channel is wired.
                         runtime.set_provider_doctor_blob(
                             "apple_stt",
                             json!({

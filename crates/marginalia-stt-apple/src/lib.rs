@@ -14,6 +14,8 @@
 //! `Arc<AppleHelperShared>`, so there is exactly one Swift process and one
 //! microphone stream open per session.
 
+pub mod aec_pipeline;
+
 use marginalia_core::ports::{
     CommandRecognition, CommandRecognizer, DictationSegment, DictationTranscriber,
     DictationTranscript, ProviderCapabilities, ProviderExecutionMode, SpeechInterruptCapture,
@@ -29,7 +31,7 @@ const COMMAND_PROVIDER_NAME: &str = "apple-stt";
 const DICTATION_PROVIDER_NAME: &str = "apple-dictation-stt";
 
 /// Bump when SWIFT_HELPER_SOURCE changes so the cached binary gets recompiled.
-const HELPER_VERSION: u32 = 4;
+const HELPER_VERSION: u32 = 8;
 
 static COMPILE_HELPER: Once = Once::new();
 
@@ -92,22 +94,44 @@ pub struct AppleHelperShared {
     child: Mutex<Child>,
 }
 
+/// TLV frame types for the binary stdin protocol.
+const FRAME_AUDIO: u8 = 0x41; // 'A'
+const FRAME_MODE: u8 = 0x4D; // 'M'
+
 impl AppleHelperShared {
-    fn write_line(&self, line: &str) -> Result<(), String> {
+    /// Write a TLV frame to the helper's stdin.
+    fn write_frame(&self, frame_type: u8, payload: &[u8]) -> Result<(), String> {
+        let len = payload.len();
+        if len > u16::MAX as usize {
+            return Err(format!("frame payload too large: {len}"));
+        }
         let mut stdin = self.stdin.lock().unwrap();
         stdin
-            .write_all(line.as_bytes())
-            .and_then(|_| stdin.write_all(b"\n"))
+            .write_all(&[frame_type, (len >> 8) as u8, len as u8])
+            .and_then(|_| stdin.write_all(payload))
             .and_then(|_| stdin.flush())
             .map_err(|e| format!("write to helper stdin: {e}"))
     }
 
+    /// Send a mode-switch command ("COMMAND" or "DICTATION").
     fn switch_to_command(&self) -> Result<(), String> {
-        self.write_line("MODE COMMAND")
+        self.write_frame(FRAME_MODE, b"COMMAND")
     }
 
     fn switch_to_dictation(&self) -> Result<(), String> {
-        self.write_line("MODE DICTATION")
+        self.write_frame(FRAME_MODE, b"DICTATION")
+    }
+
+    /// Send an audio frame (f32 samples, little-endian) to the helper for
+    /// SFSpeechRecognizer to process.
+    pub fn write_audio_frame(&self, samples: &[f32]) -> Result<(), String> {
+        let bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                samples.as_ptr() as *const u8,
+                samples.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        self.write_frame(FRAME_AUDIO, bytes)
     }
 }
 
@@ -126,13 +150,16 @@ impl Drop for AppleHelperShared {
 /// Spawn the Swift helper and produce paired command/dictation handles. The
 /// helper runs in COMMAND mode by default; the dictation transcriber switches
 /// to DICTATION mode on demand and back when its `transcribe` returns.
+/// Sample rate used for the audio pipeline (mic → AEC → helper).
+pub const AEC_SAMPLE_RATE: u32 = 24_000;
+
 pub fn new_apple_stt(
     language: &str,
     commands: Vec<String>,
     cmd_silence_timeout: f64,
     dict_silence_timeout: f64,
     dict_max_seconds: f64,
-) -> Result<(AppleCommandRecognizer, AppleDictationTranscriber), String> {
+) -> Result<(AppleCommandRecognizer, AppleDictationTranscriber, aec_pipeline::AecPipeline), String> {
     let helper = ensure_helper()?;
 
     // Smoke test: run the helper for 0.5s to surface immediate setup errors
@@ -142,6 +169,7 @@ pub fn new_apple_stt(
         .arg(format!("{cmd_silence_timeout}"))
         .arg(format!("{dict_silence_timeout}"))
         .arg(join_commands(&commands))
+        .arg(format!("{AEC_SAMPLE_RATE}"))
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .stdin(Stdio::piped())
@@ -166,6 +194,7 @@ pub fn new_apple_stt(
         .arg(format!("{cmd_silence_timeout}"))
         .arg(format!("{dict_silence_timeout}"))
         .arg(join_commands(&commands))
+        .arg(format!("{AEC_SAMPLE_RATE}"))
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .stdin(Stdio::piped())
@@ -205,6 +234,10 @@ pub fn new_apple_stt(
         child: Mutex::new(child),
     });
 
+    // Start the AEC pipeline: cpal mic → AEC3 → cleaned audio → helper stdin.
+    let aec = aec_pipeline::AecPipeline::start(shared.clone())
+        .map_err(|e| format!("AEC pipeline: {e}"))?;
+
     let recognizer = AppleCommandRecognizer {
         language: language.to_string(),
         commands: commands.clone(),
@@ -219,7 +252,7 @@ pub fn new_apple_stt(
         max_duration: Duration::from_secs_f64(dict_max_seconds),
     };
 
-    Ok((recognizer, transcriber))
+    Ok((recognizer, transcriber, aec))
 }
 
 // =============================================================================
@@ -420,15 +453,27 @@ impl DictationTranscriber for AppleDictationTranscriber {
 // Swift helper source
 // =============================================================================
 
-/// Persistent Swift helper. Reads stdin for `MODE COMMAND` / `MODE DICTATION`
-/// lines and switches the active recognition profile accordingly. Output
-/// lines are prefixed so the Rust side can route them to the right channel.
+/// Persistent Swift helper v8. Receives AEC-cleaned audio from Rust via a
+/// binary TLV protocol on stdin (no longer captures the mic itself). Output
+/// lines are prefixed so the Rust reader thread can route them:
 ///
-/// CLI: `stt-helper <language> <cmd_silence> <dict_silence> <triggers_pipe_separated>`
+///   `CMD <text>`       — recognized in command mode
+///   `DICT_END <text>`  — finalized dictation
+///
+/// Stdin binary protocol:
+///   byte 0     — type: 0x41 ('A') audio frame, 0x4D ('M') mode command
+///   byte 1-2   — payload length (big-endian uint16)
+///   byte 3..   — payload
+///
+/// Audio payload: raw f32 samples (little-endian), mono, at the sample rate
+/// passed as CLI arg 5 (default 24000). 10ms per frame = rate/100 samples.
+///
+/// Mode payload: UTF-8 text, one of "COMMAND" or "DICTATION".
+///
+/// CLI: `stt-helper <language> <cmd_silence> <dict_silence> <triggers> <sample_rate>`
 const SWIFT_HELPER_SOURCE: &str = r#"
 import Foundation
 import Speech
-import AVFoundation
 import AudioToolbox
 
 let language = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "it-IT"
@@ -441,6 +486,9 @@ let dictSilenceTimeout = CommandLine.arguments.count > 3
 let triggerWords: [String] = CommandLine.arguments.count > 4 && !CommandLine.arguments[4].isEmpty
     ? CommandLine.arguments[4].split(separator: "|").map { $0.lowercased() }
     : []
+let sampleRate: Double = CommandLine.arguments.count > 5
+    ? (Double(CommandLine.arguments[5]) ?? 24000)
+    : 24000
 
 setbuf(stdout, nil)
 
@@ -448,26 +496,13 @@ setbuf(stdout, nil)
 enum HelperMode { case command; case dictation }
 var currentMode: HelperMode = .command
 
-// System feedback sounds for dictation start/end. Loaded lazily from the
-// built-in macOS sound library; silent fallback if loading fails.
-var dictationStartSoundID: SystemSoundID = 0
-var dictationEndSoundID: SystemSoundID = 0
-let startSoundURL = URL(fileURLWithPath: "/System/Library/Sounds/Tink.aiff")
-let endSoundURL = URL(fileURLWithPath: "/System/Library/Sounds/Pop.aiff")
-AudioServicesCreateSystemSoundID(startSoundURL as CFURL, &dictationStartSoundID)
-AudioServicesCreateSystemSoundID(endSoundURL as CFURL, &dictationEndSoundID)
-
-func playDictationStartBeep() {
-    if dictationStartSoundID != 0 {
-        AudioServicesPlaySystemSound(dictationStartSoundID)
-    }
-}
-
-func playDictationEndBeep() {
-    if dictationEndSoundID != 0 {
-        AudioServicesPlaySystemSound(dictationEndSoundID)
-    }
-}
+// Dictation feedback sounds.
+var dictStartSound: SystemSoundID = 0
+var dictEndSound: SystemSoundID = 0
+AudioServicesCreateSystemSoundID(
+    URL(fileURLWithPath: "/System/Library/Sounds/Tink.aiff") as CFURL, &dictStartSound)
+AudioServicesCreateSystemSoundID(
+    URL(fileURLWithPath: "/System/Library/Sounds/Pop.aiff") as CFURL, &dictEndSound)
 
 // Authorization
 let semaphore = DispatchSemaphore(value: 0)
@@ -485,28 +520,17 @@ guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailabl
     fputs("SFSpeechRecognizer not available for \(language)\n", stderr)
     exit(1)
 }
-
 if #available(macOS 13.0, *) {
     recognizer.supportsOnDeviceRecognition = true
 }
 
-let audioEngine = AVAudioEngine()
-let inputNode = audioEngine.inputNode
-let format = inputNode.outputFormat(forBus: 0)
+// Audio format for buffers received from Rust.
+let audioFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+let frameSamples = UInt32(sampleRate / 100) // 10ms frame
 
 var currentRequest: SFSpeechAudioBufferRecognitionRequest?
 var isRestarting = false
 var silenceTimer: DispatchWorkItem?
-
-inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-    currentRequest?.append(buffer)
-}
-
-audioEngine.prepare()
-do { try audioEngine.start() } catch {
-    fputs("Audio engine failed: \(error)\n", stderr)
-    exit(1)
-}
 
 func containsTrigger(_ text: String) -> Bool {
     if triggerWords.isEmpty { return false }
@@ -516,11 +540,7 @@ func containsTrigger(_ text: String) -> Bool {
 
 func emit(_ text: String, mode: HelperMode) {
     if text.isEmpty { return }
-    if mode == .command {
-        print("CMD \(text)")
-    } else {
-        print("DICT_END \(text)")
-    }
+    print(mode == .command ? "CMD \(text)" : "DICT_END \(text)")
 }
 
 func scheduleRestart() {
@@ -550,25 +570,19 @@ func startRecognitionTask() {
     recognizer.recognitionTask(with: request) { result, error in
         silenceTimer?.cancel()
         silenceTimer = nil
-
-        // Mode is read live so a switch that happens during recognition is
-        // honored on the next callback / timer firing.
         let mode = currentMode
 
         if let result = result {
             lastText = result.bestTranscription.formattedString
 
             if result.isFinal {
-                if !emitted {
-                    emit(lastText, mode: mode)
-                }
+                if !emitted { emit(lastText, mode: mode) }
                 lastText = ""
                 emitted = false
                 scheduleRestart()
                 return
             }
 
-            // Fast-path: only in command mode.
             if mode == .command && !emitted && containsTrigger(lastText) {
                 emit(lastText, mode: .command)
                 emitted = true
@@ -576,14 +590,11 @@ func startRecognitionTask() {
                 return
             }
 
-            // Silence timer: longer in dictation mode so multi-clause notes
-            // aren't truncated mid-sentence.
             let timeout = (mode == .command) ? cmdSilenceTimeout : dictSilenceTimeout
-            let textSnapshot = lastText
+            let snap = lastText
             let timer = DispatchWorkItem {
-                let liveMode = currentMode
                 if !emitted {
-                    emit(textSnapshot, mode: liveMode)
+                    emit(snap, mode: currentMode)
                     emitted = true
                 }
                 scheduleRestart()
@@ -592,42 +603,67 @@ func startRecognitionTask() {
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timer)
         }
 
-        if error != nil && !isRestarting {
-            scheduleRestart()
-        }
+        if error != nil && !isRestarting { scheduleRestart() }
     }
 }
 
-// Stdin reader: handles MODE commands and exits when parent closes the pipe.
+// Read exactly N bytes from stdin. Returns nil on EOF.
+func readExact(_ count: Int) -> Data? {
+    var buf = Data(capacity: count)
+    while buf.count < count {
+        let chunk = FileHandle.standardInput.readData(ofLength: count - buf.count)
+        if chunk.isEmpty { return nil }
+        buf.append(chunk)
+    }
+    return buf
+}
+
+// Stdin reader: binary TLV protocol. Processes audio frames and mode commands.
 DispatchQueue.global().async {
-    while let line = readLine() {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        switch trimmed {
-        case "MODE COMMAND":
-            DispatchQueue.main.async {
-                if currentMode == .dictation {
-                    playDictationEndBeep()
-                }
-                currentMode = .command
-                scheduleRestart()
+    startRecognitionTask()
+
+    while true {
+        guard let header = readExact(3) else { break }
+        let type = header[0]
+        let length = Int(header[1]) << 8 | Int(header[2])
+        guard let payload = readExact(length) else { break }
+
+        if type == 0x41 { // 'A' — audio frame
+            let sampleCount = length / 4
+            guard sampleCount > 0 else { continue }
+            let pcm = AVAudioPCMBuffer(pcmFormat: audioFormat,
+                                       frameCapacity: UInt32(sampleCount))!
+            pcm.frameLength = UInt32(sampleCount)
+            payload.withUnsafeBytes { raw in
+                let src = raw.bindMemory(to: Float.self)
+                memcpy(pcm.floatChannelData![0], src.baseAddress!, length)
             }
-        case "MODE DICTATION":
             DispatchQueue.main.async {
-                if currentMode == .command {
-                    playDictationStartBeep()
-                }
-                currentMode = .dictation
-                scheduleRestart()
+                currentRequest?.append(pcm)
             }
-        default:
-            break
+        } else if type == 0x4D { // 'M' — mode command
+            let text = String(data: payload, encoding: .utf8)?.trimmingCharacters(in: .whitespaces) ?? ""
+            DispatchQueue.main.async {
+                switch text {
+                case "COMMAND":
+                    if currentMode == .dictation && dictEndSound != 0 {
+                        AudioServicesPlaySystemSound(dictEndSound)
+                    }
+                    currentMode = .command
+                    scheduleRestart()
+                case "DICTATION":
+                    if currentMode == .command && dictStartSound != 0 {
+                        AudioServicesPlaySystemSound(dictStartSound)
+                    }
+                    currentMode = .dictation
+                    scheduleRestart()
+                default: break
+                }
+            }
         }
     }
-    // Parent closed stdin → clean exit.
-    audioEngine.stop()
     exit(0)
 }
 
-startRecognitionTask()
 dispatchMain()
 "#;
