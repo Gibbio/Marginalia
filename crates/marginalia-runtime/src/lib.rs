@@ -1,3 +1,4 @@
+mod events;
 mod frontend;
 
 use marginalia_core::application::{
@@ -35,6 +36,7 @@ use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub use events::{EventCallback, RuntimeEvent, RuntimeEventSink};
 pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
 pub use marginalia_core::ports::SttEngineOutput;
 
@@ -123,6 +125,8 @@ pub struct SqliteRuntime {
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
     /// Cache: (document_id, section, chunk, voice) → SynthesisResult
     tts_cache: HashMap<String, SynthesisResult>,
+    /// Push-based event system for app notifications.
+    event_sink: RuntimeEventSink,
 }
 
 fn build_document_view<D, S>(
@@ -234,6 +238,7 @@ impl SqliteRuntime {
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
             tts_cache: HashMap::new(),
+            event_sink: RuntimeEventSink::new(),
         })
     }
 
@@ -265,11 +270,20 @@ impl SqliteRuntime {
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
             tts_cache: HashMap::new(),
+            event_sink: RuntimeEventSink::new(),
         })
     }
 
     pub fn set_default_voice(&mut self, voice: &str) {
         self.config.default_voice = voice.to_string();
+    }
+
+    pub fn subscribe_events(&mut self) -> std::sync::mpsc::Receiver<RuntimeEvent> {
+        self.event_sink.subscribe_channel()
+    }
+
+    pub fn on_event(&mut self, callback: EventCallback) {
+        self.event_sink.subscribe_callback(callback);
     }
 
     pub fn config(&self) -> &RuntimeConfig {
@@ -476,6 +490,12 @@ impl SqliteRuntime {
         if let Err(e) = self.session_repository.save_session(session.clone()) {
             log::warn!("failed to save restored session: {e}");
         }
+        self.event_sink.emit(RuntimeEvent::SessionRestored {
+            session_id: session.session_id.clone(),
+            document_id: session.document_id.clone(),
+            section_index: session.position.section_index,
+            chunk_index: session.position.chunk_index,
+        });
         Some(session)
     }
 
@@ -487,7 +507,21 @@ impl SqliteRuntime {
         if snap.state != PlaybackState::Stopped || snap.last_action != "completed" {
             return false;
         }
+        if let Some(session) = self.session_repository.get_active_session() {
+            self.event_sink.emit(RuntimeEvent::PlaybackFinished {
+                document_id: session.document_id.clone(),
+                section_index: session.position.section_index,
+                chunk_index: session.position.chunk_index,
+            });
+        }
         if self.next_chunk().is_ok() {
+            if let Some(session) = self.session_repository.get_active_session() {
+                self.event_sink.emit(RuntimeEvent::ChunkAdvanced {
+                    document_id: session.document_id.clone(),
+                    section_index: session.position.section_index,
+                    chunk_index: session.position.chunk_index,
+                });
+            }
             true
         } else {
             let _ = self.stop_session();
@@ -581,6 +615,7 @@ impl SqliteRuntime {
             .session_repository
             .get_active_session()
             .ok_or(RuntimeError::MissingActiveSession)?;
+        let document_id = session.document_id.clone();
         let playback = self.playback_engine.stop();
         session.state = ReaderState::Idle;
         session.playback_state = playback.state;
@@ -592,6 +627,7 @@ impl SqliteRuntime {
         if let Err(e) = self.session_repository.save_session(session) {
             log::warn!("failed to save session: {e}");
         }
+        self.event_sink.emit(RuntimeEvent::SessionStopped { document_id });
         Ok(())
     }
 
