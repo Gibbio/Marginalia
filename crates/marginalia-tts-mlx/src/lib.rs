@@ -87,14 +87,17 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
         let phonemes = phonemize(&request.text, &request.language)
             .map_err(|e| err(format!("phonemization failed: {e}")))?;
 
-        // Synthesize with MLX compile enabled
+        // Synthesize with MLX compile enabled (fused Metal kernels).
         mlx_rs::transforms::compile::enable_compile();
         let audio = voice_tts::generate(&mut self.model, &phonemes, &self.voice, 1.0)
             .map_err(|e| err(format!("synthesis failed: {e}")))?;
         mlx_rs::transforms::compile::disable_compile();
 
-        // Convert to samples and eval
+        // Force evaluation and release the Metal compilation cache + intermediate
+        // buffers. Without this, the JIT cache accumulates across synthesis calls
+        // and can consume several GB of unified memory.
         audio.eval().map_err(|e| err(format!("eval failed: {e}")))?;
+        mlx_rs::transforms::compile::clear_cache();
         let samples: &[f32] = audio.as_slice();
 
         // Write WAV
