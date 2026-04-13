@@ -30,7 +30,7 @@ tmp/
 *.db-shm
 *.db-wal
 
-# Downloaded model assets (large binaries — use make bootstrap-beta to install)
+# Downloaded model assets (large binaries — use make bootstrap-* to install)
 models/stt/vosk/vosk-model-*/
 models/stt/vosk/libvosk.*
 models/stt/whisper/*.bin
@@ -40,6 +40,8 @@ models/tts/kokoro/voices/
 models/tts/kokoro/lib/
 models/tts/piper/*.onnx
 models/tts/piper/*.json
+models/pdf/lib/
+models/pdf/include/
 models/tts/mlx/*.safetensors
 models/tts/mlx/voices/
 models/tts/mlx/.cache/

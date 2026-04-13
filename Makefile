@@ -81,10 +81,15 @@ ORT_VERSION        ?= 1.24.4
 WHISPER_MODEL_DIR  ?= models/stt/whisper
 WHISPER_MODEL_NAME ?= ggml-small.bin
 WHISPER_MODEL_URL  ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(WHISPER_MODEL_NAME)
+# PDFium version must match pdfium-render's expected ABI.
+# See: https://github.com/ajrcarey/pdfium-render (Cargo.toml → pdfium_latest feature)
+# Binaries: https://github.com/bblanchon/pdfium-binaries/releases
+PDFIUM_VERSION     ?= 7763
+PDFIUM_DIR         ?= models/pdf
 
 .PHONY: \
 	bootstrap-beta bootstrap-kokoro bootstrap-ort bootstrap-vosk bootstrap-vosk-lib \
-	bootstrap-mlx _kokoro-hf-cli _kokoro-curl \
+	bootstrap-mlx _kokoro-hf-cli _kokoro-curl bootstrap-pdf \
 	check-deps tui-rs beta-test beta-doctor \
 	setup bootstrap bootstrap-runtime-deps bootstrap-providers \
 	bootstrap-kokoro-python bootstrap-whisper bootstrap-system-deps setup-config \
@@ -300,6 +305,43 @@ bootstrap-mlx:
 	done; \
 	echo ""; \
 	echo "MLX assets ready at $(MLX_MODEL_DIR)/."
+
+# ---------------------------------------------------------------------------
+# PDF import — PDFium runtime library
+# ---------------------------------------------------------------------------
+
+# Download the PDFium dynamic library matching pdfium-render's ABI version.
+# The library is loaded at runtime by marginalia-import-pdf — not needed at compile time.
+# Source: https://github.com/bblanchon/pdfium-binaries
+bootstrap-pdf:
+	@OS=$$(uname -s); ARCH=$$(uname -m); \
+	if [ "$$OS" = "Darwin" ] && [ "$$ARCH" = "arm64" ]; then \
+		ARCHIVE="pdfium-mac-arm64.tgz"; \
+	elif [ "$$OS" = "Darwin" ]; then \
+		ARCHIVE="pdfium-mac-x64.tgz"; \
+	elif [ "$$OS" = "Linux" ] && [ "$$ARCH" = "aarch64" ]; then \
+		ARCHIVE="pdfium-linux-arm64.tgz"; \
+	elif [ "$$OS" = "Linux" ]; then \
+		ARCHIVE="pdfium-linux-x64.tgz"; \
+	else \
+		echo "bootstrap-pdf: unsupported platform $$OS $$ARCH"; exit 1; \
+	fi; \
+	LIB_DIR="$(PDFIUM_DIR)/lib"; \
+	LIBNAME=$$([ "$$OS" = "Darwin" ] && echo "libpdfium.dylib" || echo "libpdfium.so"); \
+	if [ -f "$$LIB_DIR/$$LIBNAME" ]; then \
+		echo "PDFium already present at $$LIB_DIR/$$LIBNAME — skipping."; \
+		exit 0; \
+	fi; \
+	mkdir -p "$$LIB_DIR"; \
+	URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F$(PDFIUM_VERSION)/$$ARCHIVE"; \
+	echo "Downloading PDFium $(PDFIUM_VERSION) for $$OS $$ARCH..."; \
+	curl -fL --progress-bar "$$URL" | tar -xz -C "$(PDFIUM_DIR)"; \
+	echo ""; \
+	if [ -f "$$LIB_DIR/$$LIBNAME" ]; then \
+		echo "[OK] PDFium ready at $$LIB_DIR/$$LIBNAME"; \
+	else \
+		echo "[FAIL] PDFium download failed — check URL or PDFIUM_VERSION=$(PDFIUM_VERSION)"; exit 1; \
+	fi
 
 # ---------------------------------------------------------------------------
 # Beta — run and verify
