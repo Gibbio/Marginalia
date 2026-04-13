@@ -523,7 +523,10 @@ impl BetaBackendClient {
         let (tx, rx) = mpsc::channel();
         let _cmd_name = name.clone();
         std::thread::spawn(move || {
-            let mut rt = runtime.lock().expect("runtime lock poisoned");
+            let mut rt = runtime.lock().unwrap_or_else(|e| {
+                log::warn!("runtime lock was poisoned — recovering");
+                e.into_inner()
+            });
             let response = rt.execute_frontend_command(&name, payload);
             let _ = tx.send(AsyncCommandResult {
                 name,

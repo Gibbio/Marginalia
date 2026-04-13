@@ -101,6 +101,17 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
         let phonemes = phonemize(&request.text, &request.language)
             .map_err(|e| err(format!("phonemization failed: {e}")))?;
 
+        // Kokoro has a hard limit of 512 tokens. Each IPA character ≈ 1 token.
+        // Reject over-long inputs early with a clear error rather than panicking
+        // inside voice_tts::generate and poisoning the runtime Mutex.
+        const MAX_PHONEME_TOKENS: usize = 505; // leave margin for BOS/EOS tokens
+        if phonemes.len() > MAX_PHONEME_TOKENS {
+            return Err(err(format!(
+                "phoneme sequence too long ({} chars > {MAX_PHONEME_TOKENS} limit) — chunk is too large for Kokoro",
+                phonemes.len()
+            )));
+        }
+
         // Synthesize with MLX compile enabled (fused Metal kernels).
         mlx_rs::transforms::compile::enable_compile();
         let audio = voice_tts::generate(&mut self.model, &phonemes, &self.voice, 1.0)

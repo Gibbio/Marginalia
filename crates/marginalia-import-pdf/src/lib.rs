@@ -97,20 +97,28 @@ impl DocumentImporter for PdfDocumentImporter {
 /// Shorter fragments are assumed to be page numbers, running headers, or rule lines.
 const MIN_PARAGRAPH_LEN: usize = 15;
 
+/// Maximum paragraph length passed to the ingestion pipeline.
+/// Kokoro's token limit is 512; IPA expansion is roughly 1.5–2× character count.
+/// 250 chars × 2 = 500 tokens — safely under the 512 limit.
+const MAX_PARAGRAPH_LEN: usize = 250;
+
 /// Split raw PDF page text into clean paragraphs ready for TTS chunking.
 ///
 /// PDF text from PDFium uses `\n` for line endings within a text block and
 /// `\n\n` (or more) for paragraph breaks. Hyphenated line breaks (`word-\n`)
 /// are re-joined into the full word.
+///
+/// Paragraphs longer than MAX_PARAGRAPH_LEN are further split at sentence
+/// boundaries (`. ! ?`) to keep each unit within Kokoro's token limit.
 fn extract_paragraphs(raw: &str) -> Vec<String> {
     // Re-join soft hyphens: "word-\nword" → "wordword"
     let dehyphenated = raw.replace("-\n", "");
 
-    // Split on paragraph boundaries (two or more newlines)
-    dehyphenated
+    // Split on paragraph boundaries (two or more newlines), then collapse
+    // inline newlines within each paragraph.
+    let coarse: Vec<String> = dehyphenated
         .split("\n\n")
         .map(|block| {
-            // Collapse inline newlines and whitespace within a paragraph
             block
                 .lines()
                 .map(str::trim)
@@ -119,5 +127,53 @@ fn extract_paragraphs(raw: &str) -> Vec<String> {
                 .join(" ")
         })
         .filter(|p| p.len() > MIN_PARAGRAPH_LEN)
-        .collect()
+        .collect();
+
+    // Further split paragraphs that are too long for the TTS engine.
+    let mut result = Vec::new();
+    for para in coarse {
+        if para.len() <= MAX_PARAGRAPH_LEN {
+            result.push(para);
+        } else {
+            result.extend(split_at_sentences(&para));
+        }
+    }
+    result
+}
+
+/// Split a long paragraph at sentence boundaries (`. ! ?`), keeping each
+/// piece under MAX_PARAGRAPH_LEN. Falls back to a hard cut if no boundary
+/// is found within the limit.
+fn split_at_sentences(text: &str) -> Vec<String> {
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current = String::new();
+
+    for ch in text.chars() {
+        current.push(ch);
+        let is_sentence_end = matches!(ch, '.' | '!' | '?' | '…');
+        if is_sentence_end && current.len() >= MIN_PARAGRAPH_LEN {
+            let trimmed = current.trim().to_string();
+            if !trimmed.is_empty() {
+                chunks.push(trimmed);
+            }
+            current.clear();
+        } else if current.len() >= MAX_PARAGRAPH_LEN {
+            // No sentence boundary found — hard cut at last space.
+            if let Some(pos) = current.rfind(' ') {
+                let head = current[..pos].trim().to_string();
+                let tail = current[pos + 1..].to_string();
+                if !head.is_empty() {
+                    chunks.push(head);
+                }
+                current = tail;
+            } else {
+                chunks.push(current.trim().to_string());
+                current.clear();
+            }
+        }
+    }
+    if !current.trim().is_empty() {
+        chunks.push(current.trim().to_string());
+    }
+    chunks
 }
