@@ -350,12 +350,12 @@ impl SqliteRuntime {
         if let Some(ref cache_dir) = self.config.tts_cache_dir {
             use sha2::{Digest, Sha256};
             let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
-            let cached_path = cache_dir.join(format!("{hash}.wav"));
+            let cached_path = cache_dir.join(format!("{hash}.flac"));
             if cached_path.exists() {
                 let result = SynthesisResult {
                     provider_name: self.tts.describe_capabilities().provider_name,
                     voice: voice.clone(),
-                    content_type: "audio/wav".to_string(),
+                    content_type: "audio/flac".to_string(),
                     audio_reference: cached_path.display().to_string(),
                     byte_length: cached_path
                         .metadata()
@@ -376,7 +376,7 @@ impl SqliteRuntime {
         if let Some(ref cache_dir) = self.config.tts_cache_dir {
             use sha2::{Digest, Sha256};
             let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
-            let stable_path = cache_dir.join(format!("{hash}.wav"));
+            let stable_path = cache_dir.join(format!("{hash}.flac"));
             if let Err(e) = std::fs::rename(&result.audio_reference, &stable_path) {
                 // rename may fail cross-device; try copy + delete
                 if std::fs::copy(&result.audio_reference, &stable_path).is_ok() {

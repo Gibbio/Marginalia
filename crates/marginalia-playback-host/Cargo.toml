@@ -8,4 +8,4 @@ description = "Host-side playback engine for Marginalia Beta desktop runtimes"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log = "0.4"
 marginalia-core = { path = "../marginalia-core" }
-rodio = { version = "0.19", default-features = false, features = ["wav"] }
+rodio = { version = "0.19", default-features = false, features = ["wav", "flac"] }
