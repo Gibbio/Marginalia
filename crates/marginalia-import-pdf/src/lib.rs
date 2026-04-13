@@ -25,13 +25,16 @@ impl PdfDocumentImporter {
     ///   2. System library path (LD_LIBRARY_PATH / DYLD_LIBRARY_PATH)
     ///
     /// Returns `Err` with a human-readable message if PDFium is not found.
-    pub fn try_new() -> Result<Self, String> {
-        let local = Pdfium::pdfium_platform_library_name_at_path("models/pdf/lib");
-        let bindings = Pdfium::bind_to_library(local)
+    /// Try to load PDFium from an explicit library directory.
+    ///
+    /// `lib_dir` should be an absolute path in production (e.g. next to the
+    /// installed binary). In development, a relative path like `"models/pdf/lib"`
+    /// works when the binary is run from the repo root.
+    pub fn try_new_at(lib_dir: &std::path::Path) -> Result<Self, String> {
+        let candidate = Pdfium::pdfium_platform_library_name_at_path(lib_dir);
+        let bindings = Pdfium::bind_to_library(candidate)
             .or_else(|_| Pdfium::bind_to_system_library())
-            .map_err(|e| {
-                format!("PDFium not found: {e}. Run: make bootstrap-pdf")
-            })?;
+            .map_err(|e| format!("PDFium not found in {}: {e}. Run: make bootstrap-pdf", lib_dir.display()))?;
         Ok(Self {
             pdfium: Pdfium::new(bindings),
         })
@@ -51,7 +54,13 @@ impl DocumentImporter for PdfDocumentImporter {
         let mut sections = Vec::new();
 
         for (i, page) in doc.pages().iter().enumerate() {
-            let raw = page.text().map(|t| t.all()).unwrap_or_default();
+            let raw = match page.text() {
+                Ok(t) => t.all(),
+                Err(e) => {
+                    log::warn!("PDF page {}: text extraction failed: {e}", i + 1);
+                    continue;
+                }
+            };
             let paragraphs = extract_paragraphs(&raw);
 
             if paragraphs.is_empty() {
@@ -84,6 +93,10 @@ impl DocumentImporter for PdfDocumentImporter {
     }
 }
 
+/// Minimum character length for a paragraph to be kept.
+/// Shorter fragments are assumed to be page numbers, running headers, or rule lines.
+const MIN_PARAGRAPH_LEN: usize = 15;
+
 /// Split raw PDF page text into clean paragraphs ready for TTS chunking.
 ///
 /// PDF text from PDFium uses `\n` for line endings within a text block and
@@ -105,7 +118,6 @@ fn extract_paragraphs(raw: &str) -> Vec<String> {
                 .collect::<Vec<_>>()
                 .join(" ")
         })
-        // Drop very short fragments: page numbers, running headers, rule lines
-        .filter(|p| p.len() > 15)
+        .filter(|p| p.len() > MIN_PARAGRAPH_LEN)
         .collect()
 }

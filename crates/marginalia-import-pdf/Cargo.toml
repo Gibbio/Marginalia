@@ -5,6 +5,7 @@ edition = "2021"
 description = "PDF importer for Marginalia — text extraction via PDFium"
 
 [dependencies]
+log = "0.4"
 marginalia-core = { path = "../marginalia-core" }
 # pdfium-render: Rust bindings to Google PDFium (dynamic loading, no compile-time dep).
 # Requires libpdfium.dylib/.so at runtime — run: make bootstrap-pdf

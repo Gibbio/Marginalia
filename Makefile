@@ -333,9 +333,20 @@ bootstrap-pdf:
 		exit 0; \
 	fi; \
 	mkdir -p "$$LIB_DIR"; \
-	URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F$(PDFIUM_VERSION)/$$ARCHIVE"; \
+	BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F$(PDFIUM_VERSION)"; \
 	echo "Downloading PDFium $(PDFIUM_VERSION) for $$OS $$ARCH..."; \
-	curl -fL --progress-bar "$$URL" | tar -xz -C "$(PDFIUM_DIR)"; \
+	TMP_ARCHIVE="$(PDFIUM_DIR)/$$ARCHIVE"; \
+	curl -fL --progress-bar -o "$$TMP_ARCHIVE" "$$BASE_URL/$$ARCHIVE"; \
+	echo "Verifying checksum..."; \
+	EXPECTED=$$(curl -fsSL "$$BASE_URL/$$ARCHIVE.sha256" | awk '{print $$1}'); \
+	ACTUAL=$$(shasum -a 256 "$$TMP_ARCHIVE" | awk '{print $$1}'); \
+	if [ "$$EXPECTED" != "$$ACTUAL" ]; then \
+		echo "[FAIL] SHA-256 mismatch! expected=$$EXPECTED got=$$ACTUAL"; \
+		rm -f "$$TMP_ARCHIVE"; exit 1; \
+	fi; \
+	echo "[OK] Checksum verified."; \
+	tar -xz -C "$(PDFIUM_DIR)" -f "$$TMP_ARCHIVE"; \
+	rm -f "$$TMP_ARCHIVE"; \
 	echo ""; \
 	if [ -f "$$LIB_DIR/$$LIBNAME" ]; then \
 		echo "[OK] PDFium ready at $$LIB_DIR/$$LIBNAME"; \

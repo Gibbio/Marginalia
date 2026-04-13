@@ -23,6 +23,7 @@ use marginalia_core::ports::{
     TopicSummarizer,
 };
 use marginalia_core::ports::{DocumentImportError, DocumentImporter};
+#[cfg(feature = "pdf-import")]
 use marginalia_import_pdf::PdfDocumentImporter;
 use marginalia_import_text::TextDocumentImporter;
 use marginalia_provider_fake::{
@@ -45,10 +46,11 @@ pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
 pub use marginalia_core::ports::SttEngineOutput;
 
 /// Routes import requests to the right backend by file extension.
-/// PDF support is optional — if PDFium is not installed, `.pdf` files
-/// return `UnsupportedFormat` with a clear error message.
+/// PDF support is optional — if the `pdf-import` feature is disabled or PDFium
+/// is not installed, `.pdf` files return a clear error message.
 struct DispatchImporter {
     text: TextDocumentImporter,
+    #[cfg(feature = "pdf-import")]
     pdf: Option<PdfDocumentImporter>,
 }
 
@@ -60,6 +62,7 @@ impl DocumentImporter for DispatchImporter {
             .map(|e| e.to_ascii_lowercase());
 
         match ext.as_deref() {
+            #[cfg(feature = "pdf-import")]
             Some("pdf") => match &self.pdf {
                 Some(pdf) => pdf.import_path(source_path),
                 None => Err(DocumentImportError::ReadFailed {
@@ -72,19 +75,28 @@ impl DocumentImporter for DispatchImporter {
     }
 }
 
-fn build_dispatch_importer() -> DispatchImporter {
-    let pdf = match PdfDocumentImporter::try_new() {
-        Ok(p) => {
-            log::info!("PDF import: PDFium loaded — .pdf files supported");
-            Some(p)
-        }
-        Err(e) => {
-            log::warn!("PDF import unavailable: {e}");
-            None
+/// Build the importer dispatcher.
+/// `pdfium_lib_dir`: explicit path to the directory containing libpdfium.dylib/.so.
+/// Pass `None` to fall back to `models/pdf/lib` (relative to CWD, dev-only).
+fn build_dispatch_importer(pdfium_lib_dir: Option<&std::path::Path>) -> DispatchImporter {
+    #[cfg(feature = "pdf-import")]
+    let pdf = {
+        let default_dir = std::path::Path::new("models/pdf/lib");
+        let lib_dir = pdfium_lib_dir.unwrap_or(default_dir);
+        match PdfDocumentImporter::try_new_at(lib_dir) {
+            Ok(p) => {
+                log::info!("PDF import: PDFium loaded — .pdf files supported");
+                Some(p)
+            }
+            Err(e) => {
+                log::warn!("PDF import unavailable: {e}");
+                None
+            }
         }
     };
     DispatchImporter {
         text: TextDocumentImporter,
+        #[cfg(feature = "pdf-import")]
         pdf,
     }
 }
@@ -290,7 +302,7 @@ impl SqliteRuntime {
             session_repository: SQLiteSessionRepository::new(connection.clone()),
             note_repository: SQLiteNoteRepository::new(connection.clone()),
             draft_repository: SQLiteRewriteDraftRepository::new(connection),
-            importer: build_dispatch_importer(),
+            importer: build_dispatch_importer(None),
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
@@ -324,7 +336,7 @@ impl SqliteRuntime {
             session_repository: SQLiteSessionRepository::new(connection.clone()),
             note_repository: SQLiteNoteRepository::new(connection.clone()),
             draft_repository: SQLiteRewriteDraftRepository::new(connection),
-            importer: build_dispatch_importer(),
+            importer: build_dispatch_importer(None),
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
