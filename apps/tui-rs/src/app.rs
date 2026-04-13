@@ -962,7 +962,7 @@ fn is_ingestable_extension(path: &Path) -> bool {
         .is_some_and(|extension| {
             matches!(
                 extension.to_ascii_lowercase().as_str(),
-                "md" | "markdown" | "txt"
+                "md" | "markdown" | "txt" | "pdf"
             )
         })
 }

@@ -333,18 +333,19 @@ bootstrap-pdf:
 		exit 0; \
 	fi; \
 	mkdir -p "$$LIB_DIR"; \
-	BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F$(PDFIUM_VERSION)"; \
+	BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/$(PDFIUM_VERSION)"; \
 	echo "Downloading PDFium $(PDFIUM_VERSION) for $$OS $$ARCH..."; \
 	TMP_ARCHIVE="$(PDFIUM_DIR)/$$ARCHIVE"; \
 	curl -fL --progress-bar -o "$$TMP_ARCHIVE" "$$BASE_URL/$$ARCHIVE"; \
-	echo "Verifying checksum..."; \
-	EXPECTED=$$(curl -fsSL "$$BASE_URL/$$ARCHIVE.sha256" | awk '{print $$1}'); \
-	ACTUAL=$$(shasum -a 256 "$$TMP_ARCHIVE" | awk '{print $$1}'); \
-	if [ "$$EXPECTED" != "$$ACTUAL" ]; then \
-		echo "[FAIL] SHA-256 mismatch! expected=$$EXPECTED got=$$ACTUAL"; \
-		rm -f "$$TMP_ARCHIVE"; exit 1; \
+	echo "Verifying integrity..."; \
+	if command -v gh >/dev/null 2>&1; then \
+		gh attestation verify "$$TMP_ARCHIVE" --repo bblanchon/pdfium-binaries \
+			&& echo "[OK] GitHub attestation verified." \
+			|| { echo "[FAIL] Attestation failed — aborting."; rm -f "$$TMP_ARCHIVE"; exit 1; }; \
+	else \
+		echo "[WARN] gh CLI not found — skipping attestation. SHA-256: $$(shasum -a 256 "$$TMP_ARCHIVE" | awk '{print $$1}')"; \
+		echo "       Install gh (brew install gh) for cryptographic verification."; \
 	fi; \
-	echo "[OK] Checksum verified."; \
 	tar -xz -C "$(PDFIUM_DIR)" -f "$$TMP_ARCHIVE"; \
 	rm -f "$$TMP_ARCHIVE"; \
 	echo ""; \
