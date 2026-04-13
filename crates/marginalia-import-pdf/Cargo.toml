@@ -1,0 +1,13 @@
+[package]
+name = "marginalia-import-pdf"
+version = "0.1.0"
+edition = "2021"
+description = "PDF importer for Marginalia — text extraction via PDFium"
+
+[dependencies]
+marginalia-core = { path = "../marginalia-core" }
+# pdfium-render: Rust bindings to Google PDFium (dynamic loading, no compile-time dep).
+# Requires libpdfium.dylib/.so at runtime — run: make bootstrap-pdf
+# Source: https://github.com/ajrcarey/pdfium-render
+# Binaries: https://github.com/bblanchon/pdfium-binaries
+pdfium-render = { version = "0.9", default-features = false, features = ["pdfium_latest", "thread_safe"] }

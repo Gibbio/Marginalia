@@ -22,6 +22,8 @@ use marginalia_core::ports::{
     SpeechInterruptMonitor, SpeechSynthesizer, SynthesisError, SynthesisRequest, SynthesisResult,
     TopicSummarizer,
 };
+use marginalia_core::ports::{DocumentImportError, DocumentImporter};
+use marginalia_import_pdf::PdfDocumentImporter;
 use marginalia_import_text::TextDocumentImporter;
 use marginalia_provider_fake::{
     FakeCommandRecognizer, FakeDictationTranscriber, FakePlaybackEngine, FakeRewriteGenerator,
@@ -41,6 +43,51 @@ pub use builder::{BuildOutput, RuntimeBuilder, RuntimeSidecar};
 pub use events::{EventCallback, RuntimeEvent, RuntimeEventSink};
 pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
 pub use marginalia_core::ports::SttEngineOutput;
+
+/// Routes import requests to the right backend by file extension.
+/// PDF support is optional — if PDFium is not installed, `.pdf` files
+/// return `UnsupportedFormat` with a clear error message.
+struct DispatchImporter {
+    text: TextDocumentImporter,
+    pdf: Option<PdfDocumentImporter>,
+}
+
+impl DocumentImporter for DispatchImporter {
+    fn import_path(&self, source_path: &Path) -> Result<marginalia_core::domain::ImportedDocument, DocumentImportError> {
+        let ext = source_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+
+        match ext.as_deref() {
+            Some("pdf") => match &self.pdf {
+                Some(pdf) => pdf.import_path(source_path),
+                None => Err(DocumentImportError::ReadFailed {
+                    source_path: source_path.to_path_buf(),
+                    message: "PDF support not available. Run: make bootstrap-pdf".to_string(),
+                }),
+            },
+            _ => self.text.import_path(source_path),
+        }
+    }
+}
+
+fn build_dispatch_importer() -> DispatchImporter {
+    let pdf = match PdfDocumentImporter::try_new() {
+        Ok(p) => {
+            log::info!("PDF import: PDFium loaded — .pdf files supported");
+            Some(p)
+        }
+        Err(e) => {
+            log::warn!("PDF import unavailable: {e}");
+            None
+        }
+    };
+    DispatchImporter {
+        text: TextDocumentImporter,
+        pdf,
+    }
+}
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -127,7 +174,7 @@ pub struct SqliteRuntime {
     session_repository: SQLiteSessionRepository,
     note_repository: SQLiteNoteRepository,
     draft_repository: SQLiteRewriteDraftRepository,
-    importer: TextDocumentImporter,
+    importer: DispatchImporter,
     event_publisher: RecordingEventPublisher,
     playback_engine: Box<dyn PlaybackEngine + Send>,
     tts: Box<dyn SpeechSynthesizer + Send>,
@@ -243,7 +290,7 @@ impl SqliteRuntime {
             session_repository: SQLiteSessionRepository::new(connection.clone()),
             note_repository: SQLiteNoteRepository::new(connection.clone()),
             draft_repository: SQLiteRewriteDraftRepository::new(connection),
-            importer: TextDocumentImporter,
+            importer: build_dispatch_importer(),
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
@@ -277,7 +324,7 @@ impl SqliteRuntime {
             session_repository: SQLiteSessionRepository::new(connection.clone()),
             note_repository: SQLiteNoteRepository::new(connection.clone()),
             draft_repository: SQLiteRewriteDraftRepository::new(connection),
-            importer: TextDocumentImporter,
+            importer: build_dispatch_importer(),
             event_publisher: RecordingEventPublisher::new(),
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),

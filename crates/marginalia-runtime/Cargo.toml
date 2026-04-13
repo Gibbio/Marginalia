@@ -18,6 +18,7 @@ log = "0.4"
 marginalia-config = { path = "../marginalia-config" }
 marginalia-core = { path = "../marginalia-core" }
 marginalia-import-text = { path = "../marginalia-import-text" }
+marginalia-import-pdf = { path = "../marginalia-import-pdf" }
 marginalia-playback-host = { path = "../marginalia-playback-host", optional = true }
 marginalia-provider-fake = { path = "../marginalia-provider-fake" }
 marginalia-stt-apple = { path = "../marginalia-stt-apple", optional = true }
