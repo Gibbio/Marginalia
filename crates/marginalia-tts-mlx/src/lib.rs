@@ -113,12 +113,12 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
         audio.eval().map_err(|e| err(format!("eval failed: {e}")))?;
         let samples: &[f32] = audio.as_slice();
 
-        // Write WAV
+        // Write FLAC
         let n = AUDIO_COUNTER.fetch_add(1, Ordering::Relaxed);
         let voice = request.voice.as_deref().unwrap_or(&self.default_voice);
-        let wav_path = self.output_dir.join(format!("mlx-{voice}-{n}.wav"));
-        write_wav_16(&wav_path, 24000, samples)
-            .map_err(|e| err(format!("failed to write WAV: {e}")))?;
+        let wav_path = self.output_dir.join(format!("mlx-{voice}-{n}.flac"));
+        write_flac_16(&wav_path, 24000, samples)
+            .map_err(|e| err(format!("failed to write FLAC: {e}")))?;
 
         // WAV is on disk — now release all MLX caches. This frees the Metal
         // buffer pool and the JIT compilation cache. The audio Array (and its
@@ -137,7 +137,7 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
         Ok(SynthesisResult {
             provider_name: "kokoro-mlx".to_string(),
             voice: voice.to_string(),
-            content_type: "audio/wav".to_string(),
+            content_type: "audio/flac".to_string(),
             audio_reference: wav_path.display().to_string(),
             byte_length,
             text_excerpt,
@@ -245,25 +245,31 @@ fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
     Ok(clean_ipa(raw.trim()))
 }
 
-fn write_wav_16(path: &Path, sample_rate: u32, samples: &[f32]) -> std::io::Result<()> {
-    let data_size = samples.len() * 2;
-    let mut bytes = Vec::with_capacity(44 + data_size);
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + data_size as u32).to_le_bytes());
-    bytes.extend_from_slice(b"WAVE");
-    bytes.extend_from_slice(b"fmt ");
-    bytes.extend_from_slice(&16u32.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
-    bytes.extend_from_slice(&sample_rate.to_le_bytes());
-    bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes());
-    bytes.extend_from_slice(&2u16.to_le_bytes());
-    bytes.extend_from_slice(&16u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&(data_size as u32).to_le_bytes());
-    for &s in samples {
-        let pcm = (s.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
-        bytes.extend_from_slice(&pcm.to_le_bytes());
-    }
-    fs::write(path, bytes)
+fn write_flac_16(path: &Path, sample_rate: u32, samples: &[f32]) -> std::io::Result<()> {
+    use flacenc::bitsink::ByteSink;
+    use flacenc::component::BitRepr;
+    use flacenc::error::Verify;
+    use flacenc::source::MemSource;
+
+    let pcm: Vec<i32> = samples
+        .iter()
+        .map(|s| (s.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i32)
+        .collect();
+
+    let source = MemSource::from_samples(&pcm, 1, 16, sample_rate as usize);
+
+    let config = flacenc::config::Encoder::default()
+        .into_verified()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+
+    let block_size = config.block_size;
+    let stream = flacenc::encode_with_fixed_block_size(&config, source, block_size)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+
+    let mut sink = ByteSink::new();
+    stream
+        .write(&mut sink)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+
+    fs::write(path, sink.as_slice())
 }
