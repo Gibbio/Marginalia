@@ -313,3 +313,24 @@ The per-platform evaluation matrix lives in NEXT.md.
 - Don't drop the `AecPipeline` — it holds the `cpal::Stream` that keeps the
   mic open. It's `Box::leak`ed in `backend.rs` because `cpal::Stream` is
   `!Send` and can't be stored in `BackendClient` (behind `Arc<Mutex>`).
+
+## Code review workflow
+
+**Before every `git push`**, spawn a code review agent using the Agent tool:
+
+- **Review model**: `claude-opus-4-6` (change this line to use a different model)
+- **Writing model**: current session model (Sonnet by default)
+
+The review agent must:
+1. Run `git diff origin/<branch>...HEAD` to see all commits being pushed
+2. Check for: bugs, security issues, violations of the rules in this file,
+   broken hexagonal architecture boundaries, missing error handling at system
+   boundaries, regressions vs existing tests
+3. Report **blocking issues** (must fix before push) and **suggestions** (optional)
+4. Give a verdict: `APPROVED` or `NEEDS WORK`
+
+If `NEEDS WORK`: present the issues, do not push, wait for the user to decide.
+If `APPROVED`: proceed with push.
+
+Use `/review-push` to trigger this manually at any time.
+To override the model: `/review-push sonnet` or `/review-push haiku`.

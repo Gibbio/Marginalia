@@ -5,12 +5,13 @@ edition = "2021"
 description = "Host-neutral runtime composition for the Marginalia Beta engine"
 
 [features]
-default = []
+default = ["pdf-import"]
 apple-stt = ["dep:marginalia-stt-apple"]
 whisper-stt = ["dep:marginalia-stt-whisper"]
 whisper-stt-metal = ["whisper-stt", "marginalia-stt-whisper/metal"]
 mlx-tts = ["dep:marginalia-tts-mlx"]
 host-playback = ["dep:marginalia-playback-host"]
+pdf-import = ["dep:marginalia-import-pdf"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -18,7 +19,7 @@ log = "0.4"
 marginalia-config = { path = "../marginalia-config" }
 marginalia-core = { path = "../marginalia-core" }
 marginalia-import-text = { path = "../marginalia-import-text" }
-marginalia-import-pdf = { path = "../marginalia-import-pdf" }
+marginalia-import-pdf = { path = "../marginalia-import-pdf", optional = true }
 marginalia-playback-host = { path = "../marginalia-playback-host", optional = true }
 marginalia-provider-fake = { path = "../marginalia-provider-fake" }
 marginalia-stt-apple = { path = "../marginalia-stt-apple", optional = true }
