@@ -1,4 +1,4 @@
-use crate::domain::{build_document_from_import, Document};
+use crate::domain::{build_document_from_import, Document, ImportedDocument};
 use crate::events::{DomainEvent, EventName};
 use crate::ports::events::EventPublisher;
 use crate::ports::storage::{DocumentRepository, StorageError};
@@ -104,6 +104,16 @@ where
         source_path: &Path,
     ) -> Result<DocumentIngestionOutcome, IngestionError> {
         let imported = self.importer.import_path(source_path)?;
+        self.ingest_imported(imported)
+    }
+
+    /// Persist an already-parsed `ImportedDocument` and publish the ingestion
+    /// event. Bypasses the `DocumentImporter` trait for sources that don't fit
+    /// the path-based model (e.g. web URLs).
+    pub fn ingest_imported(
+        &mut self,
+        imported: ImportedDocument,
+    ) -> Result<DocumentIngestionOutcome, IngestionError> {
         let raw_char_count = imported.canonical_text().chars().count();
         let document = build_document_from_import(imported, self.chunk_target_chars);
         let already_present = self

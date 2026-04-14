@@ -36,6 +36,7 @@ impl SqliteRuntime {
             commands: vec![
                 "create_note",
                 "ingest_document",
+                "ingest_url",
                 "next_chunk",
                 "next_chapter",
                 "pause_session",
@@ -200,6 +201,24 @@ impl SqliteRuntime {
                 match self.ingest_path(Path::new(path)) {
                     Ok(outcome) => ok_response(
                         "Document ingested into local SQLite storage.",
+                        json!({
+                            "document": {
+                                "document_id": outcome.document.document_id,
+                                "title": outcome.document.title,
+                            }
+                        }),
+                    ),
+                    Err(err) => error_response(err.to_string()),
+                }
+            }
+            #[cfg(feature = "url-import")]
+            "ingest_url" => {
+                let Some(url) = payload.get("url").and_then(Value::as_str) else {
+                    return error_response("ingest_url requires a url.".to_string());
+                };
+                match self.ingest_url(url) {
+                    Ok(outcome) => ok_response(
+                        "Web article ingested into local SQLite storage.",
                         json!({
                             "document": {
                                 "document_id": outcome.document.document_id,

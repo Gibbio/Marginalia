@@ -154,6 +154,20 @@ impl BackendClient {
         })
     }
 
+    pub fn ingest_url(&mut self, url: &str) -> Result<IngestDocumentResult, String> {
+        let response = self.command_response("ingest_url", json!({ "url": url }))?;
+        let document_id = response
+            .payload
+            .get("document")
+            .and_then(|document| document.get("document_id"))
+            .and_then(|document_id| document_id.as_str())
+            .map(ToString::to_string);
+        Ok(IngestDocumentResult {
+            message: response.message,
+            document_id,
+        })
+    }
+
     /// Dispatch start_session to a background thread. Returns immediately.
     pub fn start_session_async(&mut self, target: &str) {
         self.send_async("start_session", json!({"target": target}));
