@@ -267,23 +267,13 @@ fn phonemize(text: &str, language: &str) -> Result<Vec<String>, String> {
 /// - Curly quotes normalized
 /// - Multiple spaces collapsed
 fn normalize_pauses(text: &str) -> String {
-    text.replace('(', ", ")
-        .replace(')', ", ")
-        .replace('[', ", ")
-        .replace(']', ", ")
-        .replace('{', ", ")
-        .replace('}', ", ")
+    text.replace(['(', ')', '[', ']', '{', '}'], ", ")
         .replace(" — ", ", ")
         .replace(" – ", ", ")
         .replace("--", ", ")
         .replace("\",", "…") // closing quote + comma → ellipsis (longer pause)
-        .replace('"', ", ") // other quotes → comma pause
-        .replace('\u{201C}', ", ") // left double quote "
-        .replace('\u{201D}', ", ") // right double quote "
-        .replace('\u{00AB}', ", ") // «
-        .replace('\u{00BB}', ", ") // »
-        .replace('\u{2018}', "'") // left single quote
-        .replace('\u{2019}', "'") // right single quote
+        .replace(['"', '\u{201C}', '\u{201D}', '\u{00AB}', '\u{00BB}'], ", ") // »
+        .replace(['\u{2018}', '\u{2019}'], "'") // right single quote
         .replace("  ", " ")
         .replace(", ,", ",")
         .replace(",,", ",")
@@ -301,10 +291,7 @@ fn is_clause_punct(c: char) -> bool {
 /// Clean espeak IPA output to match Kokoro's expected phoneme format.
 /// Based on misaki's post-processing rules.
 fn clean_ipa(ipa: &str) -> String {
-    ipa.replace('^', "") // tie character
-        .replace('\u{0329}', "") // combining vertical line below
-        .replace('\u{032A}', "") // combining bridge below
-        .replace('-', "") // hyphens in IPA
+    ipa.replace(['^', '\u{0329}', '\u{032A}', '-'], "") // hyphens in IPA
 }
 
 fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
@@ -329,16 +316,16 @@ fn write_flac_16(path: &Path, sample_rate: u32, samples: &[f32]) -> std::io::Res
 
     let config = flacenc::config::Encoder::default()
         .into_verified()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
 
     let block_size = config.block_size;
     let stream = flacenc::encode_with_fixed_block_size(&config, source, block_size)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
 
     let mut sink = ByteSink::new();
     stream
         .write(&mut sink)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
 
     fs::write(path, sink.as_slice())
 }

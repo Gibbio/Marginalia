@@ -128,7 +128,7 @@ impl AppleHelperShared {
         let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 samples.as_ptr() as *const u8,
-                samples.len() * std::mem::size_of::<f32>(),
+                std::mem::size_of_val(samples),
             )
         };
         self.write_frame(FRAME_AUDIO, bytes)
@@ -228,10 +228,8 @@ pub fn new_apple_stt(
                 if dict_tx.send(rest.to_string()).is_err() {
                     break;
                 }
-            } else if trimmed == "DICT_END" {
-                if dict_tx.send(String::new()).is_err() {
-                    break;
-                }
+            } else if trimmed == "DICT_END" && dict_tx.send(String::new()).is_err() {
+                break;
             }
         }
     });
