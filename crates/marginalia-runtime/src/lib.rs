@@ -23,6 +23,8 @@ use marginalia_core::ports::{
     TopicSummarizer,
 };
 use marginalia_core::ports::{DocumentImportError, DocumentImporter};
+#[cfg(feature = "epub-import")]
+use marginalia_import_epub::EpubDocumentImporter;
 #[cfg(feature = "pdf-import")]
 use marginalia_import_pdf::PdfDocumentImporter;
 use marginalia_import_text::TextDocumentImporter;
@@ -46,12 +48,18 @@ pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
 pub use marginalia_core::ports::SttEngineOutput;
 
 /// Routes import requests to the right backend by file extension.
-/// PDF support is optional — if the `pdf-import` feature is disabled or PDFium
-/// is not installed, `.pdf` files return a clear error message.
+///
+/// - `.pdf` → `PdfDocumentImporter` (requires PDFium binary — optional
+///   feature `pdf-import`, defaults to on).
+/// - `.epub` → `EpubDocumentImporter` (pure-Rust — optional feature
+///   `epub-import`, defaults to on).
+/// - anything else → `TextDocumentImporter` (plain text / markdown).
 struct DispatchImporter {
     text: TextDocumentImporter,
     #[cfg(feature = "pdf-import")]
     pdf: Option<PdfDocumentImporter>,
+    #[cfg(feature = "epub-import")]
+    epub: EpubDocumentImporter,
 }
 
 impl DocumentImporter for DispatchImporter {
@@ -70,6 +78,8 @@ impl DocumentImporter for DispatchImporter {
                     message: "PDF support not available. Run: make bootstrap-pdf".to_string(),
                 }),
             },
+            #[cfg(feature = "epub-import")]
+            Some("epub") => self.epub.import_path(source_path),
             _ => self.text.import_path(source_path),
         }
     }
@@ -98,6 +108,8 @@ fn build_dispatch_importer(pdfium_lib_dir: Option<&std::path::Path>) -> Dispatch
         text: TextDocumentImporter,
         #[cfg(feature = "pdf-import")]
         pdf,
+        #[cfg(feature = "epub-import")]
+        epub: EpubDocumentImporter::new(),
     }
 }
 

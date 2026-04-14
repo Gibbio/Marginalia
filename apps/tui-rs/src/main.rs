@@ -678,7 +678,7 @@ fn render_document_lines(app: &App, content_width: usize) -> (Vec<Line<'static>>
         return (
             vec![
                 Line::from("No ingested document selected.".to_string()),
-                Line::from("Use /ingest <path> to load a document (.md, .txt, .pdf).".to_string()),
+                Line::from("Use /ingest <path> to load a document (.md, .txt, .pdf, .epub).".to_string()),
             ],
             None,
         );

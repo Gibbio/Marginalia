@@ -16,6 +16,8 @@ crates/
   marginalia-runtime/       Orchestrates core + storage + providers
   marginalia-storage-sqlite/ SQLite persistence
   marginalia-import-text/   Text/Markdown importer with chunking
+  marginalia-import-pdf/    PDF importer via PDFium (requires models/pdf/lib)
+  marginalia-import-epub/   EPUB 2/3 importer via `epub` crate (pure Rust)
   marginalia-tts-mlx/       Kokoro TTS via MLX Metal GPU (macOS Apple Silicon)
   marginalia-tts-kokoro/    Kokoro TTS via ONNX Runtime (cross-platform fallback)
   marginalia-stt-apple/     Apple SFSpeechRecognizer via Swift helper (macOS)

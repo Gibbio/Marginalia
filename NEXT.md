@@ -46,7 +46,8 @@ release tag yet — accumulating for v0.1.1.
 | Area | Task | Notes |
 |------|------|-------|
 | Import | PDF via `marginalia-import-pdf` (pdfium-render) | `make bootstrap-pdf` downloads binaries; install verified with `gh attestation verify` |
-| Runtime | `DispatchImporter` routes by file extension | `.pdf` → pdf importer, everything else → text importer — selected at construction, transparent to callers |
+| Import | EPUB 2/3 via `marginalia-import-epub` (`epub` + `scraper`) | Pure-Rust (no native deps); maps spine items to sections, pulls chapter titles from TOC, extracts block-level text |
+| Runtime | `DispatchImporter` routes by file extension | `.pdf` → pdf importer, `.epub` → epub importer, everything else → text importer — selected at construction, transparent to callers |
 | Storage | TTS cache switched to FLAC 16-bit | ~50% smaller than WAV, lossless; rodio decodes via `flac` feature |
 | Chunking | `merge_fragments` prefers sentence boundaries | No more mid-sentence audio cuts; falls back to hard cut only when no `. ! ?` fits in the phoneme budget |
 | Playback | Prefetch cascade on auto-advance | Every chunk transition pre-synthesizes the next chunk, eliminating the inter-chunk gap during continuous reading |
@@ -98,7 +99,6 @@ release tag yet — accumulating for v0.1.1.
 ## Medium term
 
 ### Import formats
-- [ ] **EPUB** (structured chapters + metadata).
 - [ ] **URL import** (web scraping, reader mode extraction).
 - [ ] **Markdown with images**: skip images, read alt text.
 
