@@ -16,8 +16,8 @@ impl log::Log for AppLogger {
         }
         let level = match record.level() {
             log::Level::Error => "ERROR",
-            log::Level::Warn  => "WARN",
-            log::Level::Info  => "INFO",
+            log::Level::Warn => "WARN",
+            log::Level::Info => "INFO",
             log::Level::Debug => "DEBUG",
             log::Level::Trace => "TRACE",
         };

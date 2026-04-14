@@ -6,11 +6,13 @@
 
 use crate::{RuntimeConfig, SqliteRuntime};
 
-#[cfg(feature = "apple-stt")]
-pub use marginalia_stt_apple::aec_pipeline::WaveformData;
 use marginalia_config::{
     KokoroSection, MlxSection, PlaybackSection, SttSection, VoiceCommandsSection,
 };
+#[cfg(feature = "apple-stt")]
+pub use marginalia_stt_apple::aec_pipeline::WaveformData;
+// `json!` is only used inside apple-stt / whisper-stt blocks.
+#[cfg(any(feature = "apple-stt", feature = "whisper-stt"))]
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -19,11 +21,8 @@ use std::path::{Path, PathBuf};
 pub struct RuntimeSidecar {
     /// Shared waveform data for AEC visualization (Apple STT only).
     #[cfg(feature = "apple-stt")]
-    pub waveform_data: Option<
-        std::sync::Arc<
-            std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>,
-        >,
-    >,
+    pub waveform_data:
+        Option<std::sync::Arc<std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>>>,
     #[cfg(not(feature = "apple-stt"))]
     _private: (),
 }
@@ -154,8 +153,7 @@ impl RuntimeBuilder {
         #[allow(unused_variables)]
         let kokoro = &self.kokoro;
         if let Some(assets_root) = &kokoro.assets_root {
-            let kokoro_config =
-                marginalia_tts_kokoro::KokoroConfig::from_assets_root(assets_root);
+            let kokoro_config = marginalia_tts_kokoro::KokoroConfig::from_assets_root(assets_root);
             let readiness = kokoro_config.readiness_report();
             if readiness.is_ready() {
                 let synth_config =
@@ -185,10 +183,7 @@ impl RuntimeBuilder {
                         text_processor,
                     )
                 } else {
-                    marginalia_tts_kokoro::KokoroSpeechSynthesizer::new(
-                        kokoro_config,
-                        synth_config,
-                    )
+                    marginalia_tts_kokoro::KokoroSpeechSynthesizer::new(kokoro_config, synth_config)
                 };
                 runtime.set_speech_synthesizer(synthesizer);
                 tts_label = "kokoro";
@@ -220,9 +215,7 @@ impl RuntimeBuilder {
         let mut dictation_label = "fake";
         #[cfg(feature = "apple-stt")]
         let mut _waveform_data: Option<
-            std::sync::Arc<
-                std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>,
-            >,
+            std::sync::Arc<std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>>,
         > = None;
 
         let stt_engine = self.stt.engine.to_lowercase();
@@ -256,8 +249,7 @@ impl RuntimeBuilder {
                         if let Some(ref mut pe) = playback_engine {
                             pe.set_play_samples_callback(Box::new(move |samples| {
                                 use marginalia_stt_apple::aec_pipeline::RenderCommand;
-                                let _ =
-                                    render_tx.try_send(RenderCommand::SetReference(samples));
+                                let _ = render_tx.try_send(RenderCommand::SetReference(samples));
                             }));
                         }
                         _waveform_data = Some(aec_pipeline.waveform_data());
@@ -312,8 +304,7 @@ impl RuntimeBuilder {
                     cmd_cfg.speech_threshold = v;
                 }
                 let cmd_commands = self.voice_commands.all_words();
-                let whisper_cmd_rec =
-                    WhisperCommandRecognizer::new(cmd_cfg, cmd_commands);
+                let whisper_cmd_rec = WhisperCommandRecognizer::new(cmd_cfg, cmd_commands);
 
                 let mut dict_cfg = WhisperConfig::new(&model_path);
                 dict_cfg.language = language;
@@ -348,9 +339,7 @@ impl RuntimeBuilder {
             #[cfg(not(feature = "whisper-stt"))]
             log::warn!("[stt] engine=whisper but whisper-stt feature is not built in");
         } else {
-            log::error!(
-                "[stt] unknown engine '{stt_engine}' — valid: \"apple\", \"whisper\""
-            );
+            log::error!("[stt] unknown engine '{stt_engine}' — valid: \"apple\", \"whisper\"");
         }
 
         // ── Hand playback to runtime ──

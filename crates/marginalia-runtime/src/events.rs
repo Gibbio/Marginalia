@@ -38,6 +38,7 @@ pub enum RuntimeEvent {
 
 pub type EventCallback = Box<dyn Fn(&RuntimeEvent) + Send + Sync>;
 
+#[derive(Default)]
 pub struct RuntimeEventSink {
     channels: Vec<mpsc::Sender<RuntimeEvent>>,
     callbacks: Vec<EventCallback>,
@@ -45,10 +46,7 @@ pub struct RuntimeEventSink {
 
 impl RuntimeEventSink {
     pub fn new() -> Self {
-        Self {
-            channels: Vec::new(),
-            callbacks: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn subscribe_channel(&mut self) -> mpsc::Receiver<RuntimeEvent> {

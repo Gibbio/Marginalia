@@ -11,7 +11,6 @@ use marginalia_core::domain::{
     DEFAULT_CHUNK_TARGET_CHARS,
 };
 use marginalia_core::events::{DomainEvent, EventName};
-use std::path::PathBuf;
 use marginalia_core::frontend::{
     AppSnapshot, DocumentChunkView, DocumentListItem, DocumentSectionView, DocumentView,
     SessionSnapshot,
@@ -42,6 +41,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use builder::{BuildOutput, RuntimeBuilder, RuntimeSidecar};
@@ -65,7 +65,10 @@ struct DispatchImporter {
 }
 
 impl DocumentImporter for DispatchImporter {
-    fn import_path(&self, source_path: &Path) -> Result<marginalia_core::domain::ImportedDocument, DocumentImportError> {
+    fn import_path(
+        &self,
+        source_path: &Path,
+    ) -> Result<marginalia_core::domain::ImportedDocument, DocumentImportError> {
         let ext = source_path
             .extension()
             .and_then(|e| e.to_str())
@@ -490,10 +493,7 @@ impl SqliteRuntime {
     /// persist it as a single-section document. Short URLs are resolved
     /// transparently via HTTP redirect following.
     #[cfg(feature = "url-import")]
-    pub fn ingest_url(
-        &mut self,
-        url: &str,
-    ) -> Result<DocumentIngestionOutcome, IngestionError> {
+    pub fn ingest_url(&mut self, url: &str) -> Result<DocumentIngestionOutcome, IngestionError> {
         // A fresh importer per call: ureq::Agent construction is microseconds
         // and URL ingestion is a low-frequency user-driven action. Avoids
         // holding a long-lived TCP pool inside the runtime struct.
@@ -757,7 +757,8 @@ impl SqliteRuntime {
         if let Err(e) = self.session_repository.save_session(session) {
             log::warn!("failed to save session: {e}");
         }
-        self.event_sink.emit(RuntimeEvent::SessionStopped { document_id });
+        self.event_sink
+            .emit(RuntimeEvent::SessionStopped { document_id });
         Ok(())
     }
 
@@ -1277,10 +1278,7 @@ mod tests {
 
         runtime.stop_session().unwrap();
         let stopped = runtime.session_snapshot();
-        assert!(
-            stopped.unwrap().is_none(),
-            "no active session after stop"
-        );
+        assert!(stopped.unwrap().is_none(), "no active session after stop");
 
         let _ = fs::remove_file(path);
     }
@@ -1288,11 +1286,7 @@ mod tests {
     #[test]
     fn sqlite_runtime_restore_session() {
         let path = temp_path("md");
-        fs::write(
-            &path,
-            "Alpha beta gamma delta epsilon zeta eta theta.",
-        )
-        .unwrap();
+        fs::write(&path, "Alpha beta gamma delta epsilon zeta eta theta.").unwrap();
 
         let mut runtime = SqliteRuntime::open_in_memory_with_config(super::RuntimeConfig {
             chunk_target_chars: 20,
@@ -1356,10 +1350,7 @@ mod tests {
 
         // 5. Pause + resume
         runtime.pause_session().unwrap();
-        assert_eq!(
-            runtime.session_snapshot().unwrap().unwrap().state,
-            "paused"
-        );
+        assert_eq!(runtime.session_snapshot().unwrap().unwrap().state, "paused");
         runtime.resume_session().unwrap();
         assert_eq!(
             runtime.session_snapshot().unwrap().unwrap().state,

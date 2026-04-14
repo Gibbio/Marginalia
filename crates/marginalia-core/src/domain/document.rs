@@ -341,10 +341,7 @@ fn split_at_sentences(text: &str, base_offset: usize) -> Vec<(String, usize, usi
 }
 
 fn ends_at_sentence_boundary(text: &str) -> bool {
-    matches!(
-        text.trim_end().chars().last(),
-        Some('.' | '!' | '?' | '…')
-    )
+    matches!(text.trim_end().chars().last(), Some('.' | '!' | '?' | '…'))
 }
 
 fn merge_fragments(

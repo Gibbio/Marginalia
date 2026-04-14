@@ -219,7 +219,9 @@ impl AecPipeline {
     /// be played. Call this right when `PlaybackEngine::start()` is called.
     /// Samples must be f32 mono at `AEC_SAMPLE_RATE`.
     pub fn set_render_reference(&self, samples: Vec<f32>) {
-        let _ = self.render_tx.try_send(RenderCommand::SetReference(samples));
+        let _ = self
+            .render_tx
+            .try_send(RenderCommand::SetReference(samples));
     }
 
     /// Clear the render reference (playback stopped).

@@ -159,7 +159,14 @@ pub fn new_apple_stt(
     cmd_silence_timeout: f64,
     dict_silence_timeout: f64,
     dict_max_seconds: f64,
-) -> Result<(AppleCommandRecognizer, AppleDictationTranscriber, aec_pipeline::AecPipeline), String> {
+) -> Result<
+    (
+        AppleCommandRecognizer,
+        AppleDictationTranscriber,
+        aec_pipeline::AecPipeline,
+    ),
+    String,
+> {
     let helper = ensure_helper()?;
 
     // Smoke test: run the helper for 0.5s to surface immediate setup errors

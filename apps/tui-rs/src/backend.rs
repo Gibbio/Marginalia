@@ -296,7 +296,8 @@ pub(crate) struct BetaBackendClient {
     async_result_rx: Option<mpsc::Receiver<AsyncCommandResult>>,
     /// Real-time audio waveform data from the AEC pipeline (if active).
     #[cfg(feature = "apple-stt")]
-    pub waveform_data: Option<std::sync::Arc<std::sync::Mutex<marginalia_runtime::builder::WaveformData>>>,
+    pub waveform_data:
+        Option<std::sync::Arc<std::sync::Mutex<marginalia_runtime::builder::WaveformData>>>,
 }
 
 struct AsyncCommandResult {
@@ -352,10 +353,9 @@ impl BetaBackendClient {
                     let raw = capture.raw_text.filter(|t| !t.is_empty());
                     let cmd = capture.recognized_command;
 
-                    if stt_debug && raw.is_some() || cmd.is_some() {
-                        if tx.send((raw, cmd)).is_err() {
-                            break;
-                        }
+                    if (stt_debug && raw.is_some() || cmd.is_some()) && tx.send((raw, cmd)).is_err()
+                    {
+                        break;
                     }
                 }
             });
@@ -597,7 +597,6 @@ impl BetaBackendClient {
         let rx = self.async_result_rx.as_ref()?;
         match rx.try_recv() {
             Ok(result) => {
-
                 // On successful navigation, prefetch next chunk in background
                 if result.response.status == "ok" && Self::is_navigation_command(&result.name) {
                     self.spawn_prefetch();
