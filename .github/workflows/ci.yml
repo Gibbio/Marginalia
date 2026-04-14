@@ -82,6 +82,14 @@ jobs:
 
       # Same rationale as Linux clippy: `--workspace` would pull in
       # crates with native deps that the runner isn't set up for. Default
-      # members cover the Rust-only portable surface.
+      # members cover the Rust-only portable surface. We tee the output
+      # so any warning is visible in the CI log (piping directly into
+      # grep -q would swallow the warning text).
       - name: cargo doc (no warnings)
-        run: cargo doc --no-deps 2>&1 | (! grep -q "^warning")
+        run: |
+          set -o pipefail
+          cargo doc --no-deps 2>&1 | tee /tmp/doc.log
+          if grep -q "^warning" /tmp/doc.log; then
+            echo "::error::cargo doc emitted warnings (see above)"
+            exit 1
+          fi

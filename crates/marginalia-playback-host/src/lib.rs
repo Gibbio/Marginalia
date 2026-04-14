@@ -248,7 +248,12 @@ mod tests {
 
     static COUNTER: AtomicU64 = AtomicU64::new(1);
 
+    // HostPlaybackEngine opens a real OS audio device via rodio, which
+    // requires an available sound card. Headless Linux CI runners don't
+    // have one, so these tests are `#[ignore]`d by default and run locally
+    // (or on a workstation runner) with `cargo test -- --ignored`.
     #[test]
+    #[ignore = "requires a real audio device"]
     fn playback_engine_starts_and_stops() {
         let audio_path = temp_wav_path();
         write_silence_wav(&audio_path, 1_000);
@@ -277,6 +282,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a real audio device"]
     fn playback_engine_pause_resume() {
         let audio_path = temp_wav_path();
         write_silence_wav(&audio_path, 48_000); // 3 seconds of silence
