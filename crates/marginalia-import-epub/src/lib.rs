@@ -162,8 +162,8 @@ fn paths_match(a: &Path, b: &Path) -> bool {
 fn extract_paragraphs(html: &str) -> Vec<String> {
     let doc = Html::parse_document(html);
 
-    let selector = Selector::parse("p, h1, h2, h3, h4, h5, h6, li, blockquote")
-        .expect("static selector");
+    let selector =
+        Selector::parse("p, h1, h2, h3, h4, h5, h6, li, blockquote").expect("static selector");
 
     let mut result: Vec<String> = Vec::new();
     for el in doc.select(&selector) {
@@ -218,7 +218,10 @@ mod tests {
 
     #[test]
     fn collapse_whitespace_keeps_single_spaces() {
-        assert_eq!(collapse_whitespace("hello   world\n\t\tfoo"), "hello world foo");
+        assert_eq!(
+            collapse_whitespace("hello   world\n\t\tfoo"),
+            "hello world foo"
+        );
     }
 
     #[test]
@@ -261,9 +264,6 @@ mod tests {
             Path::new("ch1.xhtml"),
             Path::new("OEBPS/ch1.xhtml")
         ));
-        assert!(!paths_match(
-            Path::new("ch1.xhtml"),
-            Path::new("ch2.xhtml")
-        ));
+        assert!(!paths_match(Path::new("ch1.xhtml"), Path::new("ch2.xhtml")));
     }
 }

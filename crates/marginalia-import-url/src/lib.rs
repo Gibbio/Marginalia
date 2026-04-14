@@ -29,8 +29,11 @@ const MIN_BLOCK_LEN: usize = 15;
 const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 
 /// User-Agent header. Identifies Marginalia so site operators can see traffic.
-const USER_AGENT: &str =
-    concat!("Marginalia/", env!("CARGO_PKG_VERSION"), " (reader; +https://github.com/Gibbio/Marginalia)");
+const USER_AGENT: &str = concat!(
+    "Marginalia/",
+    env!("CARGO_PKG_VERSION"),
+    " (reader; +https://github.com/Gibbio/Marginalia)"
+);
 
 pub struct UrlDocumentImporter {
     agent: ureq::Agent,
@@ -54,7 +57,8 @@ impl UrlDocumentImporter {
     /// Fetch `url`, extract the readable article, and return an
     /// `ImportedDocument` ready to be chunked and synthesized.
     pub fn import_url(&self, url: &str) -> Result<ImportedDocument, DocumentImportError> {
-        let parsed = url::Url::parse(url).map_err(|e| read_failed(url, format!("invalid URL: {e}")))?;
+        let parsed =
+            url::Url::parse(url).map_err(|e| read_failed(url, format!("invalid URL: {e}")))?;
         if parsed.scheme() != "http" && parsed.scheme() != "https" {
             return Err(read_failed(
                 url,
@@ -100,15 +104,19 @@ impl UrlDocumentImporter {
 
         let mut parser = Readability::new(&html, None)
             .map_err(|e| read_failed(url, format!("readability init failed: {e:?}")))?;
-        let article = parser.parse().ok_or_else(|| DocumentImportError::EmptyContent {
-            source_path: PathBuf::from(&final_url),
-        })?;
-
-        let cleaned_html = article.content.clone().ok_or_else(|| {
-            DocumentImportError::EmptyContent {
+        let article = parser
+            .parse()
+            .ok_or_else(|| DocumentImportError::EmptyContent {
                 source_path: PathBuf::from(&final_url),
-            }
-        })?;
+            })?;
+
+        let cleaned_html =
+            article
+                .content
+                .clone()
+                .ok_or_else(|| DocumentImportError::EmptyContent {
+                    source_path: PathBuf::from(&final_url),
+                })?;
 
         let paragraphs = extract_paragraphs(&cleaned_html);
         if paragraphs.is_empty() {

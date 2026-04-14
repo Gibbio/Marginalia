@@ -16,6 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system deps
+        # libasound2-dev: required by alsa-sys (cpal/rodio audio playback).
+        # pkg-config: resolver for alsa.pc during the alsa-sys build script.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -36,8 +43,12 @@ jobs:
       - name: Test
         run: cargo test
 
+      # `--workspace` would pull in stt-apple (Swift), stt-vosk (libvosk),
+      # stt-whisper (cmake+C++), tts-mlx (Metal Toolchain) — none of which
+      # can build on a stock Linux runner. Default members cover everything
+      # that is portable and Rust-only.
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy -- -D warnings
 
       - name: Format check
         run: cargo fmt --check
@@ -69,5 +80,8 @@ jobs:
       - name: Test
         run: cargo test
 
+      # Same rationale as Linux clippy: `--workspace` would pull in
+      # crates with native deps that the runner isn't set up for. Default
+      # members cover the Rust-only portable surface.
       - name: cargo doc (no warnings)
-        run: cargo doc --no-deps --workspace 2>&1 | (! grep -q "^warning")
+        run: cargo doc --no-deps 2>&1 | (! grep -q "^warning")

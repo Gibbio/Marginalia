@@ -152,12 +152,10 @@ fn run_tui(
         app.poll_async_command();
         app.check_auto_advance();
 
-        if let Some((raw, _cmd)) = app.poll_voice_event() {
-            if let Some(raw) = raw {
-                app.push_message(format!("stt: \"{raw}\""));
-                logger.info(format!("stt heard: {raw}"));
-                app.handle_voice_command(&raw);
-            }
+        if let Some((Some(raw), _cmd)) = app.poll_voice_event() {
+            app.push_message(format!("stt: \"{raw}\""));
+            logger.info(format!("stt heard: {raw}"));
+            app.handle_voice_command(&raw);
         }
 
         if event::poll(Duration::from_millis(100))
@@ -331,10 +329,7 @@ fn render(frame: &mut Frame, app: &mut App) {
         document_area[1].width.saturating_sub(2).max(1) as usize,
     );
     let document_heading = Paragraph::new(section_heading(
-        &format!(
-            "{} — Marginalia {version}",
-            document_heading_title(app)
-        ),
+        &format!("{} — Marginalia {version}", document_heading_title(app)),
         document_area[0].width,
         title_style,
         section_style,

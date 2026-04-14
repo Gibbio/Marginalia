@@ -154,7 +154,9 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
         // pool so MLX doesn't hold onto several GB of unified memory between
         // synthesis calls.
         mlx_rs::transforms::compile::clear_cache();
-        unsafe { mlx_clear_cache(); }
+        unsafe {
+            mlx_clear_cache();
+        }
 
         let byte_length = wav_path.metadata().map(|m| m.len() as usize).unwrap_or(0);
         let text_excerpt = request.text.chars().take(50).collect();

@@ -34,7 +34,12 @@ impl PdfDocumentImporter {
         let candidate = Pdfium::pdfium_platform_library_name_at_path(lib_dir);
         let bindings = Pdfium::bind_to_library(candidate)
             .or_else(|_| Pdfium::bind_to_system_library())
-            .map_err(|e| format!("PDFium not found in {}: {e}. Run: make bootstrap-pdf", lib_dir.display()))?;
+            .map_err(|e| {
+                format!(
+                    "PDFium not found in {}: {e}. Run: make bootstrap-pdf",
+                    lib_dir.display()
+                )
+            })?;
         Ok(Self {
             pdfium: Pdfium::new(bindings),
         })
