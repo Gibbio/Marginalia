@@ -28,7 +28,7 @@ struct IngestPathCandidate {
     is_directory: bool,
 }
 
-pub const COMMANDS: [CommandSpec; 12] = [
+pub const COMMANDS: [CommandSpec; 13] = [
     CommandSpec {
         name: "/play",
         usage: "/play <path|id>",
@@ -38,6 +38,11 @@ pub const COMMANDS: [CommandSpec; 12] = [
         name: "/ingest",
         usage: "/ingest <path>",
         summary: "ingest a document into the library",
+    },
+    CommandSpec {
+        name: "/ingest_url",
+        usage: "/ingest_url <url>",
+        summary: "fetch a web article and ingest its readable content",
     },
     CommandSpec {
         name: "/pause",
@@ -516,6 +521,18 @@ impl App {
                 }
                 let resolved_path = expand_shell_like_path(argument);
                 let response = self.backend.ingest_document(&resolved_path)?;
+                let document_id = response.document_id;
+                self.selected_document_id = document_id.clone();
+                self.pending_play = document_id;
+                response.message
+            }
+            "ingest_url" => {
+                if argument.is_empty() {
+                    return Err("Usage: /ingest_url <url>".to_string());
+                }
+                // Do NOT expand_shell_like_path the argument — URLs must stay
+                // verbatim (no `~` expansion, no path trimming).
+                let response = self.backend.ingest_url(argument)?;
                 let document_id = response.document_id;
                 self.selected_document_id = document_id.clone();
                 self.pending_play = document_id;

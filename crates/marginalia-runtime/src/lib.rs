@@ -28,6 +28,8 @@ use marginalia_import_epub::EpubDocumentImporter;
 #[cfg(feature = "pdf-import")]
 use marginalia_import_pdf::PdfDocumentImporter;
 use marginalia_import_text::TextDocumentImporter;
+#[cfg(feature = "url-import")]
+use marginalia_import_url::UrlDocumentImporter;
 use marginalia_provider_fake::{
     FakeCommandRecognizer, FakeDictationTranscriber, FakePlaybackEngine, FakeRewriteGenerator,
     FakeSpeechSynthesizer, FakeTopicSummarizer, RecordingEventPublisher,
@@ -482,6 +484,28 @@ impl SqliteRuntime {
             self.config.chunk_target_chars,
         );
         service.ingest_path(source_path)
+    }
+
+    /// Fetch a URL, extract its readable article via Mozilla Readability, and
+    /// persist it as a single-section document. Short URLs are resolved
+    /// transparently via HTTP redirect following.
+    #[cfg(feature = "url-import")]
+    pub fn ingest_url(
+        &mut self,
+        url: &str,
+    ) -> Result<DocumentIngestionOutcome, IngestionError> {
+        // A fresh importer per call: ureq::Agent construction is microseconds
+        // and URL ingestion is a low-frequency user-driven action. Avoids
+        // holding a long-lived TCP pool inside the runtime struct.
+        let importer = UrlDocumentImporter::new();
+        let imported = importer.import_url(url)?;
+        let mut service = DocumentIngestionService::new(
+            &mut self.document_repository,
+            &self.importer,
+            self.event_publisher.clone(),
+            self.config.chunk_target_chars,
+        );
+        service.ingest_imported(imported)
     }
 
     /// Start a new reading session for the given document, synthesizing and playing the first chunk.

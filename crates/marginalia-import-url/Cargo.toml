@@ -1,0 +1,14 @@
+[package]
+name = "marginalia-import-url"
+version = "0.1.0"
+edition = "2021"
+description = "Web article importer for Marginalia — fetches a URL and extracts the readable article using Mozilla Readability."
+
+[dependencies]
+log = "0.4"
+marginalia-core = { path = "../marginalia-core" }
+readability-rust = "0.1"
+scraper = { version = "0.20", default-features = false }
+# default ureq features include tls via rustls — pure Rust, no OpenSSL needed.
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
+url = "2"
