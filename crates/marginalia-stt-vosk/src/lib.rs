@@ -291,10 +291,12 @@ impl SpeechInterruptMonitor for VoskSpeechInterruptMonitor {
 // Audio setup (cpal)
 // ---------------------------------------------------------------------------
 
-fn setup_audio(
-    desired_rate: u32,
-    device_name: Option<&str>,
-) -> Result<(cpal::Stream, Receiver<Vec<i16>>, String, u32), String> {
+/// Tuple returned by `setup_audio`: the live cpal stream, a channel
+/// receiver of captured i16 frames, the resolved device name, and the
+/// device's native sample rate in Hz.
+type AudioSetup = (cpal::Stream, Receiver<Vec<i16>>, String, u32);
+
+fn setup_audio(desired_rate: u32, device_name: Option<&str>) -> Result<AudioSetup, String> {
     let host = cpal::default_host();
 
     let device = match device_name {

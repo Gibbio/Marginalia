@@ -124,12 +124,7 @@ impl AecPipeline {
             let mut render_ref: Option<Vec<f32>> = None;
             let mut render_pos: usize = 0;
 
-            loop {
-                let raw_mic = match mic_rx.recv() {
-                    Ok(v) => v,
-                    Err(_) => break,
-                };
-
+            while let Ok(raw_mic) = mic_rx.recv() {
                 // Check for render commands (non-blocking).
                 while let Ok(cmd) = render_rx.try_recv() {
                     match cmd {
