@@ -166,14 +166,27 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
 /// clause in a single espeak-ng call, and re-insert the punctuation.
 /// Works for any language espeak-ng supports — no language-specific code.
 fn phonemize(text: &str, language: &str) -> Result<String, String> {
-    // Normalize brackets/dashes to comma pauses before phonemization
     let text = normalize_pauses(text);
 
+    let bytes = text.as_bytes();
     let mut result = String::new();
     let mut clause_start = 0;
 
     for (i, ch) in text.char_indices() {
         if is_clause_punct(ch) {
+            // Don't split on '.' or ',' between ASCII digits: they are either
+            // decimal separators or thousands separators depending on locale
+            // (IT: "2,5" / "1.000.000"; EN: "2.5" / "1,000,000"). espeak-ng
+            // already knows the language rules and expands them correctly as
+            // long as the number reaches it as a single token.
+            if ch == ',' || ch == '.' {
+                let before = i.checked_sub(1).map(|j| bytes[j]).unwrap_or(0);
+                let after = bytes.get(i + 1).copied().unwrap_or(0);
+                if before.is_ascii_digit() && after.is_ascii_digit() {
+                    continue;
+                }
+            }
+
             let clause = &text[clause_start..i];
             let clean = clause.trim();
             if !clean.is_empty() {

@@ -351,9 +351,12 @@ fn merge_fragments(
     fragments: Vec<(String, usize, usize)>,
     target: usize,
 ) -> Vec<(String, usize, usize)> {
-    // Tolerate chunks up to hard_max to avoid mid-sentence cuts, staying
-    // within Kokoro's ~505-phoneme budget for typical Italian prose.
-    let hard_max = target.saturating_add(target / 2).min(450);
+    // Tolerate chunks up to hard_max to avoid mid-sentence cuts while staying
+    // within Kokoro's ~505-phoneme budget. Italian/English IPA expansion is
+    // roughly 1.2–1.5× the character count (stress marks, digraphs), so 330
+    // chars ≈ 500 phonemes at worst. Keeping the ceiling tight: going higher
+    // triggers the phoneme guard in tts-mlx and the chunk is silently dropped.
+    let hard_max = target.saturating_add(target / 10).min(330);
 
     let mut merged = Vec::new();
     let mut buffer_texts: Vec<String> = Vec::new();

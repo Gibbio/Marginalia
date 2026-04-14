@@ -40,8 +40,7 @@ models/tts/kokoro/voices/
 models/tts/kokoro/lib/
 models/tts/piper/*.onnx
 models/tts/piper/*.json
-models/pdf/lib/
-models/pdf/include/
+models/pdf/
 models/tts/mlx/*.safetensors
 models/tts/mlx/voices/
 models/tts/mlx/.cache/
