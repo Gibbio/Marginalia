@@ -41,6 +41,10 @@ impl UrlDocumentImporter {
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(30))
             .timeout_read(Duration::from_secs(30))
+            // Total-request cap: a slow-drip server that sends one byte per
+            // per-read timeout would otherwise hang indefinitely. 45s is
+            // comfortably above a normal article fetch.
+            .timeout(Duration::from_secs(45))
             .user_agent(USER_AGENT)
             .redirects(5)
             .build();

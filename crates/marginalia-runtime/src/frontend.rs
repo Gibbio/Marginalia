@@ -36,6 +36,7 @@ impl SqliteRuntime {
             commands: vec![
                 "create_note",
                 "ingest_document",
+                #[cfg(feature = "url-import")]
                 "ingest_url",
                 "next_chunk",
                 "next_chapter",
