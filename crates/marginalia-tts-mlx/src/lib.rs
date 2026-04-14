@@ -97,44 +97,62 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
     fn synthesize(&mut self, request: SynthesisRequest) -> Result<SynthesisResult, SynthesisError> {
         let err = |msg: String| SynthesisError::new("kokoro-mlx", msg);
 
-        // Phonemize with espeak-ng
-        let phonemes = phonemize(&request.text, &request.language)
+        // Phonemize — may return multiple pieces if the total phoneme count
+        // would exceed Kokoro's ~505-token budget (common with number-heavy
+        // text like annual reports: "2025" → "duemilaventicinque" inflates
+        // phoneme count well beyond the char-count heuristic used by the
+        // chunker in marginalia-core).
+        let pieces = phonemize(&request.text, &request.language)
             .map_err(|e| err(format!("phonemization failed: {e}")))?;
 
-        // Kokoro has a hard limit of 512 tokens. Each IPA character ≈ 1 token.
-        // Reject over-long inputs early with a clear error rather than panicking
-        // inside voice_tts::generate and poisoning the runtime Mutex.
-        const MAX_PHONEME_TOKENS: usize = 505; // leave margin for BOS/EOS tokens
-        if phonemes.len() > MAX_PHONEME_TOKENS {
-            return Err(err(format!(
-                "phoneme sequence too long ({} chars > {MAX_PHONEME_TOKENS} limit) — chunk is too large for Kokoro",
-                phonemes.len()
-            )));
+        if pieces.is_empty() {
+            return Err(err("phonemization produced no output".to_string()));
         }
 
-        // Synthesize with MLX compile enabled (fused Metal kernels).
-        mlx_rs::transforms::compile::enable_compile();
-        let audio = voice_tts::generate(&mut self.model, &phonemes, &self.voice, 1.0)
-            .map_err(|e| err(format!("synthesis failed: {e}")))?;
-        mlx_rs::transforms::compile::disable_compile();
+        // Safety net: if a single clause still exceeds the budget after the
+        // greedy split there is nothing left to divide — surface the error
+        // instead of panicking inside voice_tts::generate.
+        for piece in &pieces {
+            if piece.len() > MAX_PHONEME_TOKENS {
+                return Err(err(format!(
+                    "phoneme piece too long ({} chars > {MAX_PHONEME_TOKENS} limit) — a single clause cannot be split",
+                    piece.len()
+                )));
+            }
+        }
 
-        // Force evaluation, then release BOTH the JIT compilation cache AND the
-        // Metal buffer pool. Without this, MLX holds onto several GB of unified
-        // memory (GPU buffers that macOS reports as system memory pressure).
-        audio.eval().map_err(|e| err(format!("eval failed: {e}")))?;
-        let samples: &[f32] = audio.as_slice();
+        if pieces.len() > 1 {
+            log::info!(
+                "tts-mlx: chunk phonemized into {} pieces (over {}-phoneme budget) — auto-split",
+                pieces.len(),
+                MAX_PHONEME_TOKENS
+            );
+        }
+
+        // Generate audio for each piece with MLX compile enabled (fused Metal
+        // kernels) and concatenate the PCM samples into one buffer.
+        let mut all_samples: Vec<f32> = Vec::new();
+        for piece in &pieces {
+            mlx_rs::transforms::compile::enable_compile();
+            let audio = voice_tts::generate(&mut self.model, piece, &self.voice, 1.0)
+                .map_err(|e| err(format!("synthesis failed: {e}")))?;
+            mlx_rs::transforms::compile::disable_compile();
+
+            audio.eval().map_err(|e| err(format!("eval failed: {e}")))?;
+            all_samples.extend_from_slice(audio.as_slice());
+            drop(audio);
+        }
 
         // Write FLAC
         let n = AUDIO_COUNTER.fetch_add(1, Ordering::Relaxed);
         let voice = request.voice.as_deref().unwrap_or(&self.default_voice);
         let wav_path = self.output_dir.join(format!("mlx-{voice}-{n}.flac"));
-        write_flac_16(&wav_path, 24000, samples)
+        write_flac_16(&wav_path, 24000, &all_samples)
             .map_err(|e| err(format!("failed to write FLAC: {e}")))?;
 
-        // WAV is on disk — now release all MLX caches. This frees the Metal
-        // buffer pool and the JIT compilation cache. The audio Array (and its
-        // backing Metal buffer) is dropped when it goes out of scope above.
-        drop(audio);
+        // FLAC is on disk — release the MLX JIT cache AND the Metal buffer
+        // pool so MLX doesn't hold onto several GB of unified memory between
+        // synthesis calls.
         mlx_rs::transforms::compile::clear_cache();
         unsafe { mlx_clear_cache(); }
 
@@ -143,7 +161,7 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
 
         let mut metadata = HashMap::new();
         metadata.insert("language".to_string(), request.language);
-        metadata.insert("phonemes".to_string(), phonemes);
+        metadata.insert("phonemes".to_string(), pieces.join(" "));
 
         Ok(SynthesisResult {
             provider_name: "kokoro-mlx".to_string(),
@@ -157,6 +175,10 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
     }
 }
 
+// Kokoro has a hard limit of 512 tokens per inference call. Each IPA character
+// ≈ 1 token; leave a small margin for BOS/EOS.
+const MAX_PHONEME_TOKENS: usize = 505;
+
 /// Phonemize text by clause, preserving punctuation for Kokoro prosody.
 ///
 /// espeak-ng strips punctuation from IPA output. Kokoro needs `,` `.` `?` `!`
@@ -165,12 +187,26 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
 /// Strategy: split text on clause boundaries (punctuation), phonemize each
 /// clause in a single espeak-ng call, and re-insert the punctuation.
 /// Works for any language espeak-ng supports — no language-specific code.
-fn phonemize(text: &str, language: &str) -> Result<String, String> {
+///
+/// Returns one or more pieces, each guaranteed not to exceed
+/// `MAX_PHONEME_TOKENS`. Splits happen at clause boundaries when the running
+/// accumulator would overflow; callers synthesize each piece separately and
+/// concatenate the resulting audio.
+fn phonemize(text: &str, language: &str) -> Result<Vec<String>, String> {
     let text = normalize_pauses(text);
-
     let bytes = text.as_bytes();
-    let mut result = String::new();
+
+    let mut pieces: Vec<String> = Vec::new();
+    let mut current = String::new();
     let mut clause_start = 0;
+
+    // Flush `current` into `pieces` if adding `addition` more chars would
+    // overflow the phoneme budget. `addition` already includes any separator.
+    let try_flush = |current: &mut String, pieces: &mut Vec<String>, addition: usize| {
+        if !current.is_empty() && current.len() + addition > MAX_PHONEME_TOKENS {
+            pieces.push(std::mem::take(current));
+        }
+    };
 
     for (i, ch) in text.char_indices() {
         if is_clause_punct(ch) {
@@ -187,31 +223,38 @@ fn phonemize(text: &str, language: &str) -> Result<String, String> {
                 }
             }
 
-            let clause = &text[clause_start..i];
-            let clean = clause.trim();
+            let clean = text[clause_start..i].trim();
             if !clean.is_empty() {
                 let phonemes = espeak_ipa(clean, language)?;
-                if !result.is_empty() && !phonemes.is_empty() {
-                    result.push(' ');
+                let separator = if current.is_empty() { 0 } else { 1 };
+                // +1 accounts for the punctuation byte we push below.
+                try_flush(&mut current, &mut pieces, separator + phonemes.len() + 1);
+                if !current.is_empty() && !phonemes.is_empty() {
+                    current.push(' ');
                 }
-                result.push_str(&phonemes);
+                current.push_str(&phonemes);
             }
-            result.push(ch);
+            current.push(ch);
             clause_start = i + ch.len_utf8();
         }
     }
 
-    // Remaining text after last punctuation
     let tail = text[clause_start..].trim();
     if !tail.is_empty() {
         let phonemes = espeak_ipa(tail, language)?;
-        if !result.is_empty() && !phonemes.is_empty() {
-            result.push(' ');
+        let separator = if current.is_empty() { 0 } else { 1 };
+        try_flush(&mut current, &mut pieces, separator + phonemes.len());
+        if !current.is_empty() && !phonemes.is_empty() {
+            current.push(' ');
         }
-        result.push_str(&phonemes);
+        current.push_str(&phonemes);
     }
 
-    Ok(result)
+    if !current.is_empty() {
+        pieces.push(current);
+    }
+
+    Ok(pieces)
 }
 
 /// Normalize text before phonemization.
