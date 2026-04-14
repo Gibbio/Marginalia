@@ -382,11 +382,17 @@ impl BetaBackendClient {
         if response.status == "skipped" {
             return false;
         }
-        response
+        let advanced = response
             .payload
             .get("advanced")
             .and_then(Value::as_bool)
-            .unwrap_or(false)
+            .unwrap_or(false);
+        // Cascade: each auto-advance prefetches the chunk after the one just
+        // started, so the next transition is always a cache hit.
+        if advanced {
+            self.spawn_prefetch();
+        }
+        advanced
     }
 
     fn get_app_snapshot(&mut self) -> Result<AppSnapshot, String> {
@@ -542,19 +548,17 @@ impl BetaBackendClient {
     }
 
     /// Spawn a fire-and-forget prefetch thread for the next chunk.
-    /// Waits 300ms before locking so the UI can refresh the document view first.
+    /// Waits briefly so the UI can refresh its snapshot, then blocks on the
+    /// lock (never skips) to guarantee the next chunk is always cached.
     fn spawn_prefetch(&mut self) {
         let runtime = Arc::clone(&self.runtime);
         std::thread::spawn(move || {
-            // Let the UI refresh at least one cycle before we grab the lock
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            let mut rt = match runtime.try_lock() {
-                Ok(guard) => guard,
-                Err(_) => {
-                    // Runtime still locked — skip
-                    return;
-                }
-            };
+            // Give the UI a couple of refresh cycles before grabbing the lock.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let mut rt = runtime.lock().unwrap_or_else(|e| {
+                log::warn!("runtime lock was poisoned in prefetch — recovering");
+                e.into_inner()
+            });
             rt.execute_frontend_command("prefetch_next", json!({}));
         });
     }

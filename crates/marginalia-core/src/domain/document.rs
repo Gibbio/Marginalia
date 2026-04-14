@@ -253,14 +253,11 @@ fn chunk_section_text(section_text: &str, chunk_target_chars: usize) -> Vec<Docu
         }];
     }
 
-    let split_threshold = chunk_target_chars.saturating_mul(3) / 2;
+    // Split every paragraph at sentence boundaries so merge_fragments works
+    // with sentence-level units and can honour sentence-boundary flushing.
     let mut expanded = Vec::new();
-    for (text, start, end) in fragments {
-        if text.chars().count() > split_threshold {
-            expanded.extend(split_at_sentences(&text, start));
-        } else {
-            expanded.push((text, start, end));
-        }
+    for (text, start, _end) in fragments {
+        expanded.extend(split_at_sentences(&text, start));
     }
 
     merge_fragments(expanded, chunk_target_chars)
@@ -343,10 +340,21 @@ fn split_at_sentences(text: &str, base_offset: usize) -> Vec<(String, usize, usi
     }
 }
 
+fn ends_at_sentence_boundary(text: &str) -> bool {
+    matches!(
+        text.trim_end().chars().last(),
+        Some('.' | '!' | '?' | '…')
+    )
+}
+
 fn merge_fragments(
     fragments: Vec<(String, usize, usize)>,
     target: usize,
 ) -> Vec<(String, usize, usize)> {
+    // Tolerate chunks up to hard_max to avoid mid-sentence cuts, staying
+    // within Kokoro's ~505-phoneme budget for typical Italian prose.
+    let hard_max = target.saturating_add(target / 2).min(450);
+
     let mut merged = Vec::new();
     let mut buffer_texts: Vec<String> = Vec::new();
     let mut buffer_start = 0usize;
@@ -357,20 +365,44 @@ fn merge_fragments(
         let addition = text.chars().count() + if buffer_texts.is_empty() { 0 } else { 1 };
 
         if !buffer_texts.is_empty() && buffer_len + addition > target {
-            merged.push((buffer_texts.join(" "), buffer_start, buffer_end));
-            buffer_texts = vec![text];
-            buffer_start = start;
-            buffer_end = end;
-            buffer_len = buffer_texts[0].chars().count();
-        } else {
-            if buffer_texts.is_empty() {
-                buffer_start = start;
-            }
+            let buffer_at_boundary = buffer_texts
+                .last()
+                .map(|t| ends_at_sentence_boundary(t))
+                .unwrap_or(false);
+            let fragment_at_boundary = ends_at_sentence_boundary(&text);
 
-            buffer_len += addition;
-            buffer_end = end;
-            buffer_texts.push(text);
+            if buffer_at_boundary {
+                // Natural sentence boundary — flush the buffer here.
+                merged.push((buffer_texts.join(" "), buffer_start, buffer_end));
+                buffer_texts = vec![text];
+                buffer_start = start;
+                buffer_end = end;
+                buffer_len = buffer_texts[0].chars().count();
+            } else if fragment_at_boundary && buffer_len + addition <= hard_max {
+                // Buffer doesn't end at a boundary, but this fragment completes
+                // the sentence and fits within hard_max. Add it then flush.
+                buffer_end = end;
+                buffer_texts.push(text);
+                merged.push((buffer_texts.join(" "), buffer_start, buffer_end));
+                buffer_texts = Vec::new();
+                buffer_len = 0;
+            } else {
+                // Hard cut — no nearby sentence boundary within phoneme budget.
+                merged.push((buffer_texts.join(" "), buffer_start, buffer_end));
+                buffer_texts = vec![text];
+                buffer_start = start;
+                buffer_end = end;
+                buffer_len = buffer_texts[0].chars().count();
+            }
+            continue;
         }
+
+        if buffer_texts.is_empty() {
+            buffer_start = start;
+        }
+        buffer_len += addition;
+        buffer_end = end;
+        buffer_texts.push(text);
     }
 
     if !buffer_texts.is_empty() {
