@@ -26,13 +26,18 @@ as a single token, which already knows the language-specific rules:
 - IT: "2,5" → "due virgola cinque", "1.000" → "mille"
 - EN: "2.5" → "two point five", "1,000" → "one thousand"
 
-### Hard phoneme limit
+### Hard phoneme limit + auto-split
 
-Kokoro caps input at 512 tokens. Before calling `voice_tts::generate`, we
-check the IPA length against 505 (leaves margin for BOS/EOS) and return an
-error for over-long inputs instead of panicking inside the runtime Mutex.
-Chunks are sized in core (`chunk_target_chars = 300`, `hard_max = 330`) to
-stay under this limit at typical ~1.5× IPA expansion.
+Kokoro caps input at 512 tokens per inference. We target 505 (leaves margin
+for BOS/EOS). Character-based chunking in `marginalia-core` keeps most
+chunks well below this budget, but number-heavy content explodes on
+phonemization ("2025" → "duemilaventicinque", 4 chars → 19 chars). When the
+running phoneme buffer would exceed 505, `phonemize` flushes the current
+pieces at the last clause boundary and starts a new piece. `synthesize`
+then iterates over each piece, generates audio, and concatenates the PCM
+samples into a single FLAC. From the caller's perspective the chunk still
+produces one audio file; the split is transparent. The log line
+`tts-mlx: chunk phonemized into N pieces` fires when this path is taken.
 
 ## Memory
 

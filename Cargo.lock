@@ -1819,6 +1819,7 @@ version = "0.1.0"
 dependencies = [
  "espeak-rs",
  "flacenc",
+ "log",
  "marginalia-core",
  "mlx-rs",
  "voice-tts",
