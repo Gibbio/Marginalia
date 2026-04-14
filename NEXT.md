@@ -38,6 +38,25 @@ runtime is ready (RuntimeBuilder, events, JSON contract) — FFI is a thin
 
 ---
 
+## Post-beta — shipped since v0.1.0-beta
+
+Improvements that landed on `beta` after the `v0.1.0-beta` tag. No new
+release tag yet — accumulating for v0.1.1.
+
+| Area | Task | Notes |
+|------|------|-------|
+| Import | PDF via `marginalia-import-pdf` (pdfium-render) | `make bootstrap-pdf` downloads binaries; install verified with `gh attestation verify` |
+| Runtime | `DispatchImporter` routes by file extension | `.pdf` → pdf importer, everything else → text importer — selected at construction, transparent to callers |
+| Storage | TTS cache switched to FLAC 16-bit | ~50% smaller than WAV, lossless; rodio decodes via `flac` feature |
+| Chunking | `merge_fragments` prefers sentence boundaries | No more mid-sentence audio cuts; falls back to hard cut only when no `. ! ?` fits in the phoneme budget |
+| Playback | Prefetch cascade on auto-advance | Every chunk transition pre-synthesizes the next chunk, eliminating the inter-chunk gap during continuous reading |
+| Phonemizer | Numbers kept whole | `.` and `,` between ASCII digits are no longer clause boundaries — IT `2,5` / `1.000.000`, EN `2.5` / `1,000,000` — espeak-ng applies locale rules |
+| Phonemizer | Auto-split over-budget chunks | `phonemize` returns `Vec<String>`, `synthesize` iterates pieces and concatenates the PCM into a single FLAC; transparent to callers |
+| Config | Auto-detect OS language in Makefile | Generates `marginalia.toml` with `language` + default voice for IT / EN / FR / DE / ES / PT / JA / ZH / HI |
+| Infra | Pre-push code review agent (Opus) | `/review-push` spawns Claude Opus on the outgoing diff; push only on APPROVED verdict |
+
+---
+
 ## Short term — next features
 
 ### Reading flow
@@ -79,7 +98,6 @@ runtime is ready (RuntimeBuilder, events, JSON contract) — FFI is a thin
 ## Medium term
 
 ### Import formats
-- [ ] **PDF** (text extraction via pdf-extract or similar crate).
 - [ ] **EPUB** (structured chapters + metadata).
 - [ ] **URL import** (web scraping, reader mode extraction).
 - [ ] **Markdown with images**: skip images, read alt text.
