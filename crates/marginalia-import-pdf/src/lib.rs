@@ -144,14 +144,30 @@ fn extract_paragraphs(raw: &str) -> Vec<String> {
 /// Split a long paragraph at sentence boundaries (`. ! ?`), keeping each
 /// piece under MAX_PARAGRAPH_LEN. Falls back to a hard cut if no boundary
 /// is found within the limit.
+///
+/// `.` between two digits is treated as part of a number (IT thousands
+/// separator "1.000", EN decimal "3.14") and does NOT split the paragraph.
+/// The same applies to `,` but `,` is not a sentence terminator here, so it
+/// never splits regardless.
 fn split_at_sentences(text: &str) -> Vec<String> {
     let mut chunks: Vec<String> = Vec::new();
     let mut current = String::new();
+    let chars: Vec<char> = text.chars().collect();
 
-    for ch in text.chars() {
+    for i in 0..chars.len() {
+        let ch = chars[i];
         current.push(ch);
+
         let is_sentence_end = matches!(ch, '.' | '!' | '?' | '…');
-        if is_sentence_end && current.len() >= MIN_PARAGRAPH_LEN {
+        // Skip periods sitting between two ASCII digits: they are part of a
+        // number, not a sentence terminator.
+        let inside_number = ch == '.'
+            && i > 0
+            && chars[i - 1].is_ascii_digit()
+            && i + 1 < chars.len()
+            && chars[i + 1].is_ascii_digit();
+
+        if is_sentence_end && !inside_number && current.len() >= MIN_PARAGRAPH_LEN {
             let trimmed = current.trim().to_string();
             if !trimmed.is_empty() {
                 chunks.push(trimmed);
