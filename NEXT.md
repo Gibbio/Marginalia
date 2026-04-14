@@ -102,6 +102,7 @@ release tag yet — accumulating for v0.1.1.
 
 ### Import formats
 - [ ] **Markdown with images**: skip images, read alt text.
+- [ ] **URL import — SSRF hardening**: after redirect chain, re-check the final URL's host against an RFC1918 / loopback / link-local deny-list (127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, ::1, fe80::/10). Low priority for a personal local-first tool but cheap defense-in-depth.
 
 ### Audio export
 - [ ] **Generate audiobook**: export entire document as concatenated WAV/MP3.
