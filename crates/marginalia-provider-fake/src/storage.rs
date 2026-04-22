@@ -69,6 +69,10 @@ impl DocumentRepository for InMemoryDocumentRepository {
         results.truncate(query.limit);
         results
     }
+
+    fn delete_document(&mut self, document_id: &str) -> Result<bool, StorageError> {
+        Ok(self.documents.remove(document_id).is_some())
+    }
 }
 
 #[derive(Debug, Clone, Default)]

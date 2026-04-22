@@ -188,6 +188,8 @@ interface FfiRuntime {
   IngestResult ingest_file(string path);
   [Throws=FfiError]
   IngestResult ingest_url(string url);
+  [Throws=FfiError]
+  void delete_document(string document_id);
 
   // Session lifecycle -------------------------------------------
   [Throws=FfiError]

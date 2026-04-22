@@ -16,6 +16,7 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
     @State private var mode: Mode
     @State private var accent: Accent = .default
     @State private var logExpanded: Bool = false
+    @State private var showingBookmarks: Bool = false
     /// Persisted across launches. Window owns the accent so Settings +
     /// Reading share the same colour without plumbing a binding
     /// everywhere.
@@ -35,7 +36,8 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                     micLevels: host.micLevels,
                     ttsLevels: host.ttsLevels,
                     onAddDocument: handleImport,
-                    onOpenDocument: handleOpenDocument
+                    onOpenDocument: handleOpenDocument,
+                    onDeleteDocument: handleDeleteDocument
                 )
                 Divider().frame(width: 1).overlay(Tokens.line)
                 Group {
@@ -118,6 +120,19 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
         .onReceive(NotificationCenter.default.publisher(for: .marginaliaOpenSettings)) { _ in
             mode = (mode == .settings) ? .reading : .settings
         }
+        .onReceive(NotificationCenter.default.publisher(for: .marginaliaShowBookmarks)) { _ in
+            showingBookmarks = true
+        }
+        .sheet(isPresented: $showingBookmarks) {
+            BookmarkListView(
+                bookmarks: host.notes.filter { $0.isBookmark },
+                accent: accent,
+                onSelect: { sec, ck in
+                    Task { try? await host.seekToChunk(section: sec, chunk: ck) }
+                },
+                onDismiss: { showingBookmarks = false }
+            )
+        }
     }
 
     private func handleImport() {
@@ -141,6 +156,26 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
             try? await host.openDocument(id: id)
             mode = .reading
         }
+    }
+
+    /// Intercept the sidebar's delete intent with a confirmation alert
+    /// before firing. Deletion cascades to notes + sessions, so making
+    /// the user think twice is cheap insurance.
+    private func handleDeleteDocument(_ id: String) {
+        #if canImport(AppKit)
+        let title = host.library.first(where: { $0.id == id })?.title ?? "questo documento"
+        let alert = NSAlert()
+        alert.messageText = "Rimuovere \"\(title)\"?"
+        alert.informativeText = "Il documento verrà eliminato dalla libreria insieme a tutte le note e alla cache TTS. Il file originale sul disco non viene toccato."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Rimuovi")
+        alert.addButton(withTitle: "Annulla")
+        if alert.runModal() == .alertFirstButtonReturn {
+            Task { await host.deleteDocument(id: id) }
+        }
+        #else
+        Task { await host.deleteDocument(id: id) }
+        #endif
     }
 
     /// Consume a drag-drop payload and import any file URLs we recognise.
@@ -181,4 +216,6 @@ public extension Notification.Name {
     static let marginaliaToggleLog = Notification.Name("com.gibbio.marginalia.toggleLog")
     /// Fired by ⌘, to open/close the Settings view without clicking the gear.
     static let marginaliaOpenSettings = Notification.Name("com.gibbio.marginalia.openSettings")
+    /// Fired by ⌘⌥B to open the bookmark-list sheet.
+    static let marginaliaShowBookmarks = Notification.Name("com.gibbio.marginalia.showBookmarks")
 }

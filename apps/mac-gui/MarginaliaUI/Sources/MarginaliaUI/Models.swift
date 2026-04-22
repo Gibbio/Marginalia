@@ -377,6 +377,11 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// `voiceNoteTranscribed`.
     func startDictation()
 
+    /// Remove a document from the library. Cascades to chunks, notes,
+    /// sessions in storage. If the doc is the active one, the host stops
+    /// the session first so the reader doesn't render a ghost chunk.
+    func deleteDocument(id: String) async
+
     /// Delete a note by id. Idempotent — unknown ids no-op. After deletion
     /// the host should refresh `notes`.
     func deleteNote(id: String) async
@@ -653,6 +658,15 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     }
 
     public func refreshInstallations() async { /* no-op for mock */ }
+
+    public func deleteDocument(id: String) async {
+        library.removeAll { $0.id == id }
+        if currentSession?.documentId == id {
+            currentSession = nil
+            currentDocument = nil
+            notes = []
+        }
+    }
 
     public func deleteNote(id: String) async {
         notes.removeAll { $0.id == id }

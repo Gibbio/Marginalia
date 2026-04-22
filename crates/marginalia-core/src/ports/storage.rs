@@ -28,6 +28,11 @@ pub trait DocumentRepository {
     fn get_document(&self, document_id: &str) -> Option<Document>;
     fn list_documents(&self) -> Vec<Document>;
     fn search_documents(&self, query: &SearchQuery) -> Vec<SearchResult>;
+    /// Remove a document by id. Returns `Ok(true)` if a row was deleted.
+    /// Implementations should cascade to chunks/sections in the same
+    /// storage (via ON DELETE CASCADE in the SQLite schema, or manual
+    /// cleanup in in-memory impls).
+    fn delete_document(&mut self, document_id: &str) -> Result<bool, StorageError>;
 }
 
 impl<T> DocumentRepository for &mut T
@@ -48,6 +53,10 @@ where
 
     fn search_documents(&self, query: &SearchQuery) -> Vec<SearchResult> {
         (**self).search_documents(query)
+    }
+
+    fn delete_document(&mut self, document_id: &str) -> Result<bool, StorageError> {
+        (**self).delete_document(document_id)
     }
 }
 

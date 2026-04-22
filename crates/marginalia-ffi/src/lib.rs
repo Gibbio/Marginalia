@@ -1019,6 +1019,11 @@ impl FfiRuntime {
         }
     }
 
+    pub fn delete_document(&self, document_id: String) -> Result<(), FfiError> {
+        self.runtime.lock().unwrap().delete_document(&document_id)?;
+        Ok(())
+    }
+
     pub fn ingest_url(&self, url: String) -> Result<IngestResult, FfiError> {
         #[cfg(feature = "url-import")]
         {

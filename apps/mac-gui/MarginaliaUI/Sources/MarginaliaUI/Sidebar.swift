@@ -10,6 +10,9 @@ public struct Sidebar: View {
     public var ttsLevels: [Float]
     public var onAddDocument: () -> Void
     public var onOpenDocument: (String) -> Void
+    /// Optional: triggered by the sidebar row's context menu "Rimuovi".
+    /// Default no-op so preview / mock don't need to wire it.
+    public var onDeleteDocument: (String) -> Void = { _ in }
 
     /// Free-text filter for the library list. Case-insensitive, matches on
     /// title and any subtitle text. Bound to the sidebar's search field;
@@ -21,13 +24,15 @@ public struct Sidebar: View {
                 micLevels: [Float] = [],
                 ttsLevels: [Float] = [],
                 onAddDocument: @escaping () -> Void = {},
-                onOpenDocument: @escaping (String) -> Void = { _ in }) {
+                onOpenDocument: @escaping (String) -> Void = { _ in },
+                onDeleteDocument: @escaping (String) -> Void = { _ in }) {
         self.accent = accent
         self.library = library
         self.micLevels = micLevels
         self.ttsLevels = ttsLevels
         self.onAddDocument = onAddDocument
         self.onOpenDocument = onOpenDocument
+        self.onDeleteDocument = onDeleteDocument
     }
 
     /// Filtered library — if `libraryFilter` is empty, return everything.
@@ -62,6 +67,18 @@ public struct Sidebar: View {
                                 LibRow(entry: entry, accent: accent)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Apri") { onOpenDocument(entry.id) }
+                                Divider()
+                                // Confirmation is handled by the caller
+                                // (`MarginaliaWindow`) — at this layer we
+                                // just fire the intent.
+                                Button(role: .destructive) {
+                                    onDeleteDocument(entry.id)
+                                } label: {
+                                    Text("Rimuovi dalla libreria")
+                                }
+                            }
                         }
                         if library.isEmpty {
                             Text("Nessun documento. Usa + per importare.")

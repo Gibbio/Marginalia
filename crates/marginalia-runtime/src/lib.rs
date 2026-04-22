@@ -976,6 +976,22 @@ impl SqliteRuntime {
             .map_err(|e| RuntimeError::Runtime(format!("delete_note: {e}")))
     }
 
+    /// Remove a document from the library. Cascades to chunks, sections,
+    /// notes and sessions via the storage repository. If the document
+    /// being removed is the active session's document, stop the session
+    /// first so the UI doesn't end up rendering a ghost chunk.
+    pub fn delete_document(&mut self, document_id: &str) -> Result<bool, RuntimeError> {
+        // Stop session if it's for this doc.
+        if let Some(s) = self.session_repository.get_active_session() {
+            if s.document_id == document_id {
+                let _ = self.stop_session();
+            }
+        }
+        self.document_repository
+            .delete_document(document_id)
+            .map_err(|e| RuntimeError::Runtime(format!("delete_document: {e}")))
+    }
+
     /// Overwrite the transcript of an existing note. Looks up the note,
     /// mutates the transcript, saves back through the `save_note`
     /// upsert. Returns the updated note; errors when the id is unknown.

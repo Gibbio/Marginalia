@@ -66,6 +66,11 @@ struct LiveMarginaliaCommands: Commands {
             Button("Salva segnalibro") { Task { try? await host.bookmark() } }
                 .keyboardShortcut("b", modifiers: [.command])
                 .disabled(host.currentSession == nil)
+            Button("Lista segnalibri") {
+                NotificationCenter.default.post(name: .marginaliaShowBookmarks, object: nil)
+            }
+            .keyboardShortcut("b", modifiers: [.command, .option])
+            .disabled(host.currentSession == nil)
             Button("Dove sono") { _ = host.announcePosition() }
                 .keyboardShortcut("?", modifiers: [.command])
                 .disabled(host.currentSession == nil)

@@ -308,6 +308,24 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         }
     }
 
+    public func deleteDocument(id: String) async {
+        do {
+            try await Task.detached { [runtime] in
+                try runtime.deleteDocument(documentId: id)
+            }.value
+        } catch {
+            await MainActor.run {
+                self.pushMessage("Errore rimozione: \(error.localizedDescription)")
+            }
+            return
+        }
+        // Clear the reader if this was the active doc.
+        if currentSession?.documentId == id {
+            await refreshSessionSnapshot()
+        }
+        await refreshLibrary()
+    }
+
     public func deleteNote(id: String) async {
         do {
             try await Task.detached { [runtime] in
