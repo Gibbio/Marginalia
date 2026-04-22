@@ -93,6 +93,38 @@ impl ModelManager {
         Ok(path)
     }
 
+    /// Ensure a Kokoro MLX core weight file is available locally. Downloads
+    /// from `prince-canuma/Kokoro-82M` — the safetensors mirror the MLX
+    /// runtime consumes (hexgrad/Kokoro-82M ships `.pth` PyTorch files, which
+    /// MLX can't load directly). Returns the HF-cache path to the file.
+    ///
+    /// Typical filename: `kokoro-v1_0.safetensors`.
+    pub fn ensure_mlx_core(&self, file_name: &str) -> Result<PathBuf, ModelError> {
+        let repo = self.api.model("prince-canuma/Kokoro-82M".to_string());
+        log::info!("[models] ensuring MLX core: {file_name}");
+        let path = repo
+            .get(file_name)
+            .map_err(|e| ModelError::Download(format!("{file_name}: {e}")))?;
+        log::info!("[models] MLX core ready: {}", path.display());
+        Ok(path)
+    }
+
+    /// Ensure an MLX voice embedding (`voices/{id}.safetensors`) is available
+    /// locally. Same source as `ensure_mlx_core`. Returns the HF-cache path.
+    ///
+    /// Voice id format: `{lang}{gender}_{name}` — e.g. `if_sara` (Italian
+    /// female, Sara), `im_nicola` (Italian male), `af_bella` (English female).
+    pub fn ensure_mlx_voice(&self, voice_id: &str) -> Result<PathBuf, ModelError> {
+        let repo = self.api.model("prince-canuma/Kokoro-82M".to_string());
+        let file_name = format!("voices/{voice_id}.safetensors");
+        log::info!("[models] ensuring MLX voice: {voice_id}");
+        let path = repo
+            .get(&file_name)
+            .map_err(|e| ModelError::Download(format!("{voice_id}: {e}")))?;
+        log::info!("[models] MLX voice ready: {}", path.display());
+        Ok(path)
+    }
+
     /// Check if a local file exists at the given path. Convenience for
     /// callers that manage their own model paths.
     pub fn is_local(path: &std::path::Path) -> bool {

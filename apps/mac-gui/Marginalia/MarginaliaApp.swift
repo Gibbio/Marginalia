@@ -107,12 +107,9 @@ struct MarginaliaApp: App {
         case .installModels:
             InstallModelsView(
                 accent: .default,
-                assets: [
-                    .init(id: "mlx", label: "Kokoro MLX — voci italiane",
-                          size: "74 MB", makeTarget: "bootstrap-mlx", installed: false),
-                    .init(id: "stt-helper", label: "Swift STT helper",
-                          size: "<1 MB", makeTarget: "build-stt-helper", installed: false),
-                ],
+                assets: onboardingAssets(from: host),
+                inflightStates: host.inflightDownloads,
+                onInstall: { host.installAsset($0) },
                 onProceed: {
                     host.markOnboardingComplete()
                     onboardingStep = .none
@@ -122,6 +119,7 @@ struct MarginaliaApp: App {
                     onboardingStep = .none
                 }
             )
+            .onAppear { Task { await host.refreshInstallations() } }
         }
     }
 
@@ -164,3 +162,28 @@ struct MarginaliaApp: App {
         setenv("MARGINALIA_STT_HELPER", helpers.appendingPathComponent(helper).path, 1)
     }
 }
+
+// MARK: — Install UX glue
+
+/// Minimum required assets for the onboarding installer — the TTS core plus
+/// one voice matching the user's system language. Future iterations could
+/// add Whisper if the user opted out of Apple STT; for now we keep it lean.
+@MainActor
+private func onboardingAssets(from host: FFIHost) -> [InstallModelsView.Asset] {
+    let langPrefix = Locale.current.language.languageCode?.identifier ?? "en"
+    let defaultVoice: String
+    switch langPrefix {
+    case "it": defaultVoice = "voice:if_sara"
+    case "en": defaultVoice = "voice:af_bella"
+    default:   defaultVoice = "voice:af_bella"
+    }
+    let required = ["mlx-core", defaultVoice]
+    return host.installations
+        .filter { required.contains($0.id) }
+        .map {
+            InstallModelsView.Asset(
+                id: $0.id, label: $0.label, size: $0.size, installed: $0.installed
+            )
+        }
+}
+
