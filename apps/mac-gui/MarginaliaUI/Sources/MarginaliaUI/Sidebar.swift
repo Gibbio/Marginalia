@@ -11,6 +11,11 @@ public struct Sidebar: View {
     public var onAddDocument: () -> Void
     public var onOpenDocument: (String) -> Void
 
+    /// Free-text filter for the library list. Case-insensitive, matches on
+    /// title and any subtitle text. Bound to the sidebar's search field;
+    /// also focusable via ⌘K (see `.onReceive` on MarginaliaWindow — TBD).
+    @State private var libraryFilter: String = ""
+
     public init(accent: Accent,
                 library: [LibraryEntry],
                 micLevels: [Float] = [],
@@ -23,6 +28,19 @@ public struct Sidebar: View {
         self.ttsLevels = ttsLevels
         self.onAddDocument = onAddDocument
         self.onOpenDocument = onOpenDocument
+    }
+
+    /// Filtered library — if `libraryFilter` is empty, return everything.
+    /// Applies lowercased "contains" to the title + subtitle (whatever the
+    /// entry chooses to expose). Result stays sorted as the host supplied
+    /// (typically by last-opened desc).
+    private var filteredLibrary: [LibraryEntry] {
+        let q = libraryFilter.trimmingCharacters(in: .whitespaces).lowercased()
+        if q.isEmpty { return library }
+        return library.filter { entry in
+            entry.title.lowercased().contains(q)
+                || entry.subtitle.lowercased().contains(q)
+        }
     }
 
     public var body: some View {
@@ -39,7 +57,7 @@ public struct Sidebar: View {
                         SideRow(label: "Archivio", count: 28, active: false, accent: accent)
                     }
                     SideSection(title: "libreria", accent: accent) {
-                        ForEach(library) { entry in
+                        ForEach(filteredLibrary) { entry in
                             Button(action: { onOpenDocument(entry.id) }) {
                                 LibRow(entry: entry, accent: accent)
                             }
@@ -47,6 +65,13 @@ public struct Sidebar: View {
                         }
                         if library.isEmpty {
                             Text("Nessun documento. Usa + per importare.")
+                                .font(.serif(12, italic: true))
+                                .foregroundStyle(Tokens.textFaint)
+                                .padding(.horizontal, 18).padding(.vertical, 10)
+                        } else if filteredLibrary.isEmpty {
+                            // Search produced nothing — tell the user why
+                            // there's silence instead of showing a blank list.
+                            Text("Nessun risultato per \"\(libraryFilter)\".")
                                 .font(.serif(12, italic: true))
                                 .foregroundStyle(Tokens.textFaint)
                                 .padding(.horizontal, 18).padding(.vertical, 10)
@@ -101,20 +126,27 @@ public struct Sidebar: View {
     }
 
     /// Search input, used inside `searchBarRow` which also hosts the "+".
+    /// Real `TextField` bound to `libraryFilter`; `filteredLibrary` reads
+    /// it. `.textFieldStyle(.plain)` removes AppKit's default chrome so
+    /// the rounded container below is the only visible frame.
     private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textFaint)
-            Text("cerca o di'…")
+            TextField("cerca nella libreria", text: $libraryFilter)
+                .textFieldStyle(.plain)
                 .font(.sans(12))
-                .foregroundStyle(Tokens.textFaint)
-            Spacer(minLength: 8)
-            Text("⌘K")
-                .font(.mono(10))
-                .foregroundStyle(Tokens.textFaint)
-                .padding(.horizontal, 5).padding(.vertical, 2)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.04)))
+                .foregroundStyle(Tokens.text)
+            if !libraryFilter.isEmpty {
+                Button(action: { libraryFilter = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Tokens.textFaint)
+                }
+                .buttonStyle(.plain)
+                .help("Pulisci filtro")
+            }
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(

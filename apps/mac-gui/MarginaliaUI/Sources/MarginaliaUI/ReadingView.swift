@@ -89,6 +89,11 @@ public struct ReadingView<Host: MarginaliaHost>: View {
     @State private var chunkFrames: [String: CGRect] = [:]
     @State private var noteFrames: [String: CGRect] = [:]
     @State private var containerWidth: CGFloat = 0
+    /// Wall-clock when the current session id was first observed. Reset
+    /// when `currentSession?.sessionId` changes (i.e. `start_session` or
+    /// `stop_session` happened). `TimelineView` refreshes the label each
+    /// second so we render `mm:ss` without an explicit `Timer`.
+    @State private var sessionStart: Date? = nil
     /// Persisted across launches. AppStorage with a RawRepresentable enum
     /// requires a non-optional default — ReadingMode.book is used when the
     /// stored value is absent or unparseable.
@@ -135,17 +140,32 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                 subtitle: sessionSubtitle,
                 playbackState: host.currentSession?.playbackState ?? .idle,
                 synthesizing: host.synthesizingAnchor != nil,
+                sessionStart: sessionStart,
                 onTogglePlay: togglePlay
             )
             Divider().frame(height: 1).overlay(Tokens.line)
             mainArea
         }
         .background(Tokens.bg)
+        .onAppear {
+            // Seed timer start when the view first mounts with an active
+            // session. `onChange` below handles subsequent session swaps.
+            if sessionStart == nil, host.currentSession != nil {
+                sessionStart = Date()
+            }
+        }
+        .onChange(of: host.currentSession?.sessionId) { _, newId in
+            sessionStart = (newId != nil) ? Date() : nil
+        }
     }
 
     private var sessionSubtitle: String {
         guard let s = host.currentSession else { return "" }
-        return "capitolo \(s.sectionIndex + 1) · chunk \(s.chunkIndex + 1)"
+        let chunksInSection = currentSection?.chunks.count ?? 0
+        let chunkLabel = chunksInSection > 0
+            ? "chunk \(s.chunkIndex + 1)/\(chunksInSection)"
+            : "chunk \(s.chunkIndex + 1)"
+        return "capitolo \(s.sectionIndex + 1)/\(s.sectionCount) · \(chunkLabel)"
     }
 
     /// Uppercased document title — the kicker line above the big title.
@@ -252,13 +272,33 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                         // Chunks. No inter-chunk spacing — flows as continuous
                         // prose. The gutter number + active-highlight still
                         // signal chunk boundaries without visual "stacchi".
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(chunks) { c in
-                                chunkParagraph(c, hasNote: anchoredIds.contains(c.id))
-                                    .id(c.id)
+                        //
+                        // Empty-document guard: some PDFs (scans without OCR,
+                        // or DRM-protected files) extract zero chunks. Show
+                        // a gentle explanation rather than a blank area under
+                        // the header.
+                        if chunks.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("NESSUN TESTO ESTRATTO")
+                                    .font(.mono(10)).tracking(1.5)
+                                    .foregroundStyle(Tokens.textFaint)
+                                Text("Questo documento non contiene testo leggibile. Probabilmente è una scansione senza OCR, o è protetto da DRM.")
+                                    .font(.serif(15, italic: true))
+                                    .foregroundStyle(Tokens.textDim)
+                                    .lineSpacing(4)
+                                    .frame(maxWidth: 520, alignment: .leading)
                             }
+                            .padding(.top, 20)
+                            .frame(maxWidth: 640, alignment: .leading)
+                        } else {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(chunks) { c in
+                                    chunkParagraph(c, hasNote: anchoredIds.contains(c.id))
+                                        .id(c.id)
+                                }
+                            }
+                            .frame(maxWidth: 640, alignment: .leading)
                         }
-                        .frame(maxWidth: 640, alignment: .leading)
                     }
                     .padding(.horizontal, 88)
                     .padding(.top, 54)
@@ -638,6 +678,18 @@ public struct ReadingView<Host: MarginaliaHost>: View {
 // MARK: — Top toolbar (doc title + center player pill)
 
 struct Toolbar: View {
+    /// Format an elapsed duration as `mm:ss` (or `h:mm:ss` past 1h).
+    /// Negative values clamped to zero — handles clock skew after sleep.
+    static func formatElapsed(_ secs: Double) -> String {
+        let total = max(0, Int(secs))
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        return h > 0
+            ? String(format: "%d:%02d:%02d", h, m, s)
+            : String(format: "%d:%02d", m, s)
+    }
+
     var accent: Accent
     var title: String
     var subtitle: String
@@ -646,6 +698,9 @@ struct Toolbar: View {
     /// `SynthesisReady`. Flips the kicker to "SINTETIZZANDO…" with a tiny
     /// spinner so the user knows the ~1 s wait isn't a freeze.
     var synthesizing: Bool = false
+    /// Wall-clock when the session started. Drives the `mm:ss` timer
+    /// rendered next to the title. `nil` hides the timer entirely.
+    var sessionStart: Date? = nil
     var onTogglePlay: () -> Void
 
     var body: some View {
@@ -692,6 +747,21 @@ struct Toolbar: View {
                 .foregroundStyle(Tokens.textDim)
                 .lineLimit(1)
                 .truncationMode(.tail)
+
+            // Session timer — mm:ss elapsed since session start. Uses
+            // TimelineView so SwiftUI auto-refreshes every second without
+            // us wiring a Timer by hand. Hidden when no session is active.
+            if let start = sessionStart {
+                TimelineView(.periodic(from: start, by: 1)) { ctx in
+                    Text(Self.formatElapsed(ctx.date.timeIntervalSince(start)))
+                        .font(.mono(10))
+                        .foregroundStyle(Tokens.textFaint)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .monospacedDigit()
+                        .help("Tempo di lettura corrente")
+                }
+            }
 
             Spacer(minLength: 12)
 
