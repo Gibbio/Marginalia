@@ -5,4 +5,6 @@ edition = "2021"
 description = "Shared configuration types for Marginalia apps (voice commands, STT, TTS, playback)"
 
 [dependencies]
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
+toml = "0.8"

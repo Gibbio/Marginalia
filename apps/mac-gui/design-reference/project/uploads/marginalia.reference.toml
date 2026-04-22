@@ -1,0 +1,249 @@
+# =============================================================================
+# Marginalia — reference configuration
+# =============================================================================
+#
+# This file documents EVERY setting Marginalia reads, with its default,
+# valid range, and a UI hint for the future macOS Settings page. It is the
+# source-of-truth handoff for UI design.
+#
+# Runtime behavior:
+# - On first launch, the app writes a minimal `marginalia.toml` into
+#   `~/Library/Application Support/Marginalia/` with only the user's choices.
+# - Everything not written out falls back to the default shown here.
+# - Options flagged "derived at runtime" are NOT stored in the TOML — the
+#   runtime discovers them from the filesystem / manifest files.
+#
+# Types:
+#   string, int, float, bool, path, enum{...}, list<T>
+#
+# UI hints:
+#   [settings:Voice]     — where this control belongs in the Settings page
+#   [advanced]           — only shown in the "Advanced" collapsible section
+#   [derived]            — computed from models present on disk; no control
+#   [readonly]           — shown for diagnostics, not editable
+# =============================================================================
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Top-level — app-wide paths + reading ergonomics.
+# No section header (they live at the TOML root).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# SQLite database holding documents, sessions, notes.
+# Type: path | Default: ".marginalia/beta.sqlite3"
+# UI hint: [advanced] "Library location" — file picker; change requires restart.
+database_path = ".marginalia/beta.sqlite3"
+
+# Directory for cached synthesized audio (one FLAC per chunk). Persists
+# across launches so already-read chunks play instantly.
+# Type: path | Default: "<db_path_parent>/tts-cache"
+# UI hint: [advanced] "Audio cache location" — file picker; "Clear cache" button.
+tts_cache_dir = ".marginalia/tts-cache"
+
+# Target characters per chunk when splitting imported documents. Lower = more
+# frequent navigation points + shorter first-synthesis wait. Higher = fewer
+# audio gaps during continuous reading.
+# Type: int | Range: 100–1000 | Default: 300
+# UI hint: [advanced] "Chunk size" — slider or stepper; warn that changing
+#         requires re-importing existing documents.
+chunk_target_chars = 300
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [mlx] — Kokoro TTS via MLX (Apple Silicon Metal).
+# This is the primary TTS backend on macOS arm64.
+# ─────────────────────────────────────────────────────────────────────────────
+[mlx]
+
+# Local directory containing `kokoro-v1_0.safetensors`, `voices/*.safetensors`,
+# and `voices.manifest.json`. Written by `make bootstrap-mlx` or the in-app
+# first-run downloader.
+# Type: path | Default: "prince-canuma/Kokoro-82M" (HF slug; overridden at install time)
+# Production default inside a signed .app: `Contents/Resources/models/tts/mlx`
+# UI hint: [advanced] "TTS model path" — usually hidden; shown as diagnostic.
+model = "models/tts/mlx"
+
+# Voice preset id. Must match one of the files present under `{model}/voices/`.
+# The available list is NOT stored in this file — it is discovered at runtime
+# from `{model}/voices.manifest.json` + the actual .safetensors files on disk.
+# Type: string | Default: "af_bella"
+# UI hint: [settings:Voice] "Voice" — dropdown populated by discovery.list_voices("mlx")
+#         filtered by the currently-selected language.
+voice = "if_sara"
+
+# NOTE: voice id naming convention (Kokoro):
+#   {lang_char}{gender_char}_{name}
+#     lang:   a=en-US  b=en-GB  i=it-IT  j=ja-JP  z=zh-CN
+#             e=es-ES  f=fr-FR  h=hi-IN  p=pt-BR
+#     gender: f=female  m=male
+# e.g. `if_sara` = Italian female Sara, `im_nicola` = Italian male Nicola.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [kokoro] — Kokoro ONNX TTS (cross-platform fallback). Optional.
+# Only active when `assets_root` is set AND MLX is not compiled in.
+# ─────────────────────────────────────────────────────────────────────────────
+[kokoro]
+# Directory holding `kokoro.onnx`, `config.json`, `voices/`, and the ONNX
+# Runtime dylib. Leave unset to disable the ONNX backend entirely.
+# Type: path | Default: unset
+# UI hint: [advanced] "ONNX TTS assets" — file picker; only shown if the user
+#         enables the ONNX backend in the TTS backend dropdown.
+# assets_root = "models/tts/kokoro"
+
+# Per-backend cache override (falls back to top-level `tts_cache_dir`).
+# Type: path | Default: unset
+# tts_cache_dir = "models/tts/kokoro/cache"
+
+# External phonemizer executable. Usually unset — the built-in espeak-rs is used.
+# Type: string | Default: unset
+# UI hint: [advanced] — hidden by default.
+# phonemizer_program = "espeak-ng"
+
+# Extra args for the phonemizer program.
+# Type: list<string> | Default: []
+# phonemizer_args = ["-v", "it", "--ipa", "-q"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [voice_commands] — trigger words mapped to actions.
+# Each action takes a list of synonyms. Users can add/remove per language;
+# recognized words fire the mapped action.
+# ─────────────────────────────────────────────────────────────────────────────
+[voice_commands]
+
+# UI hint: [settings:VoiceCommands] — rendered as a table with one row per
+#         action. Each row has a label (localized action name) and a
+#         tag-input for the list of trigger words. "Add synonym" / "Remove"
+#         per cell. Changes apply immediately.
+
+pause        = ["pausa", "ferma"]           # stop playback
+next         = ["avanti", "prossimo"]        # advance to next chunk
+back         = ["indietro"]                  # previous chunk
+stop         = ["stop", "basta"]             # stop and rewind cursor
+repeat       = ["ripeti"]                    # replay current chunk
+resume       = ["riprendi", "continua"]      # resume from pause
+next_chapter = ["prossimo capitolo", "capitolo avanti"]
+prev_chapter = ["capitolo indietro", "capitolo precedente"]
+bookmark     = ["segna", "segnalibro"]       # save current position
+note         = ["nota", "appunto"]           # start dictation → save as note
+where        = ["dove sono", "posizione"]    # read current position aloud
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [stt] — speech-to-text (voice commands + note dictation).
+# A single engine serves BOTH use cases; per-context tuning lives under
+# [stt.commands] and [stt.dictation].
+# ─────────────────────────────────────────────────────────────────────────────
+[stt]
+
+# Which engine to use.
+# Type: enum{"apple", "whisper"} | Default: "whisper"
+# UI hint: [settings:STT] "Speech recognition" — segmented control.
+#         Options come from discovery.list_stt_engines(); grey out ones
+#         where `available = false` and show the `reason` string under the
+#         disabled option.
+engine = "apple"
+
+# Recognition language. The runtime auto-normalizes between ISO ("it") and
+# BCP-47 ("it-IT") for whichever format the engine expects.
+# Type: string | Default: unset (falls back to "it-IT")
+# UI hint: [settings:Language] "Language" — at the top of the page, above
+#         every other control. Dropdown populated by
+#         discovery.list_languages().
+language = "it"
+
+# Show raw STT transcript in the app's debug/log pane.
+# Type: bool | Default: false
+# UI hint: [advanced] "Show transcription in log".
+debug = true
+
+
+# ── Apple engine settings ──
+[stt.apple]
+# Placeholder for future Apple-only options. Currently nothing to configure —
+# Apple Speech uses the language from [stt].language and the macOS Dictation
+# permission (System Settings → Keyboard → Dictation → ON, required once).
+
+
+# ── Whisper engine settings ──
+[stt.whisper]
+# Path to the ggml model file. If missing, the engine shows as unavailable in
+# discovery.list_stt_engines() and the "Download model" button appears in the
+# UI. Typical models: ggml-small.bin (~465 MB), ggml-base.bin (~141 MB).
+# Type: path | Default: unset
+# UI hint: [settings:STT]. When `engine = "whisper"` and this path is missing,
+#         show a highlighted card: "Whisper small model needed (465 MB) —
+#         [Install]". The Install button calls the first-run downloader.
+model_path = "models/stt/whisper/ggml-small.bin"
+
+
+# ── Per-context tuning: command recognition (short utterances) ──
+[stt.commands]
+# UI hint: [advanced] "Voice commands — fine tuning" (disclosure group).
+
+# Seconds of silence after speech before the utterance is finalized.
+# Shorter = faster response, more risk of truncating mid-word.
+# Type: float | Range: 0.3–3.0 | Default: 0.8
+# UI hint: slider "Silence timeout" with value bubble.
+# silence_timeout = 0.8
+
+# Maximum recording duration (Whisper only — Apple auto-stops on silence).
+# Type: float | Range: 1.0–30.0 | Default: 4.0
+# UI hint: slider "Max command length".
+# max_record_seconds = 4
+
+# Minimum RMS amplitude (0–32767) treated as speech (Whisper only).
+# Type: int | Range: 100–5000 | Default: 500
+# UI hint: slider "Noise gate".
+# speech_threshold = 500
+
+
+# ── Per-context tuning: note dictation (long utterances) ──
+[stt.dictation]
+# UI hint: [advanced] "Note dictation — fine tuning" (disclosure group).
+
+# Longer silence window so natural pauses don't finalize the note.
+# Type: float | Range: 0.5–5.0 | Default: 1.5
+# silence_timeout = 1.5
+
+# Type: float | Range: 5.0–300.0 | Default: 60.0
+# max_record_seconds = 60
+
+# Type: int | Range: 100–5000 | Default: 500
+# speech_threshold = 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [playback] — audio output.
+# ─────────────────────────────────────────────────────────────────────────────
+[playback]
+
+# Use the no-op fake engine (for CI / headless environments). On a real Mac,
+# always false.
+# Type: bool | Default: false
+# UI hint: [hidden] — never exposed in the UI.
+fake = false
+
+
+# =============================================================================
+# Discovered at runtime — NOT stored in this file
+# =============================================================================
+#
+# The settings page shows lots of things that aren't in the TOML. They come
+# from discovery scans the runtime performs on demand:
+#
+#   discovery.list_languages()      → BCP-47 tags + display names, filtered
+#                                     by what voices are installed.
+#   discovery.list_voices(backend)  → {id, display, lang, gender, backend}
+#                                     from {model}/voices.manifest.json
+#                                     intersected with files on disk.
+#   discovery.list_tts_backends()   → {id, name, available, reason?} — "mlx"
+#                                     is available iff the weights file
+#                                     exists and the feature is compiled in.
+#   discovery.list_stt_engines()    → same shape as above: "apple" (always on
+#                                     macOS), "whisper" (iff model_path exists).
+#
+# The UI should render these lists directly — do not duplicate them into
+# the TOML. Lists change when the user installs or removes an asset via the
+# "Installations" section of Settings.

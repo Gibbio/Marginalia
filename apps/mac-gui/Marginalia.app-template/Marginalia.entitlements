@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Microphone is always needed: STT commands + note dictation. -->
+    <key>com.apple.security.device.microphone</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Import files via NSOpenPanel. Read-write so the runtime can also
+         cache synthesized audio next to the user's document directory. -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- Network access is GATED by the UI's Installations section only.
+         Keep this entitlement present so the first-run downloader works;
+         the app enforces "no other network access" at the code level. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>

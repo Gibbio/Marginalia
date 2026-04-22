@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "voices": [
+    {"id": "if_sara", "display": "Sara", "lang": "it-IT", "gender": "female"},
+    {"id": "im_nicola", "display": "Nicola", "lang": "it-IT", "gender": "male"}
+  ]
+}

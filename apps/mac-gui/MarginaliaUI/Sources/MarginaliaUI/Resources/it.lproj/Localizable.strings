@@ -1,0 +1,28 @@
+/* Marginalia — Italian strings.
+   Keys are kebab-case identifiers grouped by surface. Add entries as
+   views migrate from hard-coded strings to T("key"). */
+
+// Settings sub-nav
+"settings.nav.language"       = "Lingua";
+"settings.nav.voice"          = "Voce";
+"settings.nav.stt"            = "Riconoscimento vocale";
+"settings.nav.commands"       = "Comandi vocali";
+"settings.nav.audio"          = "Audio & lettura";
+"settings.nav.installations"  = "Installazioni";
+"settings.nav.diagnostics"    = "Diagnostica";
+"settings.nav.interface"      = "Lingua interfaccia";
+
+// Settings top-bar
+"settings.top.back"           = "torna alla lettura";
+"settings.top.title"          = "Impostazioni";
+"settings.top.pending"        = "modifiche in sospeso";
+"settings.top.respawn"        = "riavvia motore";
+"settings.top.apply"          = "Applica";
+"settings.top.applying"       = "Applicazione…";
+
+// Settings — Interface language
+"settings.interface.title"    = "Lingua interfaccia";
+"settings.interface.sub"      = "la lingua dei testi dell'app. il cambio richiede di riavviare Marginalia.";
+"settings.interface.italian"  = "Italiano";
+"settings.interface.english"  = "English";
+"settings.interface.restart"  = "Riavvia Marginalia per applicare la nuova lingua.";

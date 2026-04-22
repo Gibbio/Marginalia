@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>Marginalia</string>
+    <key>CFBundleExecutable</key>
+    <string>Marginalia</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.gibbio.marginalia.dev</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Marginalia</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.9.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Marginalia ascolta i tuoi comandi vocali e le note dettate per interagire con il testo letto ad alta voce.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Marginalia usa il riconoscimento vocale per rispondere ai tuoi comandi e trascrivere le note dettate.</string>
+    <!-- Fonts bundled under Contents/Resources/fonts/ (see ATSApplicationFontsPath).
+         Keeps the design typography consistent even on machines without the fonts installed. -->
+    <key>ATSApplicationFontsPath</key>
+    <string>fonts</string>
+</dict>
+</plist>

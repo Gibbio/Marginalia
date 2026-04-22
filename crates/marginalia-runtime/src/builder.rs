@@ -18,7 +18,18 @@ use std::path::{Path, PathBuf};
 
 /// Side resources that must outlive the runtime but can't live inside it
 /// (e.g. `cpal::Stream` is `!Send` and `SqliteRuntime` is behind `Arc<Mutex>`).
+///
+/// Kept by the owning application on its main thread. Drop semantics:
+/// dropping the sidecar drops the AEC pipeline, which closes the mic stream
+/// and lets the Apple helper's `Arc<AppleHelperShared>` refcount drop to zero
+/// (which in turn `kill()`s the Swift helper in its `Drop` impl). This is
+/// what makes `apply_provider_spec` able to tear down and respawn STT.
 pub struct RuntimeSidecar {
+    /// The live AEC pipeline (Apple STT only). Holding `Some(...)` here keeps
+    /// the cpal input stream open; replacing it with a new pipeline or
+    /// setting it to `None` shuts the old one down cleanly.
+    #[cfg(feature = "apple-stt")]
+    pub aec_pipeline: Option<marginalia_stt_apple::aec_pipeline::AecPipeline>,
     /// Shared waveform data for AEC visualization (Apple STT only).
     #[cfg(feature = "apple-stt")]
     pub waveform_data:
@@ -217,6 +228,22 @@ impl RuntimeBuilder {
         let mut _waveform_data: Option<
             std::sync::Arc<std::sync::Mutex<marginalia_stt_apple::aec_pipeline::WaveformData>>,
         > = None;
+        #[cfg(feature = "apple-stt")]
+        let mut _aec_pipeline: Option<marginalia_stt_apple::aec_pipeline::AecPipeline> = None;
+
+        // Shared slot for the AEC render sender. Wired into the playback engine
+        // once, then updated whenever the AEC pipeline is respawned (language
+        // change, engine switch). Keeps the playback callback stable across
+        // provider reconfigurations.
+        #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+        let aec_render_slot = crate::reconfigure::AecRenderSlot::new();
+        #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+        if let Some(ref mut pe) = playback_engine {
+            let slot = aec_render_slot.clone();
+            pe.set_play_samples_callback(Box::new(move |samples| {
+                slot.send_set_reference(samples);
+            }));
+        }
 
         let stt_engine = self.stt.engine.to_lowercase();
 
@@ -224,13 +251,7 @@ impl RuntimeBuilder {
             #[cfg(feature = "apple-stt")]
             {
                 let commands = self.voice_commands.all_words();
-                let language = match self.stt.language.as_deref() {
-                    None => "it-IT".to_string(),
-                    Some(l) if l.contains('-') => l.to_string(),
-                    Some(l) if l.eq_ignore_ascii_case("it") => "it-IT".to_string(),
-                    Some(l) if l.eq_ignore_ascii_case("en") => "en-US".to_string(),
-                    Some(l) => l.to_string(),
-                };
+                let language = crate::reconfigure::normalize_apple_language(&self.stt.language);
                 let cmd_silence = self.stt.commands.silence_timeout.unwrap_or(0.8);
                 let dict_silence = self.stt.dictation.silence_timeout.unwrap_or(1.5);
                 let dict_max = self.stt.dictation.max_record_seconds.unwrap_or(60.0);
@@ -244,16 +265,10 @@ impl RuntimeBuilder {
                     Ok((rec, dict, aec_pipeline)) => {
                         runtime.set_command_recognizer(rec);
                         runtime.set_dictation_transcriber(dict);
-                        let render_tx = aec_pipeline.render_sender();
                         #[cfg(feature = "host-playback")]
-                        if let Some(ref mut pe) = playback_engine {
-                            pe.set_play_samples_callback(Box::new(move |samples| {
-                                use marginalia_stt_apple::aec_pipeline::RenderCommand;
-                                let _ = render_tx.try_send(RenderCommand::SetReference(samples));
-                            }));
-                        }
+                        aec_render_slot.install(aec_pipeline.render_sender());
                         _waveform_data = Some(aec_pipeline.waveform_data());
-                        Box::leak(Box::new(aec_pipeline));
+                        _aec_pipeline = Some(aec_pipeline);
                         runtime.set_provider_doctor_blob(
                             "apple_stt",
                             json!({
@@ -361,6 +376,8 @@ impl RuntimeBuilder {
         Ok(BuildOutput {
             runtime,
             sidecar: RuntimeSidecar {
+                #[cfg(feature = "apple-stt")]
+                aec_pipeline: _aec_pipeline,
                 #[cfg(feature = "apple-stt")]
                 waveform_data: _waveform_data,
                 #[cfg(not(feature = "apple-stt"))]

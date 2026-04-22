@@ -1,0 +1,38 @@
+[package]
+name = "marginalia-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "UniFFI bindings for the Marginalia runtime — Swift / Kotlin / Python consumers"
+
+[lib]
+name = "marginalia_ffi"
+# staticlib for the Swift/Kotlin import (linked into the .app),
+# cdylib for the uniffi-bindgen harness and ad-hoc dlopen consumers.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi_bindgen.rs"
+
+[features]
+# Mirror the runtime's features so the .app can choose what to bundle.
+# macOS arm64 builds enable everything (mlx-tts, apple-stt).
+# Cross-platform fallback keeps just fake providers + kokoro ONNX.
+default = ["url-import"]
+mlx-tts = ["marginalia-runtime/mlx-tts"]
+apple-stt = ["marginalia-runtime/apple-stt"]
+whisper-stt = ["marginalia-runtime/whisper-stt"]
+host-playback = ["marginalia-runtime/host-playback"]
+url-import = ["marginalia-runtime/url-import"]
+
+[dependencies]
+log = "0.4"
+marginalia-config = { path = "../marginalia-config" }
+marginalia-core = { path = "../marginalia-core" }
+marginalia-models = { path = "../marginalia-models" }
+marginalia-runtime = { path = "../marginalia-runtime" }
+thiserror = "2"
+uniffi = { version = "0.29", features = ["cli"] }
+
+[build-dependencies]
+uniffi = { version = "0.29", features = ["build"] }

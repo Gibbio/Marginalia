@@ -59,6 +59,22 @@ voice-mlx/
 # Log files
 *.log
 
+# mac-gui live build artifacts — regenerated from `marginalia-ffi` by
+# apps/mac-gui/scripts/build-rust-xcframework.sh. Source of truth is the
+# Rust crate, not these copies.
+apps/mac-gui/Generated/
+apps/mac-gui/MarginaliaUI/Sources/MarginaliaKit/
+apps/mac-gui/MarginaliaUI/.build/
+apps/mac-gui/MarginaliaUI/.swiftpm/
+apps/mac-gui/build/
+
+# mac-gui Xcode project is generated from `apps/mac-gui/project.yml` via
+# `make xcodegen` (XcodeGen). Don't commit the pbxproj — it regenerates
+# deterministically and we avoid merge conflicts on binary-ish plists.
+apps/mac-gui/Marginalia.xcodeproj/
+apps/mac-gui/DerivedData/
+apps/mac-gui/*.xcworkspace/
+
 # Editors and OS
 .DS_Store
 .idea/

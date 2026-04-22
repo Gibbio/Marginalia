@@ -1,6 +1,8 @@
 pub mod builder;
+pub mod discovery;
 mod events;
 mod frontend;
+pub mod reconfigure;
 
 use marginalia_core::application::{
     DocumentIngestionOutcome, DocumentIngestionService, IngestionError, SessionQueryError,
@@ -45,8 +47,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use builder::{BuildOutput, RuntimeBuilder, RuntimeSidecar};
+pub use discovery::{Discovery, Gender, LangInfo, SttEngine, TtsBackend, VoiceInfo};
 pub use events::{EventCallback, RuntimeEvent, RuntimeEventSink};
 pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
+pub use reconfigure::{apply_provider_spec, ApplyReport, ProviderSpec, ReconfigureContext};
 pub use marginalia_core::ports::SttEngineOutput;
 
 /// Routes import requests to the right backend by file extension.
@@ -395,6 +399,16 @@ impl SqliteRuntime {
     /// Replace the TTS speech synthesizer provider.
     pub fn set_speech_synthesizer(&mut self, synthesizer: impl SpeechSynthesizer + Send + 'static) {
         self.tts = Box::new(synthesizer);
+    }
+
+    /// Replace the TTS speech synthesizer provider with a pre-boxed trait
+    /// object. Used by `reconfigure::apply_provider_spec`, which picks the
+    /// concrete backend at runtime and returns `Box<dyn SpeechSynthesizer>`.
+    pub fn set_speech_synthesizer_boxed(
+        &mut self,
+        synthesizer: Box<dyn SpeechSynthesizer + Send>,
+    ) {
+        self.tts = synthesizer;
     }
 
     /// Store a provider diagnostic blob for the doctor report.
@@ -834,6 +848,42 @@ impl SqliteRuntime {
             ]),
         );
         Ok(note)
+    }
+
+    /// List all saved notes for a document, newest first.
+    /// Pass `None` to target the document of the active session; returns
+    /// empty when no session is active.
+    pub fn list_notes(&self, document_id: Option<&str>) -> Vec<VoiceNote> {
+        let target = match document_id {
+            Some(id) => id.to_string(),
+            None => match self.session_repository.get_active_session() {
+                Some(s) => s.document_id,
+                None => return Vec::new(),
+            },
+        };
+        let mut notes = self.note_repository.list_notes_for_document(&target);
+        notes.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        notes
+    }
+
+    /// Synthesize a one-off preview sample with the current TTS backend.
+    /// Used by the GUI's Settings page to let users hear a voice before
+    /// committing to it. Bypasses the per-chunk cache — the result is a
+    /// short throwaway file under `tts_cache_dir` (the caller is responsible
+    /// for playback and doesn't need to clean it up; the cache eviction
+    /// policy will reap it eventually).
+    pub fn synthesize_preview(
+        &mut self,
+        text: &str,
+        voice: &str,
+        language: &str,
+    ) -> Result<SynthesisResult, SynthesisError> {
+        let request = SynthesisRequest {
+            text: text.to_string(),
+            voice: Some(voice.to_string()),
+            language: language.to_string(),
+        };
+        self.tts.synthesize(request)
     }
 
     /// Generate a diagnostic report of all configured providers and their status.

@@ -14,7 +14,7 @@
 //! All types derive `Deserialize` + `Default` so they work seamlessly with
 //! TOML (or any other serde format).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 // =============================================================================
@@ -28,13 +28,14 @@ use std::path::PathBuf;
 /// - `[stt.whisper]` / `[stt.apple]` — engine-specific settings
 /// - `[stt.commands]` — tuning for short-utterance command recognition
 /// - `[stt.dictation]` — tuning for long-utterance note dictation
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SttSection {
     /// Engine choice: `"apple"` or `"whisper"`. Default: `"whisper"`.
     #[serde(default = "default_stt_engine")]
     pub engine: String,
     /// Recognition language. Whisper expects ISO (`"it"`), Apple expects
     /// BCP-47 (`"it-IT"`); the backend normalizes between the two.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
     /// Show raw STT transcript in the app's debug/log pane.
     #[serde(default)]
@@ -59,28 +60,32 @@ fn default_stt_engine() -> String {
 
 /// Apple-engine settings. Currently empty; reserved for future options
 /// (e.g. on-device requirement, custom locale).
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AppleEngineSection {}
 
 /// Whisper-engine settings.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WhisperEngineSection {
     /// Path to the Whisper ggml model file (e.g. `ggml-small.bin`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model_path: Option<PathBuf>,
 }
 
 /// Per-context tuning applied on top of the chosen engine. Each context
 /// (commands / dictation) gets its own values for the same parameter set.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SttContextSection {
     /// Seconds of silence after speech before emitting/finalizing.
     /// Default: 0.8 (commands) / 1.5 (dictation).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub silence_timeout: Option<f64>,
     /// Maximum recording duration in seconds (Whisper only).
     /// Default: 4 (commands) / 60 (dictation).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_record_seconds: Option<f64>,
     /// Minimum RMS amplitude (0-32767) considered as speech (Whisper only).
     /// Default: 500.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speech_threshold: Option<i16>,
 }
 
@@ -91,7 +96,7 @@ pub struct SttContextSection {
 /// Maps actions to trigger words (`[voice_commands]`). The STT backend
 /// listens for all words; when one is recognized, the corresponding action
 /// is executed. Users can add synonyms in any language.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VoiceCommandsSection {
     #[serde(default = "default_pause")]
     pub pause: Vec<String>,
@@ -223,13 +228,16 @@ fn default_where() -> Vec<String> {
 // =============================================================================
 
 /// Kokoro ONNX TTS configuration (`[kokoro]`).
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct KokoroSection {
     /// Directory containing `kokoro.onnx`, `config.json`, `voices/`, and `lib/`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub assets_root: Option<PathBuf>,
     /// Directory for synthesised WAV cache.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tts_cache_dir: Option<PathBuf>,
     /// External phonemizer program (e.g. `espeak-ng`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub phonemizer_program: Option<String>,
     /// Arguments for the phonemizer program.
     #[serde(default)]
@@ -237,7 +245,7 @@ pub struct KokoroSection {
 }
 
 /// Kokoro MLX Metal TTS configuration (`[mlx]`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MlxSection {
     /// HuggingFace model repo or local path. Default: `prince-canuma/Kokoro-82M`.
     #[serde(default = "default_mlx_model")]
@@ -268,9 +276,133 @@ fn default_mlx_voice() -> String {
 // =============================================================================
 
 /// Playback configuration (`[playback]`).
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct PlaybackSection {
     /// Use the no-op fake playback engine (headless/CI environments).
     #[serde(default)]
     pub fake: bool,
+}
+
+// =============================================================================
+// Top-level app config
+// =============================================================================
+
+/// Top-level Marginalia configuration, shared across all hosts (TUI, future
+/// macOS GUI, mobile). Wraps the section types above with a handful of
+/// app-agnostic top-level fields.
+///
+/// Loaded from TOML. Hosts pick their own default path (TUI uses
+/// `apps/tui-rs/marginalia.toml`; the macOS GUI will use
+/// `~/Library/Application Support/Marginalia/marginalia.toml`).
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AppConfig {
+    /// Path to the SQLite database. Default: `.marginalia/beta.sqlite3`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database_path: Option<PathBuf>,
+    /// Directory for cached TTS WAV/FLAC files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tts_cache_dir: Option<PathBuf>,
+    /// Target characters per chunk when splitting imported documents.
+    /// Default: 300.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chunk_target_chars: Option<usize>,
+    /// Trigger words mapped to actions (`pause`, `next`, etc.).
+    #[serde(default)]
+    pub voice_commands: VoiceCommandsSection,
+    /// Speech-to-text engine settings.
+    #[serde(default)]
+    pub stt: SttSection,
+    #[serde(default)]
+    pub kokoro: KokoroSection,
+    #[serde(default)]
+    pub playback: PlaybackSection,
+    #[serde(default)]
+    pub mlx: MlxSection,
+}
+
+impl AppConfig {
+    /// Load a config from an explicit path. Returns `Err` if the file is
+    /// missing or fails to parse — callers decide whether to fall back to
+    /// defaults or surface the error to the user.
+    pub fn load_from(path: &std::path::Path) -> Result<Self, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        toml::from_str(&content)
+            .map_err(|e| format!("cannot parse {}: {e}", path.display()))
+    }
+
+    /// Load from `MARGINALIA_CONFIG` env var, or from `default_path` if
+    /// the env var is unset. Missing or unparseable files yield `Default`,
+    /// with a warning via the `log` crate. Matches the TUI's existing
+    /// forgiving behavior.
+    pub fn load_or_default(default_path: &std::path::Path) -> Self {
+        let path = std::env::var("MARGINALIA_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| default_path.to_path_buf());
+
+        if !path.exists() {
+            return Self::default();
+        }
+
+        match Self::load_from(&path) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                log::warn!("{e}");
+                Self::default()
+            }
+        }
+    }
+
+    /// Serialize this config to TOML and write it atomically to `path`.
+    /// The output is canonical (clean, comment-less) — intended for
+    /// programmatic writes from the GUI's Apply button. The hand-maintained
+    /// template in `apps/tui-rs/marginalia.toml` remains the documentation
+    /// reference.
+    pub fn write_to(&self, path: &std::path::Path) -> Result<(), String> {
+        let body = toml::to_string_pretty(self)
+            .map_err(|e| format!("serialize config: {e}"))?;
+        let header = "# Marginalia — written by the app. Edit via Settings UI.\n";
+        let full = format!("{header}{body}");
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        }
+        // Write to a sibling `.tmp` then rename → atomic swap, avoids
+        // leaving a half-written file on crash.
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, full)
+            .map_err(|e| format!("write {}: {e}", tmp.display()))?;
+        std::fs::rename(&tmp, path)
+            .map_err(|e| format!("rename {} → {}: {e}", tmp.display(), path.display()))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_minimal_config() {
+        let mut cfg = AppConfig::default();
+        cfg.mlx.voice = "if_sara".to_string();
+        cfg.stt.engine = "apple".to_string();
+        cfg.stt.language = Some("it-IT".to_string());
+
+        let dir = std::env::temp_dir().join(format!("marginalia-cfg-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("marginalia.toml");
+
+        cfg.write_to(&path).unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(loaded.mlx.voice, "if_sara");
+        assert_eq!(loaded.stt.engine, "apple");
+        assert_eq!(loaded.stt.language.as_deref(), Some("it-IT"));
+
+        // Verify None fields are omitted (not written as `= null`).
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(!contents.contains("= null"));
+    }
 }

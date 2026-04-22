@@ -89,8 +89,9 @@ PDFIUM_DIR         ?= models/pdf
 
 .PHONY: \
 	bootstrap-beta bootstrap-kokoro bootstrap-ort bootstrap-vosk bootstrap-vosk-lib \
-	bootstrap-mlx _kokoro-hf-cli _kokoro-curl bootstrap-pdf \
+	bootstrap-mlx mlx-manifest build-stt-helper _kokoro-hf-cli _kokoro-curl bootstrap-pdf \
 	check-deps tui-rs beta-test beta-doctor \
+	build-xcframework bundle-mock bundle-live xcodegen gui-xcode \
 	setup bootstrap bootstrap-runtime-deps bootstrap-providers \
 	bootstrap-kokoro-python bootstrap-whisper bootstrap-system-deps setup-config \
 	format lint test smoke run-cli-help doctor \
@@ -304,7 +305,142 @@ bootstrap-mlx:
 		fi; \
 	done; \
 	echo ""; \
+	$(MAKE) --no-print-directory mlx-manifest; \
 	echo "MLX assets ready at $(MLX_MODEL_DIR)/."
+
+# Regenerate voices.manifest.json from the safetensors files actually present
+# on disk. The GUI/runtime reads this manifest to enumerate installed voices
+# without ever scanning the upstream HuggingFace repo.
+#
+# Voice id format: {lang_char}{gender_char}_{name}   (e.g. if_sara = Italian female Sara)
+#   lang:   a=en-US b=en-GB i=it-IT j=ja-JP z=zh-CN e=es-ES f=fr-FR h=hi-IN p=pt-BR
+#   gender: f=female m=male
+mlx-manifest:
+	@VOICES_DIR="$(MLX_MODEL_DIR)/voices"; \
+	MANIFEST="$(MLX_MODEL_DIR)/voices.manifest.json"; \
+	if [ ! -d "$$VOICES_DIR" ]; then \
+		echo "mlx-manifest: $$VOICES_DIR not found, skipping."; \
+		exit 0; \
+	fi; \
+	{ \
+		printf '{\n  "schema_version": 1,\n  "voices": [\n'; \
+		FIRST=1; \
+		for F in "$$VOICES_DIR"/*.safetensors; do \
+			[ -f "$$F" ] || continue; \
+			ID=$$(basename "$$F" .safetensors); \
+			PREFIX=$$(printf '%s' "$$ID" | cut -d'_' -f1); \
+			NAME=$$(printf '%s' "$$ID" | cut -d'_' -f2-); \
+			LC=$$(printf '%s' "$$PREFIX" | cut -c1); \
+			GC=$$(printf '%s' "$$PREFIX" | cut -c2); \
+			case "$$LC" in \
+				a) LANG_BCP=en-US ;; b) LANG_BCP=en-GB ;; i) LANG_BCP=it-IT ;; \
+				j) LANG_BCP=ja-JP ;; z) LANG_BCP=zh-CN ;; e) LANG_BCP=es-ES ;; \
+				f) LANG_BCP=fr-FR ;; h) LANG_BCP=hi-IN ;; p) LANG_BCP=pt-BR ;; \
+				*) LANG_BCP=und ;; \
+			esac; \
+			case "$$GC" in f) GENDER=female ;; m) GENDER=male ;; *) GENDER=unknown ;; esac; \
+			DISPLAY=$$(printf '%s' "$$NAME" | awk '{print toupper(substr($$0,1,1)) substr($$0,2)}'); \
+			if [ $$FIRST -eq 0 ]; then printf ',\n'; fi; \
+			printf '    {"id": "%s", "display": "%s", "lang": "%s", "gender": "%s"}' \
+				"$$ID" "$$DISPLAY" "$$LANG_BCP" "$$GENDER"; \
+			FIRST=0; \
+		done; \
+		printf '\n  ]\n}\n'; \
+	} > "$$MANIFEST"; \
+	echo "  wrote $$MANIFEST"
+
+# ---------------------------------------------------------------------------
+# Pre-compiled Swift STT helper
+#
+# Compiles the source at `crates/marginalia-stt-apple/helper/stt-helper.swift`
+# into `target/stt-helper/stt-helper-vN` so the helper can be bundled inside
+# `Marginalia.app/Contents/Helpers/` by the Xcode build. Also works in
+# dev — setting `MARGINALIA_STT_HELPER=$(pwd)/target/stt-helper/stt-helper-vN`
+# lets the TUI skip compile-on-the-fly.
+#
+# Bump HELPER_VERSION in crates/marginalia-stt-apple/src/lib.rs whenever the
+# .swift file changes; that cascades into the filename here.
+# ---------------------------------------------------------------------------
+
+# Parse the `HELPER_VERSION` constant out of the Rust file so this never drifts.
+# Capture the literal after `= ` specifically — otherwise the `u32` in the type
+# would pollute the value.
+STT_HELPER_VERSION := $(shell awk '/^const HELPER_VERSION/ { match($$0, /=[[:space:]]*[0-9]+/); v=substr($$0, RSTART+1, RLENGTH-1); gsub(/[[:space:]]/, "", v); print v; exit }' crates/marginalia-stt-apple/src/lib.rs)
+STT_HELPER_OUT_DIR := target/stt-helper
+STT_HELPER_BIN     := $(STT_HELPER_OUT_DIR)/stt-helper-v$(STT_HELPER_VERSION)
+
+build-stt-helper:
+	@OS=$$(uname -s); \
+	if [ "$$OS" != "Darwin" ]; then \
+		echo "build-stt-helper: macOS only (skipping on $$OS)."; \
+		exit 0; \
+	fi; \
+	mkdir -p "$(STT_HELPER_OUT_DIR)"; \
+	echo "Compiling $(STT_HELPER_BIN) (v$(STT_HELPER_VERSION))…"; \
+	swiftc -O \
+		-o "$(STT_HELPER_BIN)" \
+		crates/marginalia-stt-apple/helper/stt-helper.swift \
+		-framework Speech -framework AVFoundation -framework AudioToolbox; \
+	echo "Signing ad-hoc (dev mode; re-sign with Developer ID during archive)…"; \
+	codesign --force --sign - "$(STT_HELPER_BIN)"; \
+	echo ""; \
+	echo "  Built: $(STT_HELPER_BIN)"; \
+	echo "  Dev use: export MARGINALIA_STT_HELPER=$$(pwd)/$(STT_HELPER_BIN)"
+
+# ---------------------------------------------------------------------------
+# macOS GUI — xcframework + .app bundle
+# ---------------------------------------------------------------------------
+
+# Build MarginaliaKit.xcframework + Marginalia.swift bindings into
+# apps/mac-gui/Generated/. Apple Silicon only — MLX/Metal is required and we
+# don't ship a non-MLX macOS path. Prerequisite for `bundle-live`.
+#
+# Usage:
+#   make build-xcframework                  # arm64 release (default)
+#   PROFILE=debug make build-xcframework    # faster, unoptimised
+build-xcframework:
+	@OS=$$(uname -s); ARCH=$$(uname -m); \
+	if [ "$$OS" != "Darwin" ] || [ "$$ARCH" != "arm64" ]; then \
+		echo "build-xcframework: Apple Silicon macOS only (got $$OS $$ARCH)."; \
+		exit 1; \
+	fi
+	apps/mac-gui/scripts/build-rust-xcframework.sh
+
+# Build the mock .app (MockHost) — the demo/preview bundle. No Rust runtime,
+# no models, no STT helper beyond the ad-hoc signed binary. Fastest path to a
+# clickable `.app`.
+bundle-mock:
+	apps/mac-gui/scripts/build-app-bundle.sh --mock
+
+# Build the live .app (FFIHost) — links MarginaliaKit.xcframework and ships
+# with the STT helper, bundled fonts, and (if present locally) MLX models.
+# First run: `make build-xcframework` to produce the xcframework. `bundle-live`
+# rebuilds the xcframework automatically; pass SKIP_XCFRAMEWORK=1 to skip.
+bundle-live:
+	@if [ "$${SKIP_XCFRAMEWORK:-0}" != "1" ]; then \
+		$(MAKE) build-xcframework; \
+	fi
+	apps/mac-gui/scripts/build-app-bundle.sh --live
+
+# Regenerate the Xcode project from `apps/mac-gui/project.yml`. The generated
+# `.xcodeproj` is .gitignored — only `project.yml` is source-of-truth.
+#
+# Install xcodegen once via `brew install xcodegen`.
+xcodegen:
+	@OS=$$(uname -s); \
+	if [ "$$OS" != "Darwin" ]; then \
+		echo "xcodegen: macOS only (got $$OS)."; exit 1; \
+	fi
+	@command -v xcodegen >/dev/null || { \
+		echo "xcodegen not found — run: brew install xcodegen"; exit 1; \
+	}
+	cd apps/mac-gui && xcodegen generate
+
+# Regenerate + open the `.xcodeproj` in Xcode. Use this to kick off a fresh
+# Xcode session; the project itself is not committed, so running `make
+# gui-xcode` is the canonical "open the GUI project" command on this repo.
+gui-xcode: xcodegen
+	open apps/mac-gui/Marginalia.xcodeproj
 
 # ---------------------------------------------------------------------------
 # PDF import — PDFium runtime library

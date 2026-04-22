@@ -1,4 +1,3 @@
-use crate::config::TuiConfig;
 use marginalia_runtime::{RuntimeBuilder, RuntimeFrontend};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -289,6 +288,12 @@ impl BackendClient {
 
 pub(crate) struct BetaBackendClient {
     runtime: Arc<Mutex<Box<dyn RuntimeFrontend + Send>>>,
+    /// Keeps `!Send` resources (cpal input stream via AecPipeline) alive for
+    /// the lifetime of the client. Stays in the main thread — the backend
+    /// client itself is `!Send` as a consequence, which is fine since the TUI
+    /// owns it on the UI thread.
+    #[allow(dead_code)]
+    sidecar: marginalia_runtime::RuntimeSidecar,
     logs: VecDeque<BackendLogEntry>,
     sequence: u64,
     voice_cmd_rx: Option<mpsc::Receiver<(Option<String>, Option<String>)>>,
@@ -307,7 +312,7 @@ struct AsyncCommandResult {
 
 impl BetaBackendClient {
     fn spawn() -> Result<Self, String> {
-        let config = TuiConfig::load();
+        let config = crate::config::load();
 
         let db_path = config
             .database_path
@@ -362,16 +367,20 @@ impl BetaBackendClient {
             Some(rx)
         };
 
+        #[cfg(feature = "apple-stt")]
+        let waveform_data = output.sidecar.waveform_data.clone();
+
         let mut client = Self {
             runtime: Arc::new(Mutex::new(
                 Box::new(runtime) as Box<dyn RuntimeFrontend + Send>
             )),
+            sidecar: output.sidecar,
             logs: VecDeque::with_capacity(256),
             sequence: 0,
             voice_cmd_rx,
             async_result_rx: None,
             #[cfg(feature = "apple-stt")]
-            waveform_data: output.sidecar.waveform_data,
+            waveform_data,
         };
         client.push_log(format!(
             "ready db={} playback={} tts={} stt={} dictation={}",

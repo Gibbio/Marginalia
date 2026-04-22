@@ -22,7 +22,7 @@ use marginalia_core::ports::{
     SpeechInterruptMonitor,
 };
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex, Once};
 use std::time::Duration;
@@ -31,18 +31,55 @@ const COMMAND_PROVIDER_NAME: &str = "apple-stt";
 const DICTATION_PROVIDER_NAME: &str = "apple-dictation-stt";
 
 /// Bump when SWIFT_HELPER_SOURCE changes so the cached binary gets recompiled.
+///
+/// Also bump when modifying anything in `helper/stt-helper.swift`.
 const HELPER_VERSION: u32 = 9;
 
 static COMPILE_HELPER: Once = Once::new();
 
-fn helper_path() -> PathBuf {
-    std::env::temp_dir()
-        .join("marginalia-stt-apple")
-        .join(format!("stt-helper-v{HELPER_VERSION}"))
+/// File name used both by the bundled binary and the dev-mode cache.
+fn helper_filename() -> String {
+    format!("stt-helper-v{HELPER_VERSION}")
 }
 
+/// Cache path used by the dev-mode fallback (compile-on-the-fly).
+fn cache_helper_path() -> PathBuf {
+    std::env::temp_dir()
+        .join("marginalia-stt-apple")
+        .join(helper_filename())
+}
+
+/// Returns the helper binary path using a 3-tier resolver:
+/// 1. `MARGINALIA_STT_HELPER` env var (fully explicit — used by the Xcode
+///    launch scheme and by the Makefile target `run-stt-helper`).
+/// 2. `<app-bundle>/Contents/Helpers/stt-helper-vN` if the current executable
+///    is inside a `.app` bundle (production path for the signed GUI).
+/// 3. `$TMPDIR/marginalia-stt-apple/stt-helper-vN`, compile-on-the-fly via
+///    `swiftc` (dev-mode fallback — what the TUI has always done).
+///
+/// Resolving via (1) or (2) is zero-cost and does not invoke `swiftc` — that
+/// matters inside a signed/sandboxed `.app` where `swiftc` isn't available.
 fn ensure_helper() -> Result<PathBuf, String> {
-    let path = helper_path();
+    // (1) Explicit override.
+    if let Ok(p) = std::env::var("MARGINALIA_STT_HELPER") {
+        let path = PathBuf::from(&p);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "MARGINALIA_STT_HELPER points to {p} but the file does not exist"
+        ));
+    }
+
+    // (2) macOS `.app` bundle — look for the helper under Contents/Helpers/.
+    if let Some(bundle_helper) = bundled_helper_path() {
+        if bundle_helper.is_file() {
+            return Ok(bundle_helper);
+        }
+    }
+
+    // (3) Dev-mode cache + compile-on-the-fly fallback.
+    let path = cache_helper_path();
     COMPILE_HELPER.call_once(|| {
         let dir = path.parent().unwrap();
         let _ = std::fs::create_dir_all(dir);
@@ -72,8 +109,26 @@ fn ensure_helper() -> Result<PathBuf, String> {
     if path.exists() {
         Ok(path)
     } else {
-        Err("Swift helper not compiled. Is Xcode installed?".to_string())
+        Err("Swift helper not compiled. Is Xcode installed, or set \
+             MARGINALIA_STT_HELPER to a prebuilt binary."
+            .to_string())
     }
+}
+
+/// Walk up from the current executable's path looking for a `.app` bundle,
+/// then return `<app>/Contents/Helpers/stt-helper-vN`. Returns `None` when
+/// the executable is not inside a bundle (e.g. running under `cargo` or
+/// `swift run`).
+fn bundled_helper_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let mut cur: &Path = exe.as_path();
+    while let Some(parent) = cur.parent() {
+        if parent.extension().and_then(|e: &std::ffi::OsStr| e.to_str()) == Some("app") {
+            return Some(parent.join("Contents").join("Helpers").join(helper_filename()));
+        }
+        cur = parent;
+    }
+    None
 }
 
 /// Joins commands with `|` for the helper CLI arg. Pipe is safe because
@@ -476,192 +531,9 @@ impl DictationTranscriber for AppleDictationTranscriber {
 /// Mode payload: UTF-8 text, one of "COMMAND" or "DICTATION".
 ///
 /// CLI: `stt-helper <language> <cmd_silence> <dict_silence> <triggers> <sample_rate>`
-const SWIFT_HELPER_SOURCE: &str = r#"
-import Foundation
-import Speech
-import AudioToolbox
-
-let language = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "it-IT"
-let cmdSilenceTimeout = CommandLine.arguments.count > 2
-    ? (Double(CommandLine.arguments[2]) ?? 0.8)
-    : 0.8
-let dictSilenceTimeout = CommandLine.arguments.count > 3
-    ? (Double(CommandLine.arguments[3]) ?? 1.5)
-    : 1.5
-let triggerWords: [String] = CommandLine.arguments.count > 4 && !CommandLine.arguments[4].isEmpty
-    ? CommandLine.arguments[4].split(separator: "|").map { $0.lowercased() }
-    : []
-let sampleRate: Double = CommandLine.arguments.count > 5
-    ? (Double(CommandLine.arguments[5]) ?? 24000)
-    : 24000
-
-setbuf(stdout, nil)
-
-// Mode state. All mutations happen on the main queue.
-enum HelperMode { case command; case dictation }
-var currentMode: HelperMode = .command
-
-// Dictation feedback sounds.
-var dictStartSound: SystemSoundID = 0
-var dictEndSound: SystemSoundID = 0
-AudioServicesCreateSystemSoundID(
-    URL(fileURLWithPath: "/System/Library/Sounds/Tink.aiff") as CFURL, &dictStartSound)
-AudioServicesCreateSystemSoundID(
-    URL(fileURLWithPath: "/System/Library/Sounds/Pop.aiff") as CFURL, &dictEndSound)
-
-// Authorization
-let semaphore = DispatchSemaphore(value: 0)
-SFSpeechRecognizer.requestAuthorization { status in
-    guard status == .authorized else {
-        fputs("Speech recognition not authorized\n", stderr)
-        exit(1)
-    }
-    semaphore.signal()
-}
-semaphore.wait()
-
-let locale = Locale(identifier: language)
-guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
-    fputs("SFSpeechRecognizer not available for \(language)\n", stderr)
-    exit(1)
-}
-if #available(macOS 13.0, *) {
-    recognizer.supportsOnDeviceRecognition = true
-}
-
-// Audio format for buffers received from Rust.
-let audioFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
-let frameSamples = UInt32(sampleRate / 100) // 10ms frame
-
-var currentRequest: SFSpeechAudioBufferRecognitionRequest?
-var isRestarting = false
-var silenceTimer: DispatchWorkItem?
-
-func containsTrigger(_ text: String) -> Bool {
-    if triggerWords.isEmpty { return false }
-    let lower = text.lowercased()
-    return triggerWords.contains(where: { lower.contains($0) })
-}
-
-func emit(_ text: String, mode: HelperMode) {
-    if text.isEmpty { return }
-    print(mode == .command ? "CMD \(text)" : "DICT_END \(text)")
-}
-
-func scheduleRestart() {
-    silenceTimer?.cancel()
-    silenceTimer = nil
-    guard !isRestarting else { return }
-    isRestarting = true
-    currentRequest?.endAudio()
-    currentRequest = nil
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-        isRestarting = false
-        startRecognitionTask()
-    }
-}
-
-func startRecognitionTask() {
-    let request = SFSpeechAudioBufferRecognitionRequest()
-    request.shouldReportPartialResults = true
-    if #available(macOS 13.0, *) {
-        request.requiresOnDeviceRecognition = true
-    }
-    currentRequest = request
-
-    var lastText = ""
-    var emitted = false
-
-    recognizer.recognitionTask(with: request) { result, error in
-        silenceTimer?.cancel()
-        silenceTimer = nil
-        let mode = currentMode
-
-        if let result = result {
-            lastText = result.bestTranscription.formattedString
-
-            if result.isFinal {
-                if !emitted { emit(lastText, mode: mode) }
-                lastText = ""
-                emitted = false
-                scheduleRestart()
-                return
-            }
-
-            let timeout = (mode == .command) ? cmdSilenceTimeout : dictSilenceTimeout
-            let snap = lastText
-            let timer = DispatchWorkItem {
-                if !emitted {
-                    emit(snap, mode: currentMode)
-                    emitted = true
-                }
-                scheduleRestart()
-            }
-            silenceTimer = timer
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timer)
-        }
-
-        if error != nil && !isRestarting { scheduleRestart() }
-    }
-}
-
-// Read exactly N bytes from stdin. Returns nil on EOF.
-func readExact(_ count: Int) -> Data? {
-    var buf = Data(capacity: count)
-    while buf.count < count {
-        let chunk = FileHandle.standardInput.readData(ofLength: count - buf.count)
-        if chunk.isEmpty { return nil }
-        buf.append(chunk)
-    }
-    return buf
-}
-
-// Stdin reader: binary TLV protocol. Processes audio frames and mode commands.
-DispatchQueue.global().async {
-    startRecognitionTask()
-
-    while true {
-        guard let header = readExact(3) else { break }
-        let type = header[0]
-        let length = Int(header[1]) << 8 | Int(header[2])
-        guard let payload = readExact(length) else { break }
-
-        if type == 0x41 { // 'A' — audio frame
-            let sampleCount = length / 4
-            guard sampleCount > 0 else { continue }
-            let pcm = AVAudioPCMBuffer(pcmFormat: audioFormat,
-                                       frameCapacity: UInt32(sampleCount))!
-            pcm.frameLength = UInt32(sampleCount)
-            payload.withUnsafeBytes { raw in
-                let src = raw.bindMemory(to: Float.self)
-                memcpy(pcm.floatChannelData![0], src.baseAddress!, length)
-            }
-            DispatchQueue.main.async {
-                currentRequest?.append(pcm)
-            }
-        } else if type == 0x4D { // 'M' — mode command
-            let text = String(data: payload, encoding: .utf8)?.trimmingCharacters(in: .whitespaces) ?? ""
-            DispatchQueue.main.async {
-                switch text {
-                case "COMMAND":
-                    if currentMode == .dictation && dictEndSound != 0 {
-                        AudioServicesPlaySystemSound(dictEndSound)
-                    }
-                    currentMode = .command
-                    scheduleRestart()
-                case "DICTATION":
-                    if currentMode == .command && dictStartSound != 0 {
-                        AudioServicesPlaySystemSound(dictStartSound)
-                    }
-                    currentMode = .dictation
-                    scheduleRestart()
-                default: break
-                }
-            }
-        }
-    }
-    exit(0)
-}
-
-dispatchMain()
-"#;
+///
+/// The Swift source lives in `helper/stt-helper.swift` so the Xcode project
+/// can compile it as a build phase without re-implementing the text. Keeping
+/// the `include_str!` here means the dev-mode fallback (compile-on-the-fly
+/// via `swiftc`) and the bundled build use the exact same source.
+const SWIFT_HELPER_SOURCE: &str = include_str!("../helper/stt-helper.swift");

@@ -32,29 +32,56 @@ pub struct MlxSpeechSynthesizer {
 impl MlxSpeechSynthesizer {
     /// Create a new MLX synthesizer.
     ///
-    /// * `model_repo` - HuggingFace repo or local path (e.g. "prince-canuma/Kokoro-82M")
-    /// * `voice_name` - Voice preset name (e.g. "af_bella")
+    /// * `model_repo` - Local path to the Kokoro MLX model directory
+    ///   (e.g. "models/tts/mlx"). Must already exist on disk — this
+    ///   constructor never downloads anything.
+    /// * `voice_name` - Voice preset id (e.g. "if_sara"). The file
+    ///   `{model_repo}/voices/{voice_name}.safetensors` must already exist.
     /// * `output_dir` - Directory for WAV output files
+    ///
+    /// Marginalia is offline-only at runtime: if the model directory or the
+    /// voice file is missing, this returns an error instead of attempting any
+    /// network access. Run `make bootstrap-mlx` to install the assets.
     pub fn new(
         model_repo: &str,
         voice_name: &str,
         output_dir: impl AsRef<Path>,
     ) -> Result<Self, String> {
-        let model = voice_tts::load_model(model_repo)
-            .map_err(|e| format!("failed to load Kokoro MLX model: {e}"))?;
+        // Belt-and-braces: make any transitive hf-hub call a no-op, so even a
+        // future code path that forgets to resolve a local file cannot reach
+        // the network. hf-hub honors this env var (falls back to cached files
+        // or errors out without issuing a request).
+        // SAFETY: set at construction time before any hf-hub call can happen.
+        // Callers must ensure no other thread is racing on the same env var.
+        unsafe {
+            std::env::set_var("HF_HUB_OFFLINE", "1");
+        }
 
-        // Prefer a voice file bundled alongside the local model (avoids HF network access).
-        // Falls back to HF Hub only for builtin voices or if the local file is absent.
-        let local_voice = Path::new(model_repo)
+        let model_dir = Path::new(model_repo);
+        if !model_dir.is_dir() {
+            return Err(format!(
+                "Kokoro MLX model directory not found at '{model_repo}'. \
+                 Run `make bootstrap-mlx` to install it."
+            ));
+        }
+
+        let local_voice = model_dir
             .join("voices")
             .join(format!("{voice_name}.safetensors"));
-        let voice = if local_voice.exists() {
-            voice_tts::voice::load_voice_from_file(&local_voice)
-                .map_err(|e| format!("failed to load voice '{voice_name}' from local path: {e}"))?
-        } else {
-            voice_tts::load_voice(voice_name, None)
-                .map_err(|e| format!("failed to load voice '{voice_name}': {e}"))?
-        };
+        if !local_voice.exists() {
+            return Err(format!(
+                "voice '{voice_name}' not installed at {}. \
+                 Run `make bootstrap-mlx` to download it, or pick a voice that \
+                 is present under {}/voices/.",
+                local_voice.display(),
+                model_dir.display(),
+            ));
+        }
+
+        let model = voice_tts::load_model(model_repo)
+            .map_err(|e| format!("failed to load Kokoro MLX model: {e}"))?;
+        let voice = voice_tts::voice::load_voice_from_file(&local_voice)
+            .map_err(|e| format!("failed to load voice '{voice_name}' from local path: {e}"))?;
 
         let output_dir = output_dir.as_ref().to_path_buf();
         fs::create_dir_all(&output_dir).map_err(|e| format!("failed to create output dir: {e}"))?;

@@ -1,0 +1,287 @@
+// Marginalia UniFFI interface definition.
+//
+// Consumed by `uniffi-bindgen generate --language swift` (among others).
+
+namespace marginalia_ffi {};
+
+// ─────────────────────────────────────────────────────────────
+// Errors
+// ─────────────────────────────────────────────────────────────
+
+[Error]
+enum FfiError {
+  "Config",
+  "Io",
+  "Build",
+  "Reconfigure",
+  "Runtime",
+  "Ingestion",
+  "NoSession",
+};
+
+// ─────────────────────────────────────────────────────────────
+// Settings surface (unchanged from D/I)
+// ─────────────────────────────────────────────────────────────
+
+enum Gender { "Female", "Male", "Unknown" };
+
+dictionary VoiceInfo {
+  string id; string display; string lang; Gender gender; string backend;
+};
+dictionary TtsBackend {
+  string id; string name; boolean available; string? reason;
+};
+dictionary SttEngine {
+  string id; string name; boolean available; string? reason;
+};
+dictionary LangInfo {
+  string bcp47; string display; boolean has_tts; boolean has_stt;
+};
+dictionary ProviderSpec {
+  string tts_backend; string voice; string stt_engine; string language;
+};
+dictionary ApplyReport {
+  boolean tts_swapped; boolean stt_swapped; boolean language_changed; u64 elapsed_ms;
+};
+dictionary VoiceCommandEntry {
+  string action; sequence<string> triggers;
+};
+
+// ─────────────────────────────────────────────────────────────
+// Reader / library surface (new in J)
+// ─────────────────────────────────────────────────────────────
+
+enum PlaybackState { "Idle", "Playing", "Paused", "Finished", "Unknown" };
+
+dictionary DocumentListItem {
+  string id;
+  string title;
+  u32 chapter_count;
+  u32 chunk_count;
+};
+
+// Result of ingest_file / ingest_url.
+dictionary IngestResult {
+  string document_id;
+  string title;
+};
+
+dictionary ChunkView {
+  u32 index;
+  string anchor;
+  string text;
+  boolean is_active;
+  boolean is_read;
+};
+
+dictionary SectionView {
+  u32 index;
+  string title;
+  string? source_anchor;
+  sequence<ChunkView> chunks;
+};
+
+dictionary DocumentView {
+  string document_id;
+  string title;
+  string source_path;
+  u32 chapter_count;
+  u32 chunk_count;
+  u32? active_section_index;
+  u32? active_chunk_index;
+  sequence<SectionView> sections;
+};
+
+dictionary SessionSnapshot {
+  string session_id;
+  string document_id;
+  string anchor;
+  string state;
+  PlaybackState playback_state;
+  u32 section_index;
+  u32 section_count;
+  u32 chunk_index;
+  string chunk_text;
+  string section_title;
+  u32 notes_count;
+  string? voice;
+  string? tts_provider;
+  string? command_stt_provider;
+  boolean command_listening_active;
+};
+
+dictionary AppSnapshot {
+  string state;
+  u32 document_count;
+  string? active_session_id;
+  string? latest_document_id;
+  string? playback_state;
+  string? runtime_status;
+};
+
+dictionary NoteView {
+  string note_id;
+  string document_id;
+  string session_id;
+  string anchor;
+  u32 section_index;
+  u32 chunk_index;
+  string text;
+  string language;
+  string transcription_provider;
+  string created_at_iso;
+};
+
+// Ingest results wrap the runtime's DocumentIngestionOutcome enum.
+// `already_present` is true when the caller imported a path with the
+// same content hash as an existing document (no new chunks, no state change).
+
+// ─────────────────────────────────────────────────────────────
+// Event stream (new in J)
+// ─────────────────────────────────────────────────────────────
+
+[Enum]
+interface FfiRuntimeEvent {
+  ChunkAdvanced(string document_id, u32 section_index, u32 chunk_index);
+  SynthesisReady(string document_id, u32 section_index, u32 chunk_index, boolean cache_hit);
+  PlaybackFinished(string document_id, u32 section_index, u32 chunk_index);
+  CommandRecognized(string raw_text, string? command);
+  SessionRestored(string session_id, string document_id, u32 section_index, u32 chunk_index);
+  SessionStopped(string document_id);
+  Error(string message);
+};
+
+// ─────────────────────────────────────────────────────────────
+// The runtime
+// ─────────────────────────────────────────────────────────────
+
+interface FfiRuntime {
+  [Throws=FfiError]
+  constructor(string config_path);
+
+  // Settings / discovery ---------------------------------------
+  ProviderSpec current_spec();
+  [Throws=FfiError]
+  ApplyReport apply_provider_spec(ProviderSpec spec);
+
+  sequence<VoiceInfo> list_voices(string backend);
+  sequence<TtsBackend> list_tts_backends();
+  sequence<SttEngine> list_stt_engines();
+  sequence<LangInfo> list_languages();
+
+  [Throws=FfiError]
+  void save_config(
+    sequence<VoiceCommandEntry> voice_commands,
+    u32 chunk_target_chars,
+    boolean stt_debug
+  );
+
+  // Library / documents ----------------------------------------
+  sequence<DocumentListItem> list_documents();
+  DocumentView? document_view(string? document_id);
+  [Throws=FfiError]
+  IngestResult ingest_file(string path);
+  [Throws=FfiError]
+  IngestResult ingest_url(string url);
+
+  // Session lifecycle -------------------------------------------
+  [Throws=FfiError]
+  void start_session(string document_id);
+  [Throws=FfiError]
+  boolean restore_session();
+  [Throws=FfiError]
+  void pause_session();
+  [Throws=FfiError]
+  void resume_session();
+  [Throws=FfiError]
+  void stop_session();
+
+  // Playback navigation -----------------------------------------
+  [Throws=FfiError]
+  void next_chunk();
+  [Throws=FfiError]
+  void previous_chunk();
+  [Throws=FfiError]
+  void next_chapter();
+  [Throws=FfiError]
+  void previous_chapter();
+  [Throws=FfiError]
+  void restart_chapter();
+  [Throws=FfiError]
+  void repeat_chunk();
+  boolean auto_advance();
+
+  // State ---------------------------------------------------------
+  AppSnapshot app_snapshot();
+  SessionSnapshot? session_snapshot();
+  string doctor_report_json();
+
+  // Notes -------------------------------------------------------
+  [Throws=FfiError]
+  NoteView create_note(string text);
+  sequence<NoteView> list_notes(string? document_id);
+
+  // Event polling ------------------------------------------------
+  // Drain the internal event buffer (up to 256 events ring-buffered;
+  // older entries drop on overflow). Swift polls this every ~100 ms.
+  sequence<FfiRuntimeEvent> poll_events();
+
+  // Real-time audio levels from the AEC pipeline (Apple STT only). Two
+  // parallel arrays, up to 128 samples each, one ~10 ms apart. Empty on
+  // non-apple-stt builds or before the AEC has started producing frames.
+  WaveformSnapshot poll_waveform();
+
+  // Synthesize a short preview sample of `text` in `voice`. Returns the
+  // absolute path to a WAV/FLAC file the caller can play. Throws when the
+  // TTS backend is unavailable (no MLX weights, wrong voice id, …).
+  [Throws=FfiError]
+  string synthesize_preview(string text, string voice, string language);
+
+  // Absolute path to the Whisper ggml model file, or empty string if
+  // `[stt.whisper] model_path` is unset.
+  string whisper_model_path();
+
+  // Installable asset catalog ------------------------------------
+  sequence<InstallableAsset> list_installable_assets();
+  [Throws=FfiError]
+  void install_asset(string asset_id);
+  sequence<InstallProgress> install_progress();
+};
+
+dictionary WaveformSnapshot {
+  sequence<f32> tts_levels;
+  sequence<f32> mic_levels;
+};
+
+// ─────────────────────────────────────────────────────────────
+// Installable assets (new in L — onboarding / Settings downloader)
+//
+// The UI talks to the asset catalog through three calls:
+//   • `list_installable_assets()` — the hardcoded catalog + installed flag
+//     (recomputed per call, cheap — probes the HF cache).
+//   • `install_asset(id)` — kicks off a background download thread.
+//     Returns immediately; progress is polled.
+//   • `install_progress()` — drains the progress ring buffer. Swift polls
+//     this every ~500 ms (separate cadence from the 100 ms event poll).
+//
+// No byte-level progress yet: hf-hub's sync API doesn't expose download
+// bytes. States below are enough for a spinner + check/X dot.
+// ─────────────────────────────────────────────────────────────
+
+dictionary InstallableAsset {
+  string id;                 // "mlx-core", "voice:if_sara", "whisper-small", "kokoro-onnx"
+  string display_name;
+  string category;           // "tts_core" | "voice" | "stt" | "importer"
+  string? language;          // "it-IT" for voices; null for core models
+  string? gender;            // "female" | "male" for voices
+  u64 size_bytes;            // approximate (UI shows "~300 MB")
+  boolean installed;
+  string source_host;        // "huggingface.co" — shown in the network banner
+  string? notes;
+};
+
+dictionary InstallProgress {
+  string asset_id;
+  string state;              // "queued" | "downloading" | "installed" | "error"
+  string? error_message;
+};

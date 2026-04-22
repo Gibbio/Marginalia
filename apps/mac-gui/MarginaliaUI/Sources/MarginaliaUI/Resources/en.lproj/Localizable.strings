@@ -1,0 +1,26 @@
+/* Marginalia — English strings. */
+
+// Settings sub-nav
+"settings.nav.language"       = "Language";
+"settings.nav.voice"          = "Voice";
+"settings.nav.stt"            = "Speech recognition";
+"settings.nav.commands"       = "Voice commands";
+"settings.nav.audio"          = "Audio & reading";
+"settings.nav.installations"  = "Installations";
+"settings.nav.diagnostics"    = "Diagnostics";
+"settings.nav.interface"      = "Interface language";
+
+// Settings top-bar
+"settings.top.back"           = "back to reading";
+"settings.top.title"          = "Settings";
+"settings.top.pending"        = "pending changes";
+"settings.top.respawn"        = "engine restart";
+"settings.top.apply"          = "Apply";
+"settings.top.applying"       = "Applying…";
+
+// Settings — Interface language
+"settings.interface.title"    = "Interface language";
+"settings.interface.sub"      = "the language of the app's own text. Restart Marginalia to apply the change.";
+"settings.interface.italian"  = "Italiano";
+"settings.interface.english"  = "English";
+"settings.interface.restart"  = "Restart Marginalia for the new language to take effect.";

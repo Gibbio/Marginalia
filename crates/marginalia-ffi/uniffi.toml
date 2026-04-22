@@ -1,0 +1,6 @@
+# UniFFI codegen configuration. Swift-oriented for now; keep cdylib_name
+# matching the crate's library name so `import Marginalia` works from Swift.
+
+[bindings.swift]
+cdylib_name = "marginalia_ffi"
+module_name = "Marginalia"
