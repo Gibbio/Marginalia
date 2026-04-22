@@ -247,6 +247,9 @@ public struct ToastMessage: Identifiable, Hashable, Sendable {
 
 public enum MarginaliaEvent: Sendable {
     case chunkAdvanced(documentId: String, section: Int, chunk: Int)
+    /// Synthesis kicked off — audio not ready yet. The gap between this
+    /// and `synthesisReady` is what the "sintetizzando…" indicator covers.
+    case synthesisStarted(documentId: String, section: Int, chunk: Int)
     case synthesisReady(documentId: String, section: Int, chunk: Int, cacheHit: Bool)
     case playbackFinished(documentId: String, section: Int, chunk: Int)
     case commandRecognized(rawText: String, action: String?)
@@ -280,6 +283,13 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     var currentDocument: DocumentDoc? { get }
     var notes: [MarginNote] { get }
     var liveNote: MarginNote? { get }
+
+    /// Non-nil while the TTS backend is synthesizing a chunk. The Toolbar
+    /// reads this to render a spinner alongside the document title so the
+    /// ~1 s synthesis latency doesn't look like a frozen app. Mock hosts
+    /// can keep this nil; the UX difference between "ready" and "synth"
+    /// only matters with a real backend.
+    var synthesizingAnchor: String? { get }
 
     /// Persisted reading-side settings that don't live in the ProviderSpec.
     var chunkTargetChars: Int { get }
@@ -496,6 +506,7 @@ public final class MockHost: MarginaliaHost, ObservableObject {
 
     @Published public var notes: [MarginNote] = ReadingMock.notes.filter { !$0.live }
     @Published public var liveNote: MarginNote? = ReadingMock.notes.first { $0.live }
+    @Published public var synthesizingAnchor: String? = nil
 
     public init(spec: ProviderSpec = ProviderSpec(ttsBackend: "mlx", voice: "if_sara",
                                                   sttEngine: "apple", language: "it-IT")) {

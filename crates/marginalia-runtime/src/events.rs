@@ -11,6 +11,15 @@ pub enum RuntimeEvent {
         raw_text: String,
         command: Option<String>,
     },
+    /// A synthesis job has been handed to the TTS backend but no audio is
+    /// ready yet. Consumers use this to light up a "sintetizzando…" status
+    /// indicator — the gap between `SynthesisStarted` and `SynthesisReady`
+    /// is the user-visible latency they need feedback about.
+    SynthesisStarted {
+        document_id: String,
+        section_index: usize,
+        chunk_index: usize,
+    },
     SynthesisReady {
         document_id: String,
         section_index: usize,

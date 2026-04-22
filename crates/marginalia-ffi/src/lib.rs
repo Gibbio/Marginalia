@@ -350,6 +350,11 @@ pub enum FfiRuntimeEvent {
         section_index: u32,
         chunk_index: u32,
     },
+    SynthesisStarted {
+        document_id: String,
+        section_index: u32,
+        chunk_index: u32,
+    },
     SynthesisReady {
         document_id: String,
         section_index: u32,

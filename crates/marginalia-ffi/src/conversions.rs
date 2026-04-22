@@ -162,6 +162,15 @@ impl From<RuntimeEvent> for FfiRuntimeEvent {
                 section_index: u32_lossy(section_index),
                 chunk_index: u32_lossy(chunk_index),
             },
+            RuntimeEvent::SynthesisStarted {
+                document_id,
+                section_index,
+                chunk_index,
+            } => FfiRuntimeEvent::SynthesisStarted {
+                document_id,
+                section_index: u32_lossy(section_index),
+                chunk_index: u32_lossy(chunk_index),
+            },
             RuntimeEvent::SynthesisReady {
                 document_id,
                 section_index,

@@ -65,6 +65,12 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     @Published public private(set) var notes: [MarginNote] = []
     @Published public var liveNote: MarginNote? = nil
 
+    /// Non-nil while the TTS backend is busy synthesizing a chunk (between
+    /// `SynthesisStarted` and `SynthesisReady` events). The Toolbar reads
+    /// this to render the "sintetizzando…" indicator. Value is the chunk
+    /// anchor — useful for future per-chunk highlighting.
+    @Published public var synthesizingAnchor: String? = nil
+
     public init(configPath: String) throws {
         self.runtime = try MarginaliaKit.FfiRuntime(configPath: configPath)
         let ff = runtime.currentSpec()
@@ -282,7 +288,12 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
 
     public func handle(event: MarginaliaEvent) {
         switch event {
-        case .chunkAdvanced, .synthesisReady, .playbackFinished,
+        case .synthesisStarted(_, let sec, let ck):
+            synthesizingAnchor = "c\(sec)-\(ck)"
+        case .synthesisReady:
+            synthesizingAnchor = nil
+            Task { await refreshSessionSnapshot() }
+        case .chunkAdvanced, .playbackFinished,
              .sessionRestored, .sessionStopped:
             Task { await refreshSessionSnapshot() }
         case .commandRecognized(let raw, let action):
@@ -400,6 +411,8 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             switch ev {
             case .chunkAdvanced(let doc, let sec, let ck):
                 return .chunkAdvanced(documentId: doc, section: Int(sec), chunk: Int(ck))
+            case .synthesisStarted(let doc, let sec, let ck):
+                return .synthesisStarted(documentId: doc, section: Int(sec), chunk: Int(ck))
             case .synthesisReady(let doc, let sec, let ck, let hit):
                 return .synthesisReady(documentId: doc, section: Int(sec), chunk: Int(ck), cacheHit: hit)
             case .playbackFinished(let doc, let sec, let ck):

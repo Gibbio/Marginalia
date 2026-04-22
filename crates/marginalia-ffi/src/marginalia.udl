@@ -143,6 +143,7 @@ dictionary NoteView {
 [Enum]
 interface FfiRuntimeEvent {
   ChunkAdvanced(string document_id, u32 section_index, u32 chunk_index);
+  SynthesisStarted(string document_id, u32 section_index, u32 chunk_index);
   SynthesisReady(string document_id, u32 section_index, u32 chunk_index, boolean cache_hit);
   PlaybackFinished(string document_id, u32 section_index, u32 chunk_index);
   CommandRecognized(string raw_text, string? command);

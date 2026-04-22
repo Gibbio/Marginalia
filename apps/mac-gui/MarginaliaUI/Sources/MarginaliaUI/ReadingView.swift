@@ -134,6 +134,7 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                 title: host.currentSession?.documentTitle ?? "",
                 subtitle: sessionSubtitle,
                 playbackState: host.currentSession?.playbackState ?? .idle,
+                synthesizing: host.synthesizingAnchor != nil,
                 onTogglePlay: togglePlay
             )
             Divider().frame(height: 1).overlay(Tokens.line)
@@ -632,6 +633,10 @@ struct Toolbar: View {
     var title: String
     var subtitle: String
     var playbackState: PlaybackState
+    /// True while the TTS backend is between `SynthesisStarted` and
+    /// `SynthesisReady`. Flips the kicker to "SINTETIZZANDO…" with a tiny
+    /// spinner so the user knows the ~1 s wait isn't a freeze.
+    var synthesizing: Bool = false
     var onTogglePlay: () -> Void
 
     var body: some View {
@@ -640,12 +645,28 @@ struct Toolbar: View {
         // baseline so the eye reads them as one row. Non-text items (Circle,
         // playerControls) centre themselves to that baseline too.
         HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text("IN ASCOLTO")
-                .font(.mono(10))
-                .tracking(1.5)
-                .foregroundStyle(Tokens.textFaint)
-                .lineLimit(1)
-                .fixedSize()
+            if synthesizing {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.mini)
+                        .tint(accent.main)
+                        .alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 2 }
+                    Text("SINTETIZZANDO")
+                        .font(.mono(10))
+                        .tracking(1.5)
+                        .foregroundStyle(accent.main)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            } else {
+                Text("IN ASCOLTO")
+                    .font(.mono(10))
+                    .tracking(1.5)
+                    .foregroundStyle(Tokens.textFaint)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
             // Same size as "Impostazioni" in the Settings top-bar so the
             // two surfaces feel like a matching pair of headers.
             Text(title)

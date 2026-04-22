@@ -432,7 +432,14 @@ impl SqliteRuntime {
         // 1. Check in-memory cache (hot path for same session).
         if let Some(cached) = self.tts_cache.get(&cache_key) {
             if std::path::Path::new(&cached.audio_reference).exists() {
-                return Ok(cached.clone());
+                let result = cached.clone();
+                self.event_sink.emit(RuntimeEvent::SynthesisReady {
+                    document_id: document_id.to_string(),
+                    section_index,
+                    chunk_index,
+                    cache_hit: true,
+                });
+                return Ok(result);
             }
         }
 
@@ -455,11 +462,25 @@ impl SqliteRuntime {
                     metadata: HashMap::new(),
                 };
                 self.tts_cache.insert(cache_key, result.clone());
+                self.event_sink.emit(RuntimeEvent::SynthesisReady {
+                    document_id: document_id.to_string(),
+                    section_index,
+                    chunk_index,
+                    cache_hit: true,
+                });
                 return Ok(result);
             }
         }
 
-        // 3. Synthesize and cache the result.
+        // 3. Synthesize and cache the result. Emit SynthesisStarted right
+        // before the (potentially slow) TTS call so the UI can light up a
+        // "sintetizzando…" indicator during the gap — the cache-hit paths
+        // above are instantaneous and would cause a spurious spinner flash.
+        self.event_sink.emit(RuntimeEvent::SynthesisStarted {
+            document_id: document_id.to_string(),
+            section_index,
+            chunk_index,
+        });
         let mut result = self.tts.synthesize(request)?;
 
         // 4. Rename to deterministic path so it persists across restarts.
@@ -480,7 +501,13 @@ impl SqliteRuntime {
             }
         }
 
-        self.tts_cache.insert(cache_key, result.clone());
+        self.tts_cache.insert(cache_key.clone(), result.clone());
+        self.event_sink.emit(RuntimeEvent::SynthesisReady {
+            document_id: document_id.to_string(),
+            section_index,
+            chunk_index,
+            cache_hit: false,
+        });
         Ok(result)
     }
 
