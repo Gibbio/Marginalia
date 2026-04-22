@@ -591,7 +591,11 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                             NoteCard(note: note, idx: idx + 1, accent: accent,
                                      linkedFromChunk: linked,
                                      onEnter: { hoverId = note.chunkId },
-                                     onExit:  { if hoverId == note.chunkId { hoverId = nil } })
+                                     onExit:  { if hoverId == note.chunkId { hoverId = nil } },
+                                     onDelete: { Task { await host.deleteNote(id: note.id) } },
+                                     onSaveEdit: { newText in
+                                         Task { try? await host.updateNote(id: note.id, text: newText) }
+                                     })
                         }
                     }
                 }
@@ -927,8 +931,15 @@ struct NoteCard: View {
     var linkedFromChunk: Bool = false
     var onEnter: () -> Void
     var onExit: () -> Void
+    /// Optional actions: deleting returns a confirmation to the host,
+    /// editing hands the new transcript back. Default no-ops keep the
+    /// mock previews compiling unchanged.
+    var onDelete: () -> Void = {}
+    var onSaveEdit: (String) -> Void = { _ in }
 
     @State private var hovered: Bool = false
+    @State private var editing: Bool = false
+    @State private var editBuffer: String = ""
 
     /// Treat physical hover and "linked from chunk" uniformly for the
     /// card's accent-coloured elements, but keep the pulse animation
@@ -969,6 +980,18 @@ struct NoteCard: View {
                                 .strokeBorder(accent.main.opacity(0.18), lineWidth: 1)
                         )
                 }
+                // Delete button — only visible on hover to keep the card
+                // clean during regular reading.
+                if hovered && !editing {
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.red.opacity(0.75))
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Elimina nota")
+                }
             }
             .padding(.bottom, 6)
             Text(note.quote)
@@ -980,11 +1003,53 @@ struct NoteCard: View {
                     Rectangle().fill(Tokens.line).frame(width: 1)
                 }
                 .padding(.bottom, 8)
-            Text(note.body)
-                .font(.serif(14))
-                .foregroundStyle(Tokens.text)
-                .lineSpacing(4)
+            if editing {
+                // Inline editor — TextEditor fills in place of the static
+                // body. ⌘↩ saves, Esc reverts. Both also lose focus which
+                // SwiftUI handles via `.focused` below.
+                VStack(alignment: .trailing, spacing: 6) {
+                    TextEditor(text: $editBuffer)
+                        .font(.serif(14))
+                        .foregroundStyle(Tokens.text)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 60)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.white.opacity(0.03))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(accent.main.opacity(0.3), lineWidth: 1)
+                        )
+                    HStack(spacing: 8) {
+                        Button("annulla") { editing = false }
+                            .buttonStyle(.plain)
+                            .font(.mono(10))
+                            .foregroundStyle(Tokens.textFaint)
+                        Button("salva") {
+                            onSaveEdit(editBuffer.trimmingCharacters(in: .whitespacesAndNewlines))
+                            editing = false
+                        }
+                        .buttonStyle(.plain)
+                        .font(.mono(10))
+                        .foregroundStyle(accent.main)
+                        .disabled(editBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
                 .padding(.bottom, 10)
+            } else {
+                Text(note.body)
+                    .font(.serif(14))
+                    .foregroundStyle(Tokens.text)
+                    .lineSpacing(4)
+                    .padding(.bottom, 10)
+                    // Double-click the body to enter the inline editor.
+                    .onTapGesture(count: 2) {
+                        editBuffer = note.body
+                        editing = true
+                    }
+            }
             HStack(spacing: 10) {
                 ZStack {
                     Circle().strokeBorder(Tokens.textGhost, lineWidth: 1)

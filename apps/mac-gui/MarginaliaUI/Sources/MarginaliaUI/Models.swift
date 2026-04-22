@@ -376,6 +376,16 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// lights up via `dictationStarted`, the final transcript arrives via
     /// `voiceNoteTranscribed`.
     func startDictation()
+
+    /// Delete a note by id. Idempotent — unknown ids no-op. After deletion
+    /// the host should refresh `notes`.
+    func deleteNote(id: String) async
+    /// Update the transcript of an existing note. Host refreshes `notes`
+    /// on success so the margin panel picks up the edit.
+    func updateNote(id: String, text: String) async throws
+    /// Render all notes for the active document as Markdown. Used by the
+    /// menu's `Esporta note…` action. Empty string when no session.
+    func exportNotesMarkdown() -> String
     /// Save a "[BOOKMARK] …" note at the current position (voice: "segna").
     func bookmark() async throws
     /// Human-readable position string (voice: "dove sono"). Callers
@@ -643,6 +653,53 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     }
 
     public func refreshInstallations() async { /* no-op for mock */ }
+
+    public func deleteNote(id: String) async {
+        notes.removeAll { $0.id == id }
+        if liveNote?.id == id { liveNote = nil }
+    }
+
+    public func updateNote(id: String, text: String) async throws {
+        if let idx = notes.firstIndex(where: { $0.id == id }) {
+            let old = notes[idx]
+            notes[idx] = MarginNote(
+                id: old.id, chunkId: old.chunkId, when: old.when,
+                quote: old.quote, body: text, duration: old.duration,
+                status: "modificata", live: old.live
+            )
+        }
+    }
+
+    public func exportNotesMarkdown() -> String {
+        Self.renderNotesMarkdown(
+            docTitle: currentSession?.documentTitle ?? "Documento",
+            notes: notes
+        )
+    }
+
+    /// Shared markdown formatter used by both the mock and the live host
+    /// so export output looks identical across targets.
+    static func renderNotesMarkdown(docTitle: String, notes: [MarginNote]) -> String {
+        var out = "# \(docTitle) — Note\n\n"
+        if notes.isEmpty {
+            out += "_(Nessuna nota per questo documento.)_\n"
+            return out
+        }
+        for n in notes {
+            out += "## \(n.when.isEmpty ? "nota" : n.when)"
+            if !n.status.isEmpty { out += " — \(n.status)" }
+            out += "\n\n"
+            if !n.quote.isEmpty {
+                out += "> \(n.quote)\n\n"
+            }
+            out += "\(n.body)\n\n"
+            if !n.duration.isEmpty {
+                out += "_durata: \(n.duration)_\n\n"
+            }
+            out += "---\n\n"
+        }
+        return out
+    }
 
     @Published public var micLevels: [Float] = []
     @Published public var ttsLevels: [Float] = []

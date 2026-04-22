@@ -1237,6 +1237,27 @@ impl FfiRuntime {
             .collect()
     }
 
+    /// Remove a note. Idempotent — unknown ids return Ok without an
+    /// error (same semantics as the runtime method).
+    pub fn delete_note(&self, note_id: String) -> Result<(), FfiError> {
+        self.runtime.lock().unwrap().delete_note(&note_id)?;
+        Ok(())
+    }
+
+    /// Overwrite the transcript of an existing note.
+    pub fn update_note(
+        &self,
+        note_id: String,
+        new_text: String,
+    ) -> Result<NoteView, FfiError> {
+        let note = self
+            .runtime
+            .lock()
+            .unwrap()
+            .update_note(&note_id, &new_text)?;
+        Ok(note.into())
+    }
+
     // ─────────────────────────────────────────────────────────
     // Event polling
     // ─────────────────────────────────────────────────────────

@@ -78,6 +78,11 @@ pub trait NoteRepository {
     fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError>;
     fn list_notes_for_document(&self, document_id: &str) -> Vec<VoiceNote>;
     fn search_notes(&self, query: &SearchQuery) -> Vec<SearchResult>;
+    /// Remove a note by id. Returns `Ok(true)` if a row was deleted,
+    /// `Ok(false)` when the id wasn't present (idempotent no-op).
+    fn delete_note(&mut self, note_id: &str) -> Result<bool, StorageError>;
+    /// Look up a single note by id; `None` when absent.
+    fn get_note(&self, note_id: &str) -> Option<VoiceNote>;
 }
 
 impl<T> NoteRepository for &mut T
@@ -94,6 +99,14 @@ where
 
     fn search_notes(&self, query: &SearchQuery) -> Vec<SearchResult> {
         (**self).search_notes(query)
+    }
+
+    fn delete_note(&mut self, note_id: &str) -> Result<bool, StorageError> {
+        (**self).delete_note(note_id)
+    }
+
+    fn get_note(&self, note_id: &str) -> Option<VoiceNote> {
+        (**self).get_note(note_id)
     }
 }
 

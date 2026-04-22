@@ -308,6 +308,38 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         }
     }
 
+    public func deleteNote(id: String) async {
+        do {
+            try await Task.detached { [runtime] in
+                try runtime.deleteNote(noteId: id)
+            }.value
+        } catch {
+            await MainActor.run {
+                self.pushMessage("Errore eliminazione nota: \(error.localizedDescription)")
+            }
+            return
+        }
+        if let docId = currentSession?.documentId {
+            await refreshNotes(documentId: docId)
+        }
+    }
+
+    public func updateNote(id: String, text: String) async throws {
+        _ = try await Task.detached { [runtime] in
+            try runtime.updateNote(noteId: id, newText: text)
+        }.value
+        if let docId = currentSession?.documentId {
+            await refreshNotes(documentId: docId)
+        }
+    }
+
+    public func exportNotesMarkdown() -> String {
+        MockHost.renderNotesMarkdown(
+            docTitle: currentSession?.documentTitle ?? "Documento",
+            notes: notes
+        )
+    }
+
     public func handle(event: MarginaliaEvent) {
         switch event {
         case .synthesisStarted(_, let sec, let ck):

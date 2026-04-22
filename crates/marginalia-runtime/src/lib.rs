@@ -166,6 +166,10 @@ pub enum RuntimeError {
     Synthesis(SynthesisError),
     /// A session query operation failed.
     Query(SessionQueryError),
+    /// Catch-all for runtime-level errors (storage, logic) that don't
+    /// fit into the specific variants. Message is surfaced verbatim via
+    /// the FFI.
+    Runtime(String),
 }
 
 impl Display for RuntimeError {
@@ -182,6 +186,7 @@ impl Display for RuntimeError {
             }
             Self::Synthesis(error) => write!(f, "Speech synthesis failed: {error}"),
             Self::Query(error) => write!(f, "Runtime query failed: {:?}", error),
+            Self::Runtime(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -959,6 +964,36 @@ impl SqliteRuntime {
                 ("anchor".to_string(), note.anchor()),
             ]),
         );
+        Ok(note)
+    }
+
+    /// Delete a note by id. Idempotent — returns `Ok(false)` when the id
+    /// is not present. Does not touch any active session (deleting a note
+    /// doesn't move the reading position).
+    pub fn delete_note(&mut self, note_id: &str) -> Result<bool, RuntimeError> {
+        self.note_repository
+            .delete_note(note_id)
+            .map_err(|e| RuntimeError::Runtime(format!("delete_note: {e}")))
+    }
+
+    /// Overwrite the transcript of an existing note. Looks up the note,
+    /// mutates the transcript, saves back through the `save_note`
+    /// upsert. Returns the updated note; errors when the id is unknown.
+    pub fn update_note(&mut self, note_id: &str, new_text: &str) -> Result<VoiceNote, RuntimeError> {
+        let trimmed = new_text.trim();
+        if trimmed.is_empty() {
+            return Err(RuntimeError::Runtime(
+                "update_note: empty transcript".to_string(),
+            ));
+        }
+        let mut note = self
+            .note_repository
+            .get_note(note_id)
+            .ok_or_else(|| RuntimeError::Runtime(format!("note not found: {note_id}")))?;
+        note.transcript = trimmed.to_string();
+        self.note_repository
+            .save_note(note.clone())
+            .map_err(|e| RuntimeError::Runtime(format!("update_note save: {e}")))?;
         Ok(note)
     }
 

@@ -166,6 +166,16 @@ impl NoteRepository for InMemoryNoteRepository {
         results.truncate(query.limit);
         results
     }
+
+    fn delete_note(&mut self, note_id: &str) -> Result<bool, StorageError> {
+        let before = self.notes.len();
+        self.notes.retain(|n| n.note_id != note_id);
+        Ok(self.notes.len() < before)
+    }
+
+    fn get_note(&self, note_id: &str) -> Option<VoiceNote> {
+        self.notes.iter().find(|n| n.note_id == note_id).cloned()
+    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -18,6 +18,10 @@ struct LiveMarginaliaCommands: Commands {
             Button("Importa da URL…") { uiState.showingUrlImport = true }
                 .keyboardShortcut("u", modifiers: [.command])
             Divider()
+            Button("Esporta note…") { exportNotes() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(host.currentSession == nil || host.notes.isEmpty)
+            Divider()
             Button("Chiudi sessione") { Task { try? await host.stop() } }
                 .keyboardShortcut("w", modifiers: [.command])
                 .disabled(host.currentSession == nil)
@@ -94,6 +98,24 @@ struct LiveMarginaliaCommands: Commands {
             Task {
                 _ = try? await host.importFile(url: url)
                 await host.refreshLibrary()
+            }
+        }
+    }
+
+    private func exportNotes() {
+        let md = host.exportNotesMarkdown()
+        guard !md.isEmpty else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        let safeTitle = (host.currentSession?.documentTitle ?? "note")
+            .replacingOccurrences(of: "/", with: "-")
+        panel.nameFieldStringValue = "\(safeTitle) — note.md"
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try md.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                host.pushMessage("Errore export note: \(error.localizedDescription)")
             }
         }
     }

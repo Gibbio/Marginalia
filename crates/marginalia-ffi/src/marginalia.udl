@@ -235,6 +235,10 @@ interface FfiRuntime {
   [Throws=FfiError]
   NoteView create_note(string text);
   sequence<NoteView> list_notes(string? document_id);
+  [Throws=FfiError]
+  void delete_note(string note_id);
+  [Throws=FfiError]
+  NoteView update_note(string note_id, string new_text);
 
   // Event polling ------------------------------------------------
   // Drain the internal event buffer (up to 256 events ring-buffered;

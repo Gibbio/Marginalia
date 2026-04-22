@@ -678,6 +678,28 @@ impl NoteRepository for SQLiteNoteRepository {
 
         rows.filter_map(|row| row.ok()).collect()
     }
+
+    fn delete_note(&mut self, note_id: &str) -> Result<bool, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite connection lock poisoned");
+        let rows = connection
+            .execute("DELETE FROM notes WHERE note_id = ?", params![note_id])
+            .map_err(storage_err)?;
+        Ok(rows > 0)
+    }
+
+    fn get_note(&self, note_id: &str) -> Option<VoiceNote> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite connection lock poisoned");
+        let mut stmt = connection
+            .prepare("SELECT * FROM notes WHERE note_id = ?")
+            .ok()?;
+        stmt.query_row(params![note_id], note_from_row).ok()
+    }
 }
 
 // ---------------------------------------------------------------------------
