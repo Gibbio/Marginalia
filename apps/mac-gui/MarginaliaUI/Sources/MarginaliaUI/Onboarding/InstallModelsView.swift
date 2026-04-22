@@ -119,9 +119,7 @@ public struct InstallModelsView: View {
     }
 
     private var anyInflightActive: Bool {
-        inflightStates.values.contains { s in
-            s == .queued || s == .downloading
-        }
+        inflightStates.values.contains { $0.isInflight }
     }
 
     private func isEffectivelyInstalled(_ asset: Asset) -> Bool {
@@ -157,18 +155,22 @@ public struct InstallModelsView: View {
 
     /// Internal state used by the dot / trailing control. Derived from the
     /// asset's `installed` flag plus the transient `inflightStates` dict.
+    /// `downloading(fraction:)` carries 0.0–1.0 when hf-hub has reported
+    /// the total; nil = first frame before Content-Length negotiation.
     private enum RowState: Equatable {
-        case idle, queued, downloading, installed, failed(String)
+        case idle, queued
+        case downloading(fraction: Double?)
+        case installed, failed(String)
     }
 
     private func rowState(for asset: Asset) -> RowState {
         if asset.installed { return .installed }
         switch inflightStates[asset.id] {
-        case .queued?:         return .queued
-        case .downloading?:    return .downloading
-        case .installed?:      return .installed
-        case .failed(let m)?:  return .failed(m)
-        case nil:              return .idle
+        case .queued?:                    return .queued
+        case .downloading(let f)?:        return .downloading(fraction: f)
+        case .installed?:                 return .installed
+        case .failed(let m)?:             return .failed(m)
+        case nil:                         return .idle
         }
     }
 
@@ -192,6 +194,9 @@ public struct InstallModelsView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(accent.main)
         case .downloading:
+            // Circular spinner in the 26 px dot — the determinate bar is
+            // too small to read at this size. The text subtitle carries
+            // the percentage instead.
             ProgressView()
                 .progressViewStyle(.circular)
                 .controlSize(.small)
@@ -233,7 +238,9 @@ public struct InstallModelsView: View {
         switch state {
         case .installed:    return "\(size) · installato"
         case .queued:       return "\(size) · in coda"
-        case .downloading:  return "\(size) · scaricando…"
+        case .downloading(let f):
+            if let f = f { return "\(size) · \(Int(f * 100))%" }
+            return "\(size) · scaricando…"
         case .failed(let msg):
             return "errore: \(msg.isEmpty ? "non disponibile" : msg)"
         case .idle:         return "\(size) · da scaricare"
@@ -243,8 +250,19 @@ public struct InstallModelsView: View {
     @ViewBuilder
     private func trailingControl(for asset: Asset, state: RowState) -> some View {
         switch state {
-        case .installed, .queued, .downloading:
+        case .installed, .queued:
             EmptyView()
+        case .downloading(let f):
+            // Linear bar here, visible next to the label, so the user
+            // watches bytes move even when the dot's spinner blurs.
+            if let f = f {
+                ProgressView(value: f, total: 1.0)
+                    .progressViewStyle(.linear)
+                    .tint(accent.main)
+                    .frame(width: 100)
+            } else {
+                EmptyView()
+            }
         case .failed:
             Button("riprova") { onInstall(asset.id) }
                 .buttonStyle(.plain)

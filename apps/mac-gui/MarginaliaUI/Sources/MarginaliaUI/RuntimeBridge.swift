@@ -17,6 +17,9 @@
 #if MARGINALIA_FFI
 import Foundation
 import MarginaliaKit
+#if canImport(AudioToolbox)
+import AudioToolbox
+#endif
 
 @MainActor
 public final class FFIHost: MarginaliaHost, ObservableObject {
@@ -320,22 +323,40 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             guard let action else { break }
             dispatchVoiceAction(action)
         case .ingestStarted(let source):
-            // `source` may be a full URL or a filename — pick the short
-            // form for display. File URLs use lastPathComponent; web URLs
-            // fall back to the host.
+            // `source` is either a web URL (scheme + host) or a filesystem
+            // path (starts with `/`). Pick the compact form for the
+            // overlay label — host for URLs, lastPathComponent for files.
             let label: String = {
-                if let url = URL(string: source), url.scheme != nil {
+                if let url = URL(string: source), url.scheme != nil,
+                   !source.hasPrefix("/") {
                     return url.host ?? url.lastPathComponent
                 }
-                return source
+                // File path: strip to just the filename.
+                return (source as NSString).lastPathComponent
             }()
             ingestingSource = label
-        case .ingestFinished(_, _, let err):
+        case .ingestFinished(let source, _, let err):
             ingestingSource = nil
             if let err {
                 pushMessage("Errore import: \(err)")
+                // Actionable: "Riprova" re-runs the same import path.
+                // Detect URL-vs-file the same way `ingestStarted` does:
+                // filesystem paths start with `/` and have no scheme.
+                let retry = ToastAction(label: "riprova") { [weak self] in
+                    guard let self = self else { return }
+                    let isWebUrl = !source.hasPrefix("/")
+                        && URL(string: source)?.scheme != nil
+                    if isWebUrl {
+                        Task { _ = try? await self.importUrl(source) }
+                    } else {
+                        let fileUrl = URL(fileURLWithPath: source)
+                        Task { _ = try? await self.importFile(url: fileUrl) }
+                    }
+                }
                 transientToast = ToastMessage(
-                    text: "Import fallito: \(err)", kind: .error
+                    text: "Import fallito: \(err)",
+                    kind: .error,
+                    action: retry
                 )
             } else {
                 Task { await refreshLibrary() }
@@ -384,6 +405,12 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     /// TUI's `resolve_action` dispatch in `apps/tui-rs/src/app.rs:717`.
     private func dispatchVoiceAction(_ action: String) {
         pushMessage("→ \(action)")
+        // Visual + audible confirmation so the user knows the app heard
+        // the command. Chime is the system Tink (11 = Tink in Core Audio's
+        // system sound IDs) — same affordance the Swift helper uses for
+        // its mode-change beeps, kept subtle.
+        transientToast = ToastMessage(text: voiceFeedbackLabel(for: action), kind: .info)
+        playCommandChime()
         Task { [weak self] in
             guard let self else { return }
             switch action {
@@ -593,10 +620,24 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         for frame in runtime.installProgress() {
             switch frame.state {
             case "queued":      inflightDownloads[frame.assetId] = .queued
-            case "downloading": inflightDownloads[frame.assetId] = .downloading
+            case "downloading":
+                // bytes_total == 0 means hf-hub hasn't called init() yet
+                // (first downloading frame emitted before the network
+                // handshake). Render as indeterminate in that window.
+                let fraction: Double? = frame.bytesTotal > 0
+                    ? min(1.0, Double(frame.bytesDone) / Double(frame.bytesTotal))
+                    : nil
+                inflightDownloads[frame.assetId] = .downloading(fraction: fraction)
             case "installed":
                 inflightDownloads[frame.assetId] = .installed
                 Task { await self.refreshInstallations() }
+                // Voices affect the Settings picker + TtsBackends list.
+                // Re-run discovery so the Voce panel surfaces the new
+                // entry without the user having to close and reopen
+                // Settings (a frequently-reported UX rough-edge).
+                if frame.assetId.hasPrefix("voice:") || frame.assetId == "mlx-core" {
+                    refreshDiscovery()
+                }
             case "error":
                 inflightDownloads[frame.assetId] = .failed(frame.errorMessage ?? "sconosciuto")
             default:
@@ -609,6 +650,36 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             installPollTimer?.invalidate()
             installPollTimer = nil
         }
+    }
+
+    /// Short human-readable label shown in the confirmation toast when a
+    /// voice command is recognized. Matches the Italian STT vocabulary —
+    /// unknown actions fall back to the raw identifier.
+    private func voiceFeedbackLabel(for action: String) -> String {
+        switch action {
+        case "pause":        return "↓ pausa"
+        case "resume":       return "↑ riprendi"
+        case "next":         return "→ prossimo"
+        case "back":         return "← indietro"
+        case "repeat":       return "↻ ripeti"
+        case "stop":         return "■ stop"
+        case "next_chapter": return "→→ prossimo capitolo"
+        case "prev_chapter": return "←← capitolo precedente"
+        case "bookmark":     return "★ segnalibro"
+        case "note":         return "🎙 nota"
+        case "where":        return "? dove sono"
+        default:             return "→ \(action)"
+        }
+    }
+
+    /// Play the system Tink as command-match confirmation. No-op when
+    /// AppKit isn't available (non-macOS build). Runs on the caller thread
+    /// — AudioServices is lightweight + async internally.
+    private func playCommandChime() {
+        #if canImport(AudioToolbox)
+        // 1057 = Tink (the "positive" chime). Safe to call repeatedly.
+        AudioServicesPlaySystemSound(SystemSoundID(1057))
+        #endif
     }
 
     private static func formatBytes(_ bytes: UInt64) -> String {

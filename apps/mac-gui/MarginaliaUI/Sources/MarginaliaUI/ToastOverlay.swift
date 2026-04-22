@@ -22,11 +22,30 @@ public struct ToastOverlay: View {
                 HStack(alignment: .top, spacing: 10) {
                     icon(for: t.kind)
                         .frame(width: 22, height: 22)
-                    Text(t.text)
-                        .font(.serif(14))
-                        .foregroundStyle(Tokens.text)
-                        .lineLimit(4)
-                        .frame(maxWidth: 360, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(t.text)
+                            .font(.serif(14))
+                            .foregroundStyle(Tokens.text)
+                            .lineLimit(4)
+                            .frame(maxWidth: 360, alignment: .leading)
+                        if let action = t.action {
+                            Button(action: {
+                                action.handler()
+                                dismiss()
+                            }) {
+                                Text(action.label)
+                                    .font(.mono(11))
+                                    .foregroundStyle(strokeColor(for: t.kind))
+                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .background(RoundedRectangle(cornerRadius: 5)
+                                        .fill(strokeColor(for: t.kind).opacity(0.1)))
+                                    .overlay(RoundedRectangle(cornerRadius: 5)
+                                        .strokeBorder(strokeColor(for: t.kind).opacity(0.4),
+                                                      lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                     Button(action: dismiss) {
                         Image(systemName: "xmark")
                             .font(.system(size: 10, weight: .semibold))

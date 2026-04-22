@@ -532,13 +532,17 @@ public struct InstallRow: View {
     }
 
     private var isInflight: Bool {
-        state == .queued || state == .downloading
+        state?.isInflight == true
     }
 
     private var secondaryLine: String {
         switch state {
-        case .queued?:          return "\(item.size) · in coda"
-        case .downloading?:     return "\(item.size) · scaricando…"
+        case .queued?:                        return "\(item.size) · in coda"
+        case .downloading(let f)?:
+            if let f = f {
+                return "\(item.size) · \(Int(f * 100))%"
+            }
+            return "\(item.size) · scaricando…"
         case .failed(let m)?:
             return "errore: \(m.isEmpty ? "non disponibile" : m)"
         default:
@@ -554,10 +558,20 @@ public struct InstallRow: View {
     @ViewBuilder
     private var trailingControl: some View {
         if isInflight {
-            ProgressView()
-                .progressViewStyle(.circular)
-                .controlSize(.small)
-                .tint(accent.main)
+            // Linear bar when we have a percentage, circular indeterminate
+            // otherwise (queued state or first downloading frame before
+            // hf-hub init()). 80 pt wide so it doesn't bulk up the row.
+            if case .downloading(let f?)? = state {
+                ProgressView(value: f, total: 1.0)
+                    .progressViewStyle(.linear)
+                    .tint(accent.main)
+                    .frame(width: 80)
+            } else {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                    .tint(accent.main)
+            }
         } else if isInstalled, item.removable {
             IconBtn(label: "rimuovi", danger: true) { onUninstall(item.id) }
         } else if !isInstalled {

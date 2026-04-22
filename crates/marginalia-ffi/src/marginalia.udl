@@ -300,5 +300,7 @@ dictionary InstallableAsset {
 dictionary InstallProgress {
   string asset_id;
   string state;              // "queued" | "downloading" | "installed" | "error"
+  u64 bytes_done;            // 0 until hf-hub reports size
+  u64 bytes_total;           // 0 when unknown (pre-init) or irrelevant
   string? error_message;
 };

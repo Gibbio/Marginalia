@@ -26,6 +26,7 @@ host-playback = ["marginalia-runtime/host-playback"]
 url-import = ["marginalia-runtime/url-import"]
 
 [dependencies]
+hf-hub = "0.5"  # for the `Progress` trait used by the install downloader
 log = "0.4"
 marginalia-config = { path = "../marginalia-config" }
 marginalia-core = { path = "../marginalia-core" }

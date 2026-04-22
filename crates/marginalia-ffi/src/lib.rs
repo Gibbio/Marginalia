@@ -554,7 +554,67 @@ impl InstallableAsset {
 pub struct InstallProgress {
     pub asset_id: String,
     pub state: String,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
     pub error_message: Option<String>,
+}
+
+/// `hf-hub` `Progress` impl that pushes byte-level frames into the
+/// shared install ring buffer. Used by `install_asset` so the UI can
+/// render a real percent bar instead of an indeterminate spinner. To
+/// avoid flooding the 64-slot buffer with 16 KB chunks on a 300 MB
+/// download, we coalesce: only emit a frame when either 2% or 512 KB
+/// of additional progress has accumulated since the last emission.
+struct InstallProgressReporter {
+    asset_id: String,
+    buf: InstallBuffer,
+    total: u64,
+    done: u64,
+    last_emitted_done: u64,
+}
+
+impl InstallProgressReporter {
+    fn new(asset_id: String, buf: InstallBuffer) -> Self {
+        Self {
+            asset_id,
+            buf,
+            total: 0,
+            done: 0,
+            last_emitted_done: 0,
+        }
+    }
+    fn emit(&self) {
+        self.buf.push(InstallProgress {
+            asset_id: self.asset_id.clone(),
+            state: "downloading".into(),
+            bytes_done: self.done,
+            bytes_total: self.total,
+            error_message: None,
+        });
+    }
+}
+
+impl hf_hub::api::Progress for InstallProgressReporter {
+    fn init(&mut self, size: usize, _filename: &str) {
+        self.total = size as u64;
+        self.done = 0;
+        self.last_emitted_done = 0;
+        self.emit();
+    }
+    fn update(&mut self, size: usize) {
+        self.done = self.done.saturating_add(size as u64);
+        // Coalesce: 2% step OR 512 KB, whichever comes first.
+        let delta = self.done.saturating_sub(self.last_emitted_done);
+        let pct_step = self.total / 50; // 2%
+        if delta >= pct_step.max(512 * 1024) {
+            self.last_emitted_done = self.done;
+            self.emit();
+        }
+    }
+    fn finish(&mut self) {
+        self.done = self.total;
+        self.emit();
+    }
 }
 
 /// Same ring-buffer pattern as `EventBuffer`. Separate from events because
@@ -602,18 +662,25 @@ fn is_asset_cached(source: &AssetSource) -> bool {
     }
 }
 
-/// Download the asset. Must be called with `HF_HUB_OFFLINE` unset or
-/// network fetches will refuse. Caller is responsible for flipping the
-/// env var around this call.
-fn download_asset(source: &AssetSource) -> Result<PathBuf, String> {
+/// Download the asset with byte-level progress reporting via the supplied
+/// `InstallProgressReporter`. Must be called with `HF_HUB_OFFLINE` unset
+/// — the caller (`install_asset`) flips the env var around this call.
+fn download_asset_with_progress(
+    source: &AssetSource,
+    progress: InstallProgressReporter,
+) -> Result<PathBuf, String> {
     let mgr = marginalia_models::ModelManager::new().map_err(|e| e.to_string())?;
-    match source {
-        AssetSource::MlxCore { file } => mgr.ensure_mlx_core(file),
-        AssetSource::MlxVoice { voice_id } => mgr.ensure_mlx_voice(voice_id),
-        AssetSource::Whisper { file } => mgr.ensure_whisper(file),
-        AssetSource::KokoroOnnx { file } => mgr.ensure_kokoro_onnx(file),
-    }
-    .map_err(|e| e.to_string())
+    let (repo, file): (&str, String) = match source {
+        AssetSource::MlxCore { file } => ("prince-canuma/Kokoro-82M", file.to_string()),
+        AssetSource::MlxVoice { voice_id } => (
+            "prince-canuma/Kokoro-82M",
+            format!("voices/{voice_id}.safetensors"),
+        ),
+        AssetSource::Whisper { file } => ("ggerganov/whisper.cpp", file.to_string()),
+        AssetSource::KokoroOnnx { file } => ("onnx-community/Kokoro-82M", file.to_string()),
+    };
+    mgr.download_with_progress(repo, &file, progress)
+        .map_err(|e| e.to_string())
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -1252,6 +1319,8 @@ impl FfiRuntime {
                 buf.push(InstallProgress {
                     asset_id: id.clone(),
                     state: "queued".into(),
+                    bytes_done: 0,
+                    bytes_total: 0,
                     error_message: None,
                 });
                 // Open the network gate for this thread. `set_var` is
@@ -1259,22 +1328,24 @@ impl FfiRuntime {
                 // concurrently with the install flow (runtime is in
                 // onboarding mode or paused), so the race window is safe.
                 unsafe { std::env::remove_var("HF_HUB_OFFLINE") };
-                buf.push(InstallProgress {
-                    asset_id: id.clone(),
-                    state: "downloading".into(),
-                    error_message: None,
-                });
-                let result = download_asset(&source);
+                // `InstallProgressReporter` pushes its own "downloading"
+                // frames with real byte counts once hf-hub calls init().
+                let reporter = InstallProgressReporter::new(id.clone(), buf.clone());
+                let result = download_asset_with_progress(&source, reporter);
                 unsafe { std::env::set_var("HF_HUB_OFFLINE", "1") };
                 match result {
                     Ok(_path) => buf.push(InstallProgress {
                         asset_id: id,
                         state: "installed".into(),
+                        bytes_done: 0,
+                        bytes_total: 0,
                         error_message: None,
                     }),
                     Err(e) => buf.push(InstallProgress {
                         asset_id: id,
                         state: "error".into(),
+                        bytes_done: 0,
+                        bytes_total: 0,
                         error_message: Some(e),
                     }),
                 }

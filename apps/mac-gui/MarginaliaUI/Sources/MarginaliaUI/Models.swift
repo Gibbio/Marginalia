@@ -115,9 +115,14 @@ public struct InstallableAsset: Identifiable, Hashable, Codable, Sendable {
 /// FFI's `InstallProgress` state string but typed for safety. Missing keys
 /// in `MarginaliaHost.inflightDownloads` mean the asset is idle (not
 /// installed, not inflight).
+///
+/// `downloading(fraction:)` carries 0.0–1.0 when the backend supplied a
+/// total; the preview/mock and early "downloading" frames (before hf-hub
+/// has negotiated Content-Length) use `nil` which the UI renders as an
+/// indeterminate spinner.
 public enum InstallUiState: Equatable, Hashable, Sendable {
     case queued
-    case downloading
+    case downloading(fraction: Double?)
     case installed
     case failed(String)
 
@@ -126,6 +131,15 @@ public enum InstallUiState: Equatable, Hashable, Sendable {
         case .installed, .failed: return true
         case .queued, .downloading: return false
         }
+    }
+
+    /// Convenience for `if host.inflightDownloads[id]?.isInflight == true`
+    /// without pattern-matching overhead. Unknown states (forward compat)
+    /// count as not inflight.
+    public var isInflight: Bool {
+        if case .queued = self { return true }
+        if case .downloading = self { return true }
+        return false
     }
 }
 
@@ -237,14 +251,33 @@ public extension MarginNote {
     }
 }
 
-public struct ToastMessage: Identifiable, Hashable, Sendable {
+public struct ToastMessage: Identifiable, Sendable {
     public let id = UUID()
     public let text: String
     public let kind: Kind
+    /// Optional CTA — label + handler. When non-nil, ToastOverlay renders
+    /// a button inside the toast. Tapping it runs `action()` and (by
+    /// convention) dismisses the toast. Use for "Riprova", "Apri
+    /// Impostazioni", "Vedi log", etc. — anything better than the user
+    /// having to navigate elsewhere to recover.
+    public let action: ToastAction?
     public enum Kind: Sendable { case info, warning, error }
-    public init(text: String, kind: Kind = .info) {
+
+    public init(text: String, kind: Kind = .info, action: ToastAction? = nil) {
         self.text = text
         self.kind = kind
+        self.action = action
+    }
+}
+
+/// Action attached to a toast. `Sendable` closures so the struct stays
+/// thread-safe — ToastOverlay invokes the handler on the main actor.
+public struct ToastAction: Sendable {
+    public let label: String
+    public let handler: @Sendable @MainActor () -> Void
+    public init(label: String, handler: @Sendable @MainActor @escaping () -> Void) {
+        self.label = label
+        self.handler = handler
     }
 }
 
@@ -590,7 +623,7 @@ public final class MockHost: MarginaliaHost, ObservableObject {
         inflightDownloads[id] = .queued
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
-            await MainActor.run { self?.inflightDownloads[id] = .downloading }
+            await MainActor.run { self?.inflightDownloads[id] = .downloading(fraction: nil) }
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             await MainActor.run {
                 guard let self = self else { return }

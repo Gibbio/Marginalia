@@ -525,16 +525,14 @@ impl SqliteRuntime {
     /// Import a document from a file path into the runtime's storage.
     /// Emits `IngestStarted` / `IngestFinished` so the UI can overlay a
     /// "sto leggendo …" spinner during chunking — large PDFs take several
-    /// seconds and the user needs to know the app isn't frozen.
+    /// seconds and the user needs to know the app isn't frozen. The `source`
+    /// field in the events carries the full path so the UI's "Riprova"
+    /// action can re-run the exact same import.
     pub fn ingest_path(
         &mut self,
         source_path: &Path,
     ) -> Result<DocumentIngestionOutcome, IngestionError> {
-        let source = source_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("documento")
-            .to_string();
+        let source = source_path.display().to_string();
         self.event_sink.emit(RuntimeEvent::IngestStarted {
             source: source.clone(),
         });

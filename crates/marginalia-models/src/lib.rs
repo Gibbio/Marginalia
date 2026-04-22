@@ -9,6 +9,7 @@
 //! paths that the caller can pass to provider constructors.
 
 use hf_hub::api::sync::Api;
+use hf_hub::api::Progress;
 use std::path::PathBuf;
 
 /// Errors that can occur during model management operations.
@@ -129,6 +130,30 @@ impl ModelManager {
     /// callers that manage their own model paths.
     pub fn is_local(path: &std::path::Path) -> bool {
         path.exists()
+    }
+
+    /// Download `file` from `repo` with a progress callback. Thin wrapper
+    /// around `hf-hub`'s `ApiRepo::download_with_progress` so FFI callers
+    /// don't have to pull `hf-hub` into their own dep graph just to
+    /// implement the `Progress` trait.
+    ///
+    /// The callback runs on the download thread and is invoked:
+    ///   • once on `init` with `(total_bytes, filename)`
+    ///   • repeatedly on `update` with `(chunk_bytes)` (typically ~64 KB)
+    ///   • once on `finish` with no args
+    ///
+    /// Return the resolved path to the cached file (same path semantics
+    /// as `ensure_*`).
+    pub fn download_with_progress<P: Progress>(
+        &self,
+        repo: &str,
+        file: &str,
+        progress: P,
+    ) -> Result<PathBuf, ModelError> {
+        let repo_handle = self.api.model(repo.to_string());
+        repo_handle
+            .download_with_progress(file, progress)
+            .map_err(|e| ModelError::Download(format!("{file}: {e}")))
     }
 
     /// Remove a previously-downloaded file from the HF cache. Best-effort:
