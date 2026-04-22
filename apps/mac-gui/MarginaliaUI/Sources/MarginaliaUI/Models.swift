@@ -109,6 +109,20 @@ public struct InstallableAsset: Identifiable, Hashable, Codable, Sendable {
     public let size: String        // "74 MB", "465 MB"
     public var installed: Bool
     public let removable: Bool
+    /// Mirrors the FFI `category` field — "tts_core" | "voice" | "stt"
+    /// | "importer". Used by the Installations panel to group voices
+    /// under a disclosure by language rather than listing them flat.
+    public let category: String
+    /// BCP-47 code for voices ("it-IT", "en-US"); nil for core models.
+    public let language: String?
+
+    public init(id: String, label: String, size: String,
+                installed: Bool, removable: Bool,
+                category: String = "tts_core", language: String? = nil) {
+        self.id = id; self.label = label; self.size = size
+        self.installed = installed; self.removable = removable
+        self.category = category; self.language = language
+    }
 }
 
 /// UI-side install state surfaced by hosts (live and mock). Mirrors the
@@ -511,15 +525,15 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     ]
 
     @Published public var installations: [InstallableAsset] = [
-        InstallableAsset(id: "mlx_it",        label: "Kokoro MLX — voci italiane",       size: "74 MB",  installed: true,  removable: false),
-        InstallableAsset(id: "whisper_small", label: "Whisper small (STT multilingua)",  size: "465 MB", installed: true,  removable: true),
-        InstallableAsset(id: "voice_sara",    label: "Voce: Sara (it, femminile)",       size: "0.5 MB", installed: true,  removable: true),
-        InstallableAsset(id: "voice_lucia",   label: "Voce: Lucia (it, femminile)",      size: "0.5 MB", installed: true,  removable: true),
-        InstallableAsset(id: "voice_nicola",  label: "Voce: Nicola (it, maschile)",      size: "0.5 MB", installed: true,  removable: true),
-        InstallableAsset(id: "voice_marco",   label: "Voce: Marco (it, maschile)",       size: "0.5 MB", installed: false, removable: false),
-        InstallableAsset(id: "voice_bella",   label: "Voce: Bella (en-US, femminile)",   size: "0.5 MB", installed: false, removable: false),
-        InstallableAsset(id: "onnx",          label: "ONNX Runtime (TTS fallback)",      size: "34 MB",  installed: false, removable: false),
-        InstallableAsset(id: "pdfium",        label: "PDFium (import PDF)",              size: "68 MB",  installed: false, removable: false),
+        InstallableAsset(id: "mlx_it",        label: "Kokoro MLX — motore TTS",          size: "74 MB",  installed: true,  removable: false, category: "tts_core"),
+        InstallableAsset(id: "whisper_small", label: "Whisper small (STT multilingua)",  size: "465 MB", installed: true,  removable: true,  category: "stt"),
+        InstallableAsset(id: "voice_sara",    label: "Sara (femminile)",                 size: "0.5 MB", installed: true,  removable: true,  category: "voice", language: "it-IT"),
+        InstallableAsset(id: "voice_lucia",   label: "Lucia (femminile)",                size: "0.5 MB", installed: true,  removable: true,  category: "voice", language: "it-IT"),
+        InstallableAsset(id: "voice_nicola",  label: "Nicola (maschile)",                size: "0.5 MB", installed: true,  removable: true,  category: "voice", language: "it-IT"),
+        InstallableAsset(id: "voice_marco",   label: "Marco (maschile)",                 size: "0.5 MB", installed: false, removable: false, category: "voice", language: "it-IT"),
+        InstallableAsset(id: "voice_bella",   label: "Bella (femminile)",                size: "0.5 MB", installed: false, removable: false, category: "voice", language: "en-US"),
+        InstallableAsset(id: "onnx",          label: "ONNX Runtime (TTS fallback)",      size: "34 MB",  installed: false, removable: false, category: "tts_core"),
+        InstallableAsset(id: "pdfium",        label: "PDFium (import PDF)",              size: "68 MB",  installed: false, removable: false, category: "importer"),
     ]
     @Published public var inflightDownloads: [String: InstallUiState] = [:]
 

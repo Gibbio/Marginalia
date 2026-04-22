@@ -39,6 +39,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     @AppStorage(InterfaceLanguage.storageKey) private var interfaceLang: String = "it"
     @State private var languageChangeHint: Bool = false
     @AppStorage(AppTheme.storageKey) private var themeId: String = AppTheme.default.id
+    /// Persisted hue for the "Personalizzata" theme. Only read when the
+    /// active themeId is `AppTheme.customId`, but the storage is always
+    /// available so the user's choice survives theme switches.
+    @AppStorage(AppTheme.customHueKey) private var customHue: Double = 30
 
     // Wrap the host in an ObservableObject box so SwiftUI observes its
     // @Published changes in a protocol-generic way.
@@ -614,30 +618,117 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 info: "Marginalia funziona offline. Solo qui, su esplicita azione tua, l'app può contattare huggingface.co e github.com per scaricare modelli mancanti. Tutti gli asset sono Apache-2.0 o MIT."
             )
             OnlineBanner(accent: accent)
-            VStack(spacing: 0) {
-                ForEach(Array(host.installations.enumerated()), id: \.element.id) { idx, item in
-                    InstallRow(
-                        item: item,
-                        accent: accent,
-                        state: host.inflightDownloads[item.id],
-                        onInstall: { host.installAsset($0) },
-                        onUninstall: { host.uninstallAsset($0) }
-                    )
-                    if idx < host.installations.count - 1 {
-                        Divider().frame(height: 1).overlay(Tokens.lineSoft)
+
+            // Non-voice assets flat at the top — one install per user
+            // per lifetime, no grouping needed.
+            let coreAssets = host.installations.filter { $0.category != "voice" }
+            if !coreAssets.isEmpty {
+                installRowStack(coreAssets)
+            }
+
+            // Voices grouped by BCP-47 language with a disclosure + an
+            // "installa tutte" bulk button. Keeps the list navigable
+            // when the catalog grows to dozens of voices.
+            ForEach(voiceGroups, id: \.language) { group in
+                voiceLanguageSection(group)
+            }
+        }
+        .onAppear { Task { await host.refreshInstallations() } }
+    }
+
+    /// Voices grouped by language, system-current first then alphabetical.
+    private var voiceGroups: [(language: String, display: String, assets: [InstallableAsset])] {
+        let voices = host.installations.filter { $0.category == "voice" }
+        let byLang = Dictionary(grouping: voices, by: { $0.language ?? "und" })
+        let sysLang = Locale.current.language.languageCode?.identifier ?? "en"
+        return byLang
+            .map { (lang, items) -> (String, String, [InstallableAsset]) in
+                (lang, Self.languageDisplay(lang), items.sorted { $0.label < $1.label })
+            }
+            .sorted { a, b in
+                let aIsSys = a.0.lowercased().hasPrefix(sysLang)
+                let bIsSys = b.0.lowercased().hasPrefix(sysLang)
+                if aIsSys != bIsSys { return aIsSys }
+                return a.1 < b.1
+            }
+    }
+
+    private static func languageDisplay(_ bcp47: String) -> String {
+        let code = String(bcp47.prefix(2)).lowercased()
+        switch code {
+        case "it": return "Voci italiane"
+        case "en": return "Voci inglesi"
+        case "fr": return "Voci francesi"
+        case "de": return "Voci tedesche"
+        case "es": return "Voci spagnole"
+        case "pt": return "Voci portoghesi"
+        case "ja": return "Voci giapponesi"
+        case "zh": return "Voci cinesi"
+        case "hi": return "Voci hindi"
+        default:   return "Voci — \(bcp47)"
+        }
+    }
+
+    @ViewBuilder
+    private func voiceLanguageSection(
+        _ group: (language: String, display: String, assets: [InstallableAsset])
+    ) -> some View {
+        let missing = group.assets.filter { !$0.installed }
+        DisclosureGroup {
+            installRowStack(group.assets)
+                .padding(.top, 6)
+        } label: {
+            HStack {
+                Text(group.display)
+                    .font(.serif(14, italic: true))
+                    .foregroundStyle(Tokens.text)
+                Text("(\(group.assets.filter { $0.installed }.count)/\(group.assets.count))")
+                    .font(.mono(10))
+                    .foregroundStyle(Tokens.textFaint)
+                Spacer()
+                if !missing.isEmpty {
+                    Button("installa tutte") {
+                        for a in missing { host.installAsset(a.id) }
                     }
+                    .buttonStyle(.plain)
+                    .font(.mono(11))
+                    .foregroundStyle(accent.main)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(accent.main.opacity(0.08)))
+                    .overlay(RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(accent.main.opacity(0.3), lineWidth: 1))
                 }
             }
-            .onAppear { Task { await host.refreshInstallations() } }
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.015))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Tokens.line, lineWidth: 1)
-            )
         }
+        .padding(.horizontal, 4)
+        .tint(Tokens.textFaint)
+    }
+
+    @ViewBuilder
+    private func installRowStack(_ assets: [InstallableAsset]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(assets.enumerated()), id: \.element.id) { idx, item in
+                InstallRow(
+                    item: item,
+                    accent: accent,
+                    state: host.inflightDownloads[item.id],
+                    onInstall: { host.installAsset($0) },
+                    onUninstall: { host.uninstallAsset($0) }
+                )
+                if idx < assets.count - 1 {
+                    Divider().frame(height: 1).overlay(Tokens.lineSoft)
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.015))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Tokens.line, lineWidth: 1)
+        )
     }
 
     private var themeSection: some View {
@@ -653,7 +744,47 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 }
                 Spacer()
             }
+            if themeId == AppTheme.customId {
+                customHueSlider
+            }
         }
+    }
+
+    /// Hue slider shown only when the "Personalizzata" theme is active.
+    /// Writes to `AppTheme.customHueKey` — `AppTheme.accent(for:)` reads
+    /// from there on every call, so the live app picks up the change on
+    /// the next `onChange(of: themeId)` in MarginaliaWindow.
+    @ViewBuilder
+    private var customHueSlider: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Tinta accento")
+                    .font(.mono(10)).tracking(1.2)
+                    .foregroundStyle(Tokens.textFaint)
+                Spacer()
+                Text("\(Int(customHue))°")
+                    .font(.mono(11))
+                    .foregroundStyle(Tokens.textDim)
+                    .monospacedDigit()
+            }
+            Slider(value: $customHue, in: 0...360) { _ in
+                // Bump the themeId notification so MarginaliaWindow
+                // re-runs `AppTheme.accent(for:)` and we repaint.
+                let cur = themeId
+                themeId = ""
+                themeId = cur
+            }
+            .tint(Accent(hue: customHue).main)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.white.opacity(0.02))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Tokens.line, lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -815,9 +946,55 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 .buttonStyle(.plain)
                 .help("Salva un .txt con diagnostica e log recenti")
                 .accessibilityLabel("Esporta diagnostica e log")
+
+                Button(action: confirmResetPreferences) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 11, weight: .medium))
+                        Text("Ripristina predefiniti…")
+                            .font(.sans(12, weight: .medium))
+                    }
+                    .foregroundStyle(Color.red.opacity(0.8))
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(Color.red.opacity(0.06)))
+                    .overlay(Capsule().strokeBorder(Color.red.opacity(0.3), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Ripristina le preferenze dell'interfaccia (tema, dimensione chunk, debug STT) ai valori predefiniti. I documenti e le note non vengono toccati.")
+
                 Spacer()
             }
         }
+    }
+
+    /// Reset UI preferences + reading params to defaults. Does NOT touch
+    /// provider spec (could leave the app unusable if defaults aren't
+    /// installed) and does NOT delete user content (documents, notes,
+    /// bookmarks). Confirmation required — preferences are cheap to
+    /// re-set but muscle memory isn't.
+    private func confirmResetPreferences() {
+        #if canImport(AppKit)
+        let alert = NSAlert()
+        alert.messageText = "Ripristinare le preferenze?"
+        alert.informativeText = "Tema, dimensione dei chunk, debug STT, scorciatoie tornano ai valori predefiniti. Documenti, note e segnalibri NON vengono toccati."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Ripristina")
+        alert.addButton(withTitle: "Annulla")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        #endif
+        // UI / reading prefs — stored in UserDefaults.
+        let ud = UserDefaults.standard
+        ud.removeObject(forKey: AppTheme.storageKey)
+        ud.removeObject(forKey: AppTheme.customHueKey)
+        ud.removeObject(forKey: ReadingPrefs.modeKey)
+        ud.removeObject(forKey: ReadingPrefs.scaleKey)
+        themeId = AppTheme.default.id
+        customHue = 30
+        // Runtime prefs — persisted via save_config on Apply.
+        draftChunkChars = 300
+        draftSttDebug = false
+        host.saveAudioPrefs(chunkTargetChars: 300, sttDebug: false)
+        host.transientToast = ToastMessage(text: "Preferenze ripristinate.", kind: .info)
     }
 
     /// Assemble a single text dump (ISO timestamp header, doctor JSON,

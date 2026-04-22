@@ -658,7 +658,9 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     label: rawAsset.displayName,
                     size: Self.formatBytes(rawAsset.sizeBytes),
                     installed: rawAsset.installed,
-                    removable: rawAsset.category == "voice"
+                    removable: rawAsset.category == "voice",
+                    category: rawAsset.category,
+                    language: rawAsset.language
                 )
             }
             // Clear terminal states for assets that are now installed — the

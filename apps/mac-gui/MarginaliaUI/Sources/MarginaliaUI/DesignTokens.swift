@@ -72,7 +72,14 @@ public struct Theme: Hashable, Codable, Sendable {
 }
 
 public enum AppTheme {
-    /// Available themes in display order.
+    /// Special id used by the "custom" theme — the accent hue is then
+    /// read from `customHueKey` instead of the preset table.
+    public static let customId = "custom"
+    public static let customHueKey = "com.gibbio.marginalia.customAccentHue"
+
+    /// Available themes in display order. "Custom" is a placeholder row
+    /// with a placeholder hue; the actual value comes from AppStorage at
+    /// resolve time.
     public static let all: [Theme] = [
         Theme(id: "inchiostro",
               display: "Inchiostro",
@@ -82,14 +89,25 @@ public enum AppTheme {
               display: "Marea",
               blurb: "un blu più calmo e freddo, meno saturato — per le sessioni di lettura lunghe.",
               accentHue: 208),
+        Theme(id: AppTheme.customId,
+              display: "Personalizzata",
+              blurb: "scegli la tinta di accento con lo slider qui sotto.",
+              accentHue: 30),
     ]
 
     public static let `default` = all[0]
     public static let storageKey = "com.gibbio.marginalia.theme"
 
-    /// Resolve an `Accent` palette from a stored theme id.
+    /// Resolve an `Accent` palette from a stored theme id. For the custom
+    /// theme, reads the user's stored hue from `UserDefaults`; falls back
+    /// to 30° (warm orange) if no value is stored.
     public static func accent(for id: String) -> Accent {
-        Accent(hue: (all.first { $0.id == id } ?? `default`).accentHue)
+        if id == customId {
+            let hue = UserDefaults.standard.object(forKey: customHueKey) as? Double
+                ?? 30
+            return Accent(hue: hue)
+        }
+        return Accent(hue: (all.first { $0.id == id } ?? `default`).accentHue)
     }
 }
 
