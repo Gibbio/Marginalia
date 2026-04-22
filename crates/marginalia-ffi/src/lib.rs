@@ -1375,13 +1375,33 @@ impl FfiRuntime {
                         bytes_total: 0,
                         error_message: None,
                     }),
-                    Err(e) => buf.push(InstallProgress {
-                        asset_id: id,
-                        state: "error".into(),
-                        bytes_done: 0,
-                        bytes_total: 0,
-                        error_message: Some(e),
-                    }),
+                    Err(e) => {
+                        // Classify common error strings into friendly
+                        // messages. The hf-hub error bubbles up as a
+                        // string containing the underlying io::Error's
+                        // Display, so matching on substrings is the
+                        // most stable contract available without
+                        // downcasting through several wrapper types.
+                        let friendly: String = if e.contains("No space left") {
+                            "Spazio su disco insufficiente. Libera spazio e riprova.".into()
+                        } else if e.contains("Too many retries")
+                            || e.contains("dns error")
+                            || e.contains("failed to lookup")
+                        {
+                            "Problema di rete: impossibile raggiungere huggingface.co. Verifica la connessione e riprova.".into()
+                        } else if e.contains("Permission denied") {
+                            "Permesso negato sulla cartella modelli. Controlla le autorizzazioni di sistema.".into()
+                        } else {
+                            e
+                        };
+                        buf.push(InstallProgress {
+                            asset_id: id,
+                            state: "error".into(),
+                            bytes_done: 0,
+                            bytes_total: 0,
+                            error_message: Some(friendly),
+                        })
+                    }
                 }
             })
             .map_err(|e| FfiError::Io(format!("spawn install thread: {e}")))?;

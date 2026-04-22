@@ -40,8 +40,17 @@ pub struct ModelManager {
 
 impl ModelManager {
     /// Create a new model manager, initializing the HuggingFace Hub API.
+    ///
+    /// Uses `with_retries(3)` so transient network errors during download
+    /// (DNS hiccup, Wi-Fi switch, transient 5xx) retry transparently with
+    /// the library's built-in exponential backoff. 3 is enough for normal
+    /// flaky Wi-Fi without making a truly-offline install hang for
+    /// minutes before giving up.
     pub fn new() -> Result<Self, ModelError> {
-        let api = Api::new().map_err(|e| ModelError::Download(e.to_string()))?;
+        let api = hf_hub::api::sync::ApiBuilder::new()
+            .with_retries(3)
+            .build()
+            .map_err(|e| ModelError::Download(e.to_string()))?;
         Ok(Self { api })
     }
 
