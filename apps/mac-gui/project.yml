@@ -1,0 +1,127 @@
+# XcodeGen spec for `Marginalia.app` — the shipped macOS build.
+#
+# Single source of truth for the `.xcodeproj`, which is generated (and
+# .gitignored). Regenerate via:
+#
+#     make xcodegen          # idempotent
+#     open apps/mac-gui/Marginalia.xcodeproj
+#
+# The SwiftPM package at `./MarginaliaUI` is still the home of the shared UI
+# library. This Xcode target consumes the `MarginaliaUI` product; the
+# `MarginaliaUIPreview` executable target in the package stays as the
+# mock-host design bench (`swift run MarginaliaUIPreview`).
+
+name: Marginalia
+options:
+  minimumXcodeGenVersion: "2.40.0"
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  defaultConfig: Debug
+  xcodeVersion: "15.3"
+  # Keep pbxproj churn down and the file deterministic across dev machines.
+  groupSortPosition: top
+
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO  # our build scripts touch REPO_ROOT
+    SWIFT_VERSION: "5.9"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CLANG_ENABLE_MODULES: YES
+    DEAD_CODE_STRIPPING: YES
+    # `MARGINALIA_FFI` is always on for the shipped app — mocking lives in
+    # the SwiftPM preview target, not here.
+    OTHER_SWIFT_FLAGS: "-D MARGINALIA_FFI"
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG MARGINALIA_FFI"
+      ONLY_ACTIVE_ARCH: YES
+      MARGINALIA_RUST_PROFILE: debug  # faster turnaround during iteration
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: wholemodule
+      MARGINALIA_RUST_PROFILE: release
+
+# Local SwiftPM packages — the one living alongside this file. Xcode resolves
+# it automatically when the project opens.
+packages:
+  MarginaliaUI:
+    path: MarginaliaUI
+
+targets:
+  Marginalia:
+    type: application
+    platform: macOS
+    sources:
+      - path: Marginalia
+        excludes:
+          - "build-scripts/**"
+          - "Marginalia.entitlements"
+          - "Info.plist"
+    resources:
+      - path: Marginalia/Assets.xcassets
+    dependencies:
+      - package: MarginaliaUI
+        product: MarginaliaUI
+      - package: MarginaliaUI
+        product: MarginaliaKit
+      - framework: Generated/MarginaliaKit.xcframework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_NAME: Marginalia
+        PRODUCT_BUNDLE_IDENTIFIER: com.gibbio.marginalia.dev
+        MARKETING_VERSION: "0.9.0"
+        CURRENT_PROJECT_VERSION: "1"
+        # Point at the hand-written plist + entitlements — XcodeGen's `info:`
+        # and `entitlements:` keys would *generate* these files at every
+        # `xcodegen generate`, overwriting our content. Plain build settings
+        # reference them without touching them.
+        INFOPLIST_FILE: Marginalia/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Marginalia/Marginalia.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # SwiftPM product `Marginalia` (the UniFFI bindings) is only exposed
+        # when `Sources/Marginalia/Marginalia.swift` exists on disk. The
+        # preflight-xcframework.sh script in the pre-build phase below
+        # guarantees that file is in place before SwiftPM resolves the
+        # package — XcodeGen writes the phases in order.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"  # ad-hoc; replace with Developer ID when F unblocks
+        CODE_SIGNING_REQUIRED: YES
+        CODE_SIGNING_ALLOWED: YES
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.gibbio.marginalia
+    preBuildScripts:
+      # Build order matters: xcframework first (it ships the UniFFI bindings
+      # file which is what Package.swift sniffs to enable live mode), then
+      # the STT helper, then resource staging.
+      - name: "Build Rust xcframework + bindings"
+        script: |
+          "$SRCROOT/Marginalia/build-scripts/preflight-xcframework.sh"
+        basedOnDependencyAnalysis: false
+      - name: "Build pre-compiled STT helper"
+        script: |
+          "$SRCROOT/Marginalia/build-scripts/preflight-stt-helper.sh"
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - name: "Stage resources (helper, fonts, licenses)"
+        script: |
+          "$SRCROOT/Marginalia/build-scripts/stage-resources.sh"
+        basedOnDependencyAnalysis: false
+
+# Schemes: a single scheme tied to the Marginalia target, debug-launchable.
+schemes:
+  Marginalia:
+    build:
+      targets:
+        Marginalia: all
+    run:
+      config: Debug
+    archive:
+      config: Release
