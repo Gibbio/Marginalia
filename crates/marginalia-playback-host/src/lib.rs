@@ -142,7 +142,16 @@ impl PlaybackEngine for HostPlaybackEngine {
 
         let source = match Decoder::new(BufReader::new(file)) {
             Ok(s) => s,
-            Err(_) => {
+            Err(e) => {
+                // Corrupted cached FLAC (truncated write, disk full
+                // mid-save, …). Remove it so the next synthesize_cached
+                // call for the same key re-generates instead of hitting
+                // the same broken file forever.
+                log::warn!(
+                    "[playback] decode failed for {}: {e} — purging cache entry",
+                    synthesis.audio_reference
+                );
+                let _ = std::fs::remove_file(&synthesis.audio_reference);
                 self.snapshot.state = PlaybackState::Stopped;
                 self.snapshot.last_action = "start-decode-failed".to_string();
                 return self.snapshot();

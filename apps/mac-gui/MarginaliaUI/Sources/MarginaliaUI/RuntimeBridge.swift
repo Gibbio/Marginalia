@@ -301,15 +301,43 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         return pollEvents()
     }
 
+    /// Wall-clock of the most recent `pause()`. Used by `resume()` to
+    /// offer a "riparto da inizio chunk" action when the pause was long
+    /// enough that the user likely lost context (threshold: 5 min).
+    private var lastPausedAt: Date? = nil
+    private static let longPauseThreshold: TimeInterval = 300  // 5 min
+
     public func pause() async throws {
         try runtime.pauseSession()
         await refreshSessionSnapshot()
-        await MainActor.run { self.showActionFeedback("pause") }
+        await MainActor.run {
+            self.lastPausedAt = Date()
+            self.showActionFeedback("pause")
+        }
     }
     public func resume() async throws {
         try runtime.resumeSession()
         await refreshSessionSnapshot()
-        await MainActor.run { self.showActionFeedback("resume") }
+        await MainActor.run {
+            if let t = self.lastPausedAt,
+               Date().timeIntervalSince(t) >= Self.longPauseThreshold
+            {
+                // Long pause — offer a "riparto da inizio chunk" CTA.
+                // The user can accept; if they ignore, resume continues
+                // from the cached chunk position.
+                let restart = ToastAction(label: "da inizio chunk") { [weak self] in
+                    Task { try? await self?.repeatCurrent() }
+                }
+                self.transientToast = ToastMessage(
+                    text: "Ripresa dopo una lunga pausa.",
+                    kind: .info,
+                    action: restart
+                )
+            } else {
+                self.showActionFeedback("resume")
+            }
+            self.lastPausedAt = nil
+        }
     }
     public func stop() async throws { try runtime.stopSession(); await refreshSessionSnapshot() }
     public func next() async throws {

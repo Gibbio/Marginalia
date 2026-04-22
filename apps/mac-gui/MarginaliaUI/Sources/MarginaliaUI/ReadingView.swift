@@ -495,6 +495,11 @@ public struct ReadingView<Host: MarginaliaHost>: View {
     private func chunkParagraph(_ c: ReadingChunk, hasNote: Bool) -> some View {
         let isHover = hoverId == c.id
         let dimmed  = hoverId != nil && !isHover
+        // The chunk the runtime is currently synthesizing / playing.
+        // Uses the session's anchor (e.g. "section:2/chunk:5") which
+        // matches the chunk's `id` since both are derived from the
+        // same `ReadingPosition.anchor()`.
+        let isActive = c.id == host.currentSession?.anchor
         HStack(alignment: .top, spacing: 18) {
             // Gutter chunk number.
             if hasNote {
@@ -518,13 +523,33 @@ public struct ReadingView<Host: MarginaliaHost>: View {
             Text(c.text)
                 .font(chunkFont)
                 .foregroundStyle(
-                    isHover ? Tokens.text
-                             : dimmed ? Color(hex: 0xEFE5CF, opacity: 0.25)
-                                      : Tokens.textDim
+                    // Active chunk always reads at full text colour; hover
+                    // stays slightly lifted; dimmed for non-hovered when
+                    // something else is.
+                    isActive ? Tokens.text
+                             : isHover ? Tokens.text
+                                       : dimmed ? Color(hex: 0xEFE5CF, opacity: 0.25)
+                                                : Tokens.textDim
                 )
                 .lineSpacing(chunkLineSpacing)
                 .padding(.vertical, chunkPadding)
-                .background(isHover ? accent.soft.opacity(0.8) : Color.clear)
+                .background(
+                    // Active: persistent subtle accent wash; hover: livelier.
+                    // Both can combine (mouse over the playing chunk).
+                    isActive ? accent.soft.opacity(0.35)
+                             : (isHover ? accent.soft.opacity(0.8) : Color.clear)
+                )
+                .overlay(alignment: .leading) {
+                    // Thin accent bar in the gutter for the active chunk —
+                    // a tactile "you are here" mark even when the chunk has
+                    // no note.
+                    if isActive {
+                        Rectangle()
+                            .fill(accent.main)
+                            .frame(width: 2)
+                            .padding(.leading, -12)
+                    }
+                }
                 .background(
                     GeometryReader { g in
                         Color.clear.preference(
