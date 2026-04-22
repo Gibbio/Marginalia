@@ -63,6 +63,11 @@ struct LiveMarginaliaCommands: Commands {
             Button("Nuova nota dettata") { host.startDictation() }
                 .keyboardShortcut("n", modifiers: [.command])
                 .disabled(host.currentSession == nil)
+            Button("Elenco note") {
+                NotificationCenter.default.post(name: .marginaliaShowNotes, object: nil)
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
+            .disabled(host.currentSession == nil)
             Button("Salva segnalibro") { Task { try? await host.bookmark() } }
                 .keyboardShortcut("b", modifiers: [.command])
                 .disabled(host.currentSession == nil)
@@ -74,6 +79,15 @@ struct LiveMarginaliaCommands: Commands {
             Button("Dove sono") { _ = host.announcePosition() }
                 .keyboardShortcut("?", modifiers: [.command])
                 .disabled(host.currentSession == nil)
+
+            Divider()
+            // Volume in 10% steps. Bound to the slider's [0,1] range —
+            // future work can extend to rodio's amplification beyond 1.0
+            // with a separate voice command ("più forte ancora").
+            Button("Volume più alto") { host.volume = min(1.0, host.volume + 0.1) }
+                .keyboardShortcut(.upArrow, modifiers: [.command])
+            Button("Volume più basso") { host.volume = max(0.0, host.volume - 0.1) }
+                .keyboardShortcut(.downArrow, modifiers: [.command])
         }
 
         CommandGroup(replacing: .appSettings) {

@@ -37,6 +37,15 @@ pub trait PlaybackEngine {
     fn stop(&mut self) -> PlaybackSnapshot;
     fn seek(&mut self, position: &ReadingPosition) -> PlaybackSnapshot;
     fn snapshot(&self) -> PlaybackSnapshot;
+    /// Linear volume level, 0.0 (muted) to 1.0+ (amplification). Applies
+    /// to the current and all subsequent chunks. Default impl is a no-op
+    /// for engines that don't support it.
+    fn set_volume(&mut self, _volume: f32) {}
+    /// Current linear volume. Default implementation returns 1.0 so the
+    /// UI shows a sensible value for engines that don't track it.
+    fn volume(&self) -> f32 {
+        1.0
+    }
 }
 
 impl<T> PlaybackEngine for &mut T

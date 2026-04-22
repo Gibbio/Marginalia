@@ -219,6 +219,8 @@ interface FfiRuntime {
   [Throws=FfiError]
   void seek_to_chunk(u32 section_index, u32 chunk_index);
   boolean auto_advance();
+  void set_volume(f32 level);
+  f32 volume();
 
   // Voice note dictation — spawns a background thread that switches the
   // STT helper to DICTATION mode, captures until silence, saves the

@@ -74,6 +74,17 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     /// anchor — useful for future per-chunk highlighting.
     @Published public var synthesizingAnchor: String? = nil
     @Published public var ingestingSource: String? = nil
+    /// Two-way bound: slider in Settings and keyboard shortcuts read+write
+    /// this. `didSet` forwards to the runtime so the change reaches rodio
+    /// immediately (current sink + future sinks).
+    @Published public var volume: Double = 1.0 {
+        didSet {
+            guard oldValue != volume else { return }
+            let v = Float(max(0.0, min(2.0, volume)))
+            let rt = runtime
+            Task.detached { rt.setVolume(level: v) }
+        }
+    }
 
     public init(configPath: String) throws {
         self.runtime = try MarginaliaKit.FfiRuntime(configPath: configPath)
@@ -82,6 +93,9 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             ttsBackend: ff.ttsBackend, voice: ff.voice,
             sttEngine: ff.sttEngine, language: ff.language
         )
+        // Seed volume from runtime — default 1.0 for new instances but
+        // read-through in case the runtime persisted it across restarts.
+        self.volume = Double(runtime.volume())
         refreshDiscovery()
         Task { [weak self] in
             await self?.refreshLibrary()

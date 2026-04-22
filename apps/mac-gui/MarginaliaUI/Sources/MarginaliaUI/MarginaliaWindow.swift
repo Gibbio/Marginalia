@@ -17,6 +17,7 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
     @State private var accent: Accent = .default
     @State private var logExpanded: Bool = false
     @State private var showingBookmarks: Bool = false
+    @State private var showingNotes: Bool = false
     /// Persisted across launches. Window owns the accent so Settings +
     /// Reading share the same colour without plumbing a binding
     /// everywhere.
@@ -123,6 +124,9 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
         .onReceive(NotificationCenter.default.publisher(for: .marginaliaShowBookmarks)) { _ in
             showingBookmarks = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .marginaliaShowNotes)) { _ in
+            showingNotes = true
+        }
         .sheet(isPresented: $showingBookmarks) {
             BookmarkListView(
                 bookmarks: host.notes.filter { $0.isBookmark },
@@ -131,6 +135,17 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                     Task { try? await host.seekToChunk(section: sec, chunk: ck) }
                 },
                 onDismiss: { showingBookmarks = false }
+            )
+        }
+        .sheet(isPresented: $showingNotes) {
+            NotesListView(
+                notes: host.notes.filter { !$0.isBookmark },
+                accent: accent,
+                onSelect: { sec, ck in
+                    Task { try? await host.seekToChunk(section: sec, chunk: ck) }
+                },
+                onDelete: { id in Task { await host.deleteNote(id: id) } },
+                onDismiss: { showingNotes = false }
             )
         }
     }
@@ -218,4 +233,6 @@ public extension Notification.Name {
     static let marginaliaOpenSettings = Notification.Name("com.gibbio.marginalia.openSettings")
     /// Fired by ⌘⌥B to open the bookmark-list sheet.
     static let marginaliaShowBookmarks = Notification.Name("com.gibbio.marginalia.showBookmarks")
+    /// Fired by ⌘⌥N to open the notes-list sheet.
+    static let marginaliaShowNotes = Notification.Name("com.gibbio.marginalia.showNotes")
 }

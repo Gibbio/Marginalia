@@ -391,6 +391,10 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// Render all notes for the active document as Markdown. Used by the
     /// menu's `Esporta note…` action. Empty string when no session.
     func exportNotesMarkdown() -> String
+
+    /// Linear playback volume, 0.0–1.0. Rodio accepts >1.0 as amplifi-
+    /// cation but the slider caps at 1.0 to avoid distortion by default.
+    var volume: Double { get set }
     /// Save a "[BOOKMARK] …" note at the current position (voice: "segna").
     func bookmark() async throws
     /// Human-readable position string (voice: "dove sono"). Callers
@@ -577,6 +581,7 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     @Published public var liveNote: MarginNote? = ReadingMock.notes.first { $0.live }
     @Published public var synthesizingAnchor: String? = nil
     @Published public var ingestingSource: String? = nil
+    @Published public var volume: Double = 1.0
 
     public init(spec: ProviderSpec = ProviderSpec(ttsBackend: "mlx", voice: "if_sara",
                                                   sttEngine: "apple", language: "it-IT")) {

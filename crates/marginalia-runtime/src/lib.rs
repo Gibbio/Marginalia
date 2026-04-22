@@ -886,6 +886,17 @@ impl SqliteRuntime {
         self.replay_current_position("repeat_chunk")
     }
 
+    /// Set linear playback volume. 0.0 = muted, 1.0 = full. Values > 1.0
+    /// amplify — accepted by rodio but may distort.
+    pub fn set_volume(&mut self, volume: f32) {
+        self.playback_engine.set_volume(volume);
+    }
+
+    /// Current playback volume. 1.0 for engines that don't track it.
+    pub fn volume(&self) -> f32 {
+        self.playback_engine.volume()
+    }
+
     /// Jump directly to a specific `(section, chunk)` position in the
     /// active document. Used by the reading view's click-to-seek — the
     /// user taps a chunk paragraph and playback resumes from there. The

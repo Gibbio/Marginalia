@@ -1117,6 +1117,14 @@ impl FfiRuntime {
         self.runtime.lock().unwrap().try_auto_advance()
     }
 
+    pub fn set_volume(&self, level: f32) {
+        self.runtime.lock().unwrap().set_volume(level);
+    }
+
+    pub fn volume(&self) -> f32 {
+        self.runtime.lock().unwrap().volume()
+    }
+
     /// Kick off a voice-note dictation. Returns immediately; the blocking
     /// `transcribe()` call runs on a dedicated thread so the UI's 100 ms
     /// event poll stays responsive. Events:

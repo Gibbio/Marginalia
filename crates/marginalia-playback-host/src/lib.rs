@@ -26,6 +26,9 @@ pub struct HostPlaybackEngine {
     /// right before playback starts. Used by the AEC pipeline as the render
     /// reference signal.
     on_play_samples: Option<Box<dyn Fn(Vec<f32>) + Send>>,
+    /// Linear volume 0.0 – 1.0+. Persisted across sink recreations so
+    /// new chunks inherit the current level.
+    volume: f32,
 }
 
 impl Default for HostPlaybackEngine {
@@ -42,6 +45,7 @@ impl Default for HostPlaybackEngine {
             stream_handle: handle,
             sink: None,
             on_play_samples: None,
+            volume: 1.0,
             snapshot: PlaybackSnapshot {
                 state: PlaybackState::Stopped,
                 last_action: "initialized".to_string(),
@@ -175,6 +179,7 @@ impl PlaybackEngine for HostPlaybackEngine {
             }
         }
 
+        sink.set_volume(self.volume);
         sink.append(source);
         self.sink = Some(sink);
         self.snapshot.state = PlaybackState::Playing;
@@ -234,6 +239,21 @@ impl PlaybackEngine for HostPlaybackEngine {
             }
         }
         snapshot
+    }
+
+    fn set_volume(&mut self, volume: f32) {
+        // Clamp negative to 0.0 but leave the upper end open — rodio
+        // accepts >1.0 as software amplification, which power users can
+        // request via a future "più forte" voice command extension.
+        let clamped = volume.max(0.0);
+        self.volume = clamped;
+        if let Some(sink) = &self.sink {
+            sink.set_volume(clamped);
+        }
+    }
+
+    fn volume(&self) -> f32 {
+        self.volume
     }
 }
 

@@ -502,6 +502,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 sub: "dimensione dei chunk, percorsi di libreria e cache audio.",
                 info: "Il chunk è l'unità minima di sintesi e navigazione vocale. Chunk piccoli = risposta rapida ai comandi e salti fini, ma più frammentazione. Il cambio richiede di re-importare i documenti esistenti. La cache audio contiene i FLAC sintetizzati; cancellarla non perde lavoro, solo tempo di rigenerazione."
             )
+            volumeSlider
             chunkSizeSlider
             PathRow(label: "Libreria",
                     value: ".marginalia/beta.sqlite3",
@@ -510,6 +511,40 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     value: ".marginalia/tts-cache",
                     tag: "FLAC · 1 per chunk · \(cacheDirSize())",
                     action: "svuota", accent: accent)
+        }
+    }
+
+    /// Playback volume slider, 0.0–1.0 (linear). Two-way bound to
+    /// `host.volume` so the change reaches rodio immediately. Keyboard
+    /// shortcuts (⌘↑/⌘↓) also write here through the menu.
+    private var volumeSlider: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Volume")
+                    .font(.mono(10)).tracking(1.2)
+                    .foregroundStyle(Tokens.textFaint)
+                Spacer()
+                Text("\(Int(host.volume * 100))%")
+                    .font(.mono(11))
+                    .foregroundStyle(Tokens.textDim)
+                    .monospacedDigit()
+            }
+            HStack(spacing: 10) {
+                Image(systemName: "speaker.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Tokens.textFaint)
+                Slider(
+                    value: Binding(
+                        get: { host.volume },
+                        set: { host.volume = $0 }
+                    ),
+                    in: 0.0...1.0
+                )
+                .tint(accent.main)
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Tokens.textFaint)
+            }
         }
     }
 
