@@ -120,6 +120,13 @@ struct MarginaliaApp: App {
                 }
             )
             .onAppear { Task { await host.refreshInstallations() } }
+            .onChange(of: host.inflightDownloads) { oldValue, newValue in
+                // Auto-preview: the moment a voice finishes installing,
+                // play a short demo so the user *hears* the app work
+                // rather than just seeing a checkmark. Suppresses repeats
+                // by comparing against the previous snapshot.
+                playPreviewForNewlyInstalledVoice(old: oldValue, new: newValue, host: host)
+            }
         }
     }
 
@@ -187,3 +194,32 @@ private func onboardingAssets(from host: FFIHost) -> [InstallModelsView.Asset] {
         }
 }
 
+/// Demo sentence played the first time a voice is installed during
+/// onboarding. Short, neutral, chosen so non-Italian voices (when we add
+/// them) can swap the text without touching the wiring.
+private let onboardingDemoText = "Ciao, sono la tua voce. Sono pronta per leggere con te."
+
+/// Watches `FFIHost.inflightDownloads` for voices transitioning to
+/// `.installed` and fires a one-shot TTS preview. Called from `.onChange`
+/// so SwiftUI drives the comparison instead of us tracking state manually.
+@MainActor
+private func playPreviewForNewlyInstalledVoice(
+    old: [String: InstallUiState],
+    new: [String: InstallUiState],
+    host: FFIHost
+) {
+    for (id, state) in new
+        where state == .installed
+        && old[id] != .installed
+        && id.hasPrefix("voice:")
+    {
+        let voiceId = String(id.dropFirst("voice:".count))
+        Task {
+            guard let path = try? await host.synthesizePreview(
+                text: onboardingDemoText, voice: voiceId
+            ), !path.isEmpty else { return }
+            await MainActor.run { PreviewSoundCache.play(path: path) }
+        }
+        break  // one preview per install tick — avoid overlapping voices
+    }
+}

@@ -357,9 +357,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
 
     private static func playAudio(at path: String) {
         #if canImport(AppKit)
-        guard let sound = NSSound(contentsOfFile: path, byReference: false) else { return }
-        PreviewSoundCache.shared.add(sound)
-        sound.play()
+        PreviewSoundCache.play(path: path)
         #endif
     }
 

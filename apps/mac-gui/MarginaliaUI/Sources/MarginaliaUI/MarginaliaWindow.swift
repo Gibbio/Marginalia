@@ -41,16 +41,30 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                 Group {
                     switch mode {
                     case .reading:
-                        ReadingView(
-                            accent: accent,
-                            host: host,
-                            onOpenSettings: {
-                                mode = (mode == .settings) ? .reading : .settings
-                            }
-                        )
-                        // Coordinate space is now defined *inside* ReadingView's
-                        // mainArea (on the ZStack that holds both the chunk text
-                        // and the link overlay) so the two share a frame origin.
+                        // Only show ReadingView when there's an active session.
+                        // Without this gate, ReadingView's old fallback path
+                        // would surface the hardcoded mock sample (La montagna
+                        // incantata) every time a live app hadn't picked a
+                        // document yet — confusing on first run and after
+                        // `stop_session`.
+                        if host.currentSession != nil {
+                            ReadingView(
+                                accent: accent,
+                                host: host,
+                                onOpenSettings: {
+                                    mode = (mode == .settings) ? .reading : .settings
+                                }
+                            )
+                            // Coordinate space is now defined *inside* ReadingView's
+                            // mainArea (on the ZStack that holds both the chunk text
+                            // and the link overlay) so the two share a frame origin.
+                        } else {
+                            EmptyReadingState(
+                                accent: accent,
+                                hasLibrary: !host.library.isEmpty,
+                                onImport: handleImport
+                            )
+                        }
                     case .settings:
                         SettingsView(
                             host: host,

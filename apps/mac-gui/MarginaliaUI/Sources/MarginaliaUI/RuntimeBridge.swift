@@ -85,7 +85,19 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     await self?.refreshDocumentView(id: docId)
                     await self?.refreshNotes(documentId: docId)
                 }
-                await MainActor.run { self?.pushMessage("Sessione ripresa.") }
+                // Log line + visible toast — without the toast the user
+                // has no idea why the reader opened on a specific chunk
+                // (the restore is silent-by-design on the runtime side).
+                await MainActor.run { [weak self] in
+                    guard let self = self else { return }
+                    self.pushMessage("Sessione ripresa.")
+                    if let s = self.currentSession {
+                        self.transientToast = ToastMessage(
+                            text: "Riprendo: \(s.documentTitle) · capitolo \(s.sectionIndex + 1)",
+                            kind: .info
+                        )
+                    }
+                }
             } else {
                 await self?.refreshSessionSnapshot()
             }

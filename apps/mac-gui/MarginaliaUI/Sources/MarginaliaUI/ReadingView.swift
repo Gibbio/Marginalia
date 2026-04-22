@@ -103,21 +103,27 @@ public struct ReadingView<Host: MarginaliaHost>: View {
         self.onOpenSettings = onOpenSettings
     }
 
-    /// Chunks of the currently-visible section. Falls back to the mock
-    /// sample when no session is active, so the design preview stays
-    /// identical to what Claude Design shipped.
+    /// Chunks of the currently-visible section. Expects a live session —
+    /// `MarginaliaWindow` gates `.reading` mode on `currentSession != nil`,
+    /// so by the time we get here the host has a document to render. If
+    /// somehow it doesn't (e.g. the view is mounted while the runtime is
+    /// still initialising), we return an empty list and the reading column
+    /// renders just its header and gradient wash — better than leaking
+    /// mock Thomas Mann text.
     private var chunks: [ReadingChunk] {
-        guard let section = host.currentDocument?
-            .sections.first(where: { $0.index == (host.currentSession?.sectionIndex ?? -1) })
-            ?? host.currentDocument?.sections.first
-        else { return ReadingMock.chunks }
+        guard let section = currentSection else { return [] }
         return section.chunks
+    }
+
+    private var currentSection: SectionDoc? {
+        guard let doc = host.currentDocument else { return nil }
+        return doc.sections.first(where: { $0.index == (host.currentSession?.sectionIndex ?? -1) })
+            ?? doc.sections.first
     }
 
     private var notes: [MarginNote] {
         var all = host.notes
         if let live = host.liveNote { all.insert(live, at: 0) }
-        if all.isEmpty { return ReadingMock.notes }
         return all
     }
 
@@ -125,7 +131,7 @@ public struct ReadingView<Host: MarginaliaHost>: View {
         VStack(spacing: 0) {
             Toolbar(
                 accent: accent,
-                title: host.currentSession?.documentTitle ?? "La montagna incantata",
+                title: host.currentSession?.documentTitle ?? "",
                 subtitle: sessionSubtitle,
                 playbackState: host.currentSession?.playbackState ?? .idle,
                 onTogglePlay: togglePlay
@@ -137,10 +143,27 @@ public struct ReadingView<Host: MarginaliaHost>: View {
     }
 
     private var sessionSubtitle: String {
-        if let s = host.currentSession {
-            return "capitolo \(s.sectionIndex + 1) · chunk \(s.chunkIndex + 1)"
-        }
-        return "capitolo III · p. 47"
+        guard let s = host.currentSession else { return "" }
+        return "capitolo \(s.sectionIndex + 1) · chunk \(s.chunkIndex + 1)"
+    }
+
+    /// Uppercased document title — the kicker line above the big title.
+    /// Dropped to an empty string if we somehow render without a document
+    /// (MarginaliaWindow gates this, but defense-in-depth).
+    private var headerKicker: String {
+        (host.currentDocument?.title ?? "").uppercased()
+    }
+
+    /// "Capitolo N" — 1-based chapter label derived from the section index.
+    private var headerChapterLabel: String {
+        guard let idx = host.currentSession?.sectionIndex else { return "" }
+        return "Capitolo \(idx + 1)"
+    }
+
+    /// Section title in italics below the chapter label. Empty strings
+    /// suppress the second line entirely (see the `!isEmpty` guard upstream).
+    private var headerSectionTitle: String {
+        host.currentSession?.sectionTitle ?? currentSection?.title ?? ""
     }
 
     private func togglePlay() {
@@ -202,22 +225,25 @@ public struct ReadingView<Host: MarginaliaHost>: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        // Header / title — size drops in text mode and
-                        // respects the user's fontScale setting.
+                        // Header / title — live data from the current
+                        // session. Size drops in text mode and respects the
+                        // user's fontScale setting.
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("DER ZAUBERBERG · PARTE SECONDA")
+                            Text(headerKicker)
                                 .font(.mono(10))
                                 .tracking(2)
                                 .foregroundStyle(Tokens.textFaint)
                             VStack(alignment: .leading, spacing: 0) {
-                                Text("Capitolo III")
+                                Text(headerChapterLabel)
                                     .font(.serif(titleSize, weight: .medium))
                                     .kerning(-0.6)
                                     .foregroundStyle(Tokens.text)
-                                Text("il tempo in montagna")
-                                    .font(.serif(titleSize, italic: true))
-                                    .kerning(-0.6)
-                                    .foregroundStyle(Tokens.textDim)
+                                if !headerSectionTitle.isEmpty {
+                                    Text(headerSectionTitle)
+                                        .font(.serif(titleSize, italic: true))
+                                        .kerning(-0.6)
+                                        .foregroundStyle(Tokens.textDim)
+                                }
                             }
                         }
                         .padding(.bottom, headerPaddingBottom)

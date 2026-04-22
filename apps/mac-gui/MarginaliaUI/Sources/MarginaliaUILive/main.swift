@@ -114,6 +114,9 @@ struct MarginaliaLiveApp: App {
                 }
             )
             .onAppear { Task { await host.refreshInstallations() } }
+            .onChange(of: host.inflightDownloads) { oldValue, newValue in
+                playPreviewForNewlyInstalledVoice(old: oldValue, new: newValue, host: host)
+            }
         }
     }
 
@@ -174,6 +177,36 @@ private func onboardingAssets(from host: FFIHost) -> [InstallModelsView.Asset] {
                 id: $0.id, label: $0.label, size: $0.size, installed: $0.installed
             )
         }
+}
+
+/// Demo sentence auto-played when a voice finishes installing during
+/// onboarding. Short, neutral — lets the user immediately hear that the
+/// app works instead of staring at a checkmark.
+private let onboardingDemoText = "Ciao, sono la tua voce. Sono pronta per leggere con te."
+
+/// Fires a one-shot TTS preview when a voice transitions to `.installed`.
+/// Driven by `.onChange(of: host.inflightDownloads)` so SwiftUI owns the
+/// old/new diff rather than us tracking it manually.
+@MainActor
+private func playPreviewForNewlyInstalledVoice(
+    old: [String: InstallUiState],
+    new: [String: InstallUiState],
+    host: FFIHost
+) {
+    for (id, state) in new
+        where state == .installed
+        && old[id] != .installed
+        && id.hasPrefix("voice:")
+    {
+        let voiceId = String(id.dropFirst("voice:".count))
+        Task {
+            guard let path = try? await host.synthesizePreview(
+                text: onboardingDemoText, voice: voiceId
+            ), !path.isEmpty else { return }
+            await MainActor.run { PreviewSoundCache.play(path: path) }
+        }
+        break
+    }
 }
 
 /// Translate `FFIHost.InstallState` → `InstallModelsView.RowState`. Kept as
