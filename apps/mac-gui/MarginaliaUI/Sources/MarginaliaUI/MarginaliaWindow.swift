@@ -18,6 +18,7 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
     @State private var logExpanded: Bool = false
     @State private var showingBookmarks: Bool = false
     @State private var showingNotes: Bool = false
+    @State private var showingShortcuts: Bool = false
     /// Persisted across launches. Window owns the accent so Settings +
     /// Reading share the same colour without plumbing a binding
     /// everywhere.
@@ -148,6 +149,12 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                 onDismiss: { showingNotes = false }
             )
         }
+        .onReceive(NotificationCenter.default.publisher(for: .marginaliaShowShortcuts)) { _ in
+            showingShortcuts = true
+        }
+        .sheet(isPresented: $showingShortcuts) {
+            ShortcutsSheet(accent: accent, onDismiss: { showingShortcuts = false })
+        }
     }
 
     private func handleImport() {
@@ -235,4 +242,6 @@ public extension Notification.Name {
     static let marginaliaShowBookmarks = Notification.Name("com.gibbio.marginalia.showBookmarks")
     /// Fired by ⌘⌥N to open the notes-list sheet.
     static let marginaliaShowNotes = Notification.Name("com.gibbio.marginalia.showNotes")
+    /// Fired by `Aiuto → Scorciatoie` (⌘?) to open the cheatsheet.
+    static let marginaliaShowShortcuts = Notification.Name("com.gibbio.marginalia.showShortcuts")
 }

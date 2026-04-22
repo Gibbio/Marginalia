@@ -82,6 +82,7 @@ struct MarginaliaApp: App {
                 .onAppear {
                     poller.start()
                     if host.needsOnboarding { onboardingStep = .welcome }
+                    installSleepObserver()
                 }
                 .onDisappear { poller.stop() }
                 .sheet(isPresented: $uiState.showingUrlImport) {
@@ -166,6 +167,23 @@ struct MarginaliaApp: App {
     /// `MARGINALIA_STT_HELPER` explicitly is a belt-and-braces guard for
     /// Xcode-run-from-DerivedData paths where the `.app` structure isn't
     /// canonical.
+    /// Register the system-sleep hook so we auto-pause playback when the
+    /// Mac is about to sleep. Without this, waking up drops the user
+    /// into the middle of a sentence they already half-forgot. No
+    /// cleanup needed — the observer dies with the process.
+    private func installSleepObserver() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak host] _ in
+            guard let h = host,
+                  h.currentSession?.playbackState == .playing
+            else { return }
+            Task { try? await h.pause() }
+        }
+    }
+
     private static func pointHelperAtBundleIfAvailable() {
         let helpers = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers")
         guard

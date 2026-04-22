@@ -104,7 +104,12 @@ struct LiveMarginaliaCommands: Commands {
             .keyboardShortcut("l", modifiers: [.option])
         }
 
-        CommandGroup(replacing: .help) { EmptyView() }
+        CommandGroup(replacing: .help) {
+            Button("Scorciatoie") {
+                NotificationCenter.default.post(name: .marginaliaShowShortcuts, object: nil)
+            }
+            .keyboardShortcut("/", modifiers: [.command])
+        }
     }
 
     private func importFile() {

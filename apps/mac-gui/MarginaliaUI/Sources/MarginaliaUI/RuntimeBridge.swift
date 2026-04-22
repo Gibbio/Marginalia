@@ -57,7 +57,13 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         if messages.count >= 64 { messages.removeFirst() }
         messages.append(m)
         if m.hasPrefix("Errore") {
-            transientToast = ToastMessage(text: m, kind: .error)
+            // Actionable: "Apri log" expands the LogPane so the user
+            // sees the full message + prior context (stt:, play:, …)
+            // without hunting for it.
+            let openLog = ToastAction(label: "apri log") {
+                NotificationCenter.default.post(name: .marginaliaToggleLog, object: nil)
+            }
+            transientToast = ToastMessage(text: m, kind: .error, action: openLog)
         }
     }
 
@@ -295,14 +301,42 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         return pollEvents()
     }
 
-    public func pause() async throws { try runtime.pauseSession(); await refreshSessionSnapshot() }
-    public func resume() async throws { try runtime.resumeSession(); await refreshSessionSnapshot() }
+    public func pause() async throws {
+        try runtime.pauseSession()
+        await refreshSessionSnapshot()
+        await MainActor.run { self.showActionFeedback("pause") }
+    }
+    public func resume() async throws {
+        try runtime.resumeSession()
+        await refreshSessionSnapshot()
+        await MainActor.run { self.showActionFeedback("resume") }
+    }
     public func stop() async throws { try runtime.stopSession(); await refreshSessionSnapshot() }
-    public func next() async throws { try runtime.nextChunk(); await refreshSessionSnapshot() }
-    public func back() async throws { try runtime.previousChunk(); await refreshSessionSnapshot() }
-    public func repeatCurrent() async throws { try runtime.repeatChunk(); await refreshSessionSnapshot() }
-    public func nextChapter() async throws { try runtime.nextChapter(); await refreshSessionSnapshot() }
-    public func previousChapter() async throws { try runtime.previousChapter(); await refreshSessionSnapshot() }
+    public func next() async throws {
+        try runtime.nextChunk()
+        await refreshSessionSnapshot()
+        await MainActor.run { self.showActionFeedback("next") }
+    }
+    public func back() async throws {
+        try runtime.previousChunk()
+        await refreshSessionSnapshot()
+        await MainActor.run { self.showActionFeedback("back") }
+    }
+    public func repeatCurrent() async throws {
+        try runtime.repeatChunk()
+        await refreshSessionSnapshot()
+        await MainActor.run { self.showActionFeedback("repeat") }
+    }
+    public func nextChapter() async throws {
+        try runtime.nextChapter()
+        await refreshSessionSnapshot()
+        await MainActor.run { self.showActionFeedback("next_chapter") }
+    }
+    public func previousChapter() async throws {
+        try runtime.previousChapter()
+        await refreshSessionSnapshot()
+        await MainActor.run { self.showActionFeedback("prev_chapter") }
+    }
     public func seekToChunk(section: Int, chunk: Int) async throws {
         try runtime.seekToChunk(sectionIndex: UInt32(max(0, section)),
                                  chunkIndex: UInt32(max(0, chunk)))
@@ -467,13 +501,14 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
 
     /// Map a recognized voice command to the right host method. Mirrors the
     /// TUI's `resolve_action` dispatch in `apps/tui-rs/src/app.rs:717`.
+    ///
+    /// The confirmation toast is emitted by the playback methods
+    /// themselves (`pause()`, `next()`, etc. → `showActionFeedback`) so
+    /// keyboard shortcuts and voice commands get identical UI. Here we
+    /// only play the "heard you" chime — the audible half of the
+    /// confirmation.
     private func dispatchVoiceAction(_ action: String) {
         pushMessage("→ \(action)")
-        // Visual + audible confirmation so the user knows the app heard
-        // the command. Chime is the system Tink (11 = Tink in Core Audio's
-        // system sound IDs) — same affordance the Swift helper uses for
-        // its mode-change beeps, kept subtle.
-        transientToast = ToastMessage(text: voiceFeedbackLabel(for: action), kind: .info)
         playCommandChime()
         Task { [weak self] in
             guard let self else { return }
@@ -714,6 +749,15 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             installPollTimer?.invalidate()
             installPollTimer = nil
         }
+    }
+
+    /// Visual confirmation for playback actions, fired regardless of
+    /// source (voice command, keyboard shortcut, menu click). Bookmarks
+    /// and notes get their own dedicated feedback paths; this covers the
+    /// fast path of pause/next/back/etc.
+    @MainActor
+    func showActionFeedback(_ action: String) {
+        transientToast = ToastMessage(text: voiceFeedbackLabel(for: action), kind: .info)
     }
 
     /// Short human-readable label shown in the confirmation toast when a
