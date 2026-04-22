@@ -52,6 +52,17 @@ pub enum RuntimeEvent {
         document_id: Option<String>,
         error: Option<String>,
     },
+    /// Dictation job accepted — helper has switched to DICTATION mode and
+    /// is recording. UI should show the live-note card as "listening".
+    DictationStarted,
+    /// Dictation finished: either a transcript was captured or an error
+    /// occurred. Paired with the `DictationStarted` that preceded it.
+    VoiceNoteTranscribed {
+        text: String,
+        duration_secs: f64,
+        note_id: Option<String>,
+        error: Option<String>,
+    },
     Error {
         message: String,
     },

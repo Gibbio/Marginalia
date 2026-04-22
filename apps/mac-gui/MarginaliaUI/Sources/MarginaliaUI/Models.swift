@@ -260,6 +260,8 @@ public enum MarginaliaEvent: Sendable {
     case sessionStopped(documentId: String)
     case ingestStarted(source: String)
     case ingestFinished(source: String, documentId: String?, errorMessage: String?)
+    case dictationStarted
+    case voiceNoteTranscribed(text: String, durationSecs: Double, noteId: String?, errorMessage: String?)
     case runtimeError(String)
 }
 
@@ -336,6 +338,11 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// Jump to a specific `(section, chunk)` position in the active document.
     /// Wired to chunk-click in the reading column.
     func seekToChunk(section: Int, chunk: Int) async throws
+
+    /// Fire-and-forget: start a voice-note dictation. The live note card
+    /// lights up via `dictationStarted`, the final transcript arrives via
+    /// `voiceNoteTranscribed`.
+    func startDictation()
     /// Save a "[BOOKMARK] …" note at the current position (voice: "segna").
     func bookmark() async throws
     /// Human-readable position string (voice: "dove sono"). Callers
@@ -657,6 +664,28 @@ public final class MockHost: MarginaliaHost, ObservableObject {
             voice: s.voice
         )
         currentSession = s
+    }
+
+    /// Mock dictation: pop a live note placeholder, then resolve it after
+    /// ~2 s with a canned transcript so the preview shows the full flow.
+    public func startDictation() {
+        liveNote = MarginNote(
+            id: "live", chunkId: currentSession?.anchor ?? "",
+            when: "ora", quote: "", body: "…",
+            duration: "0:00", status: "", live: true
+        )
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await MainActor.run {
+                guard let self = self else { return }
+                let transcript = "Questa è una nota di prova, dettata a voce."
+                self.liveNote = MarginNote(
+                    id: "live", chunkId: self.currentSession?.anchor ?? "",
+                    when: "ora", quote: "", body: transcript,
+                    duration: "0:02", status: "applicato", live: true
+                )
+            }
+        }
     }
 
     private func bumpChunk(by d: Int) {

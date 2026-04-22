@@ -56,6 +56,9 @@ struct LiveMarginaliaCommands: Commands {
                 .disabled(host.currentSession == nil)
 
             Divider()
+            Button("Nuova nota dettata") { host.startDictation() }
+                .keyboardShortcut("n", modifiers: [.command])
+                .disabled(host.currentSession == nil)
             Button("Salva segnalibro") { Task { try? await host.bookmark() } }
                 .keyboardShortcut("b", modifiers: [.command])
                 .disabled(host.currentSession == nil)

@@ -220,6 +220,18 @@ impl From<RuntimeEvent> for FfiRuntimeEvent {
                 document_id,
                 error_message: error,
             },
+            RuntimeEvent::DictationStarted => FfiRuntimeEvent::DictationStarted,
+            RuntimeEvent::VoiceNoteTranscribed {
+                text,
+                duration_secs,
+                note_id,
+                error,
+            } => FfiRuntimeEvent::VoiceNoteTranscribed {
+                text,
+                duration_secs,
+                note_id,
+                error_message: error,
+            },
             RuntimeEvent::Error { message } => FfiRuntimeEvent::Error { message },
         }
     }

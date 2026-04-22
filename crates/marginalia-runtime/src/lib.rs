@@ -45,6 +45,7 @@ use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 pub use builder::{BuildOutput, RuntimeBuilder, RuntimeSidecar};
 pub use discovery::{Discovery, Gender, LangInfo, SttEngine, TtsBackend, VoiceInfo};
@@ -212,7 +213,12 @@ pub struct SqliteRuntime {
     playback_engine: Box<dyn PlaybackEngine + Send>,
     tts: Box<dyn SpeechSynthesizer + Send>,
     command_recognizer: Box<dyn CommandRecognizer + Send>,
-    dictation_transcriber: Box<dyn DictationTranscriber + Send>,
+    /// Wrapped in `Arc<Mutex<>>` so the FFI can clone a handle and run the
+    /// blocking `transcribe()` call on a dedicated thread without holding
+    /// the runtime-wide lock. Dictation takes ~10–30 s (user speech +
+    /// silence timeout); blocking the runtime that whole time would
+    /// freeze the UI's 100 ms event poll.
+    dictation_transcriber: Arc<Mutex<Box<dyn DictationTranscriber + Send>>>,
     rewrite_generator: Box<dyn RewriteGenerator + Send>,
     topic_summarizer: Box<dyn TopicSummarizer + Send>,
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
@@ -328,7 +334,7 @@ impl SqliteRuntime {
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
-            dictation_transcriber: Box::new(FakeDictationTranscriber::default()),
+            dictation_transcriber: Arc::new(Mutex::new(Box::new(FakeDictationTranscriber::default()))),
             rewrite_generator: Box::new(FakeRewriteGenerator::new()),
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
@@ -362,7 +368,7 @@ impl SqliteRuntime {
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
-            dictation_transcriber: Box::new(FakeDictationTranscriber::default()),
+            dictation_transcriber: Arc::new(Mutex::new(Box::new(FakeDictationTranscriber::default()))),
             rewrite_generator: Box::new(FakeRewriteGenerator::new()),
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
@@ -1002,10 +1008,12 @@ impl SqliteRuntime {
             .command_recognizer
             .describe_capabilities()
             .provider_name;
-        let dictation_name = self
-            .dictation_transcriber
-            .describe_capabilities()
-            .provider_name;
+        // `try_lock` so we don't block the doctor report if a dictation
+        // is currently in progress — report "busy" in that (rare) case.
+        let dictation_name = match self.dictation_transcriber.try_lock() {
+            Ok(guard) => guard.describe_capabilities().provider_name,
+            Err(_) => "busy".to_string(),
+        };
 
         let mut checks = serde_json::json!({
             "playback": { "ready": true, "command": "beta-runtime" },
@@ -1052,7 +1060,7 @@ impl SqliteRuntime {
         &mut self,
         transcriber: impl DictationTranscriber + Send + 'static,
     ) {
-        self.dictation_transcriber = Box::new(transcriber);
+        *self.dictation_transcriber.lock().unwrap() = Box::new(transcriber);
     }
 
     /// Convenience: set both command recognizer and dictation transcriber from
@@ -1060,12 +1068,16 @@ impl SqliteRuntime {
     /// pair (e.g. `new_apple_stt`, or a future unified Whisper factory).
     pub fn set_stt_engine(&mut self, output: SttEngineOutput) {
         self.command_recognizer = output.command_recognizer;
-        self.dictation_transcriber = output.dictation_transcriber;
+        *self.dictation_transcriber.lock().unwrap() = output.dictation_transcriber;
     }
 
-    /// Return a reference to the active dictation transcriber.
-    pub fn dictation_transcriber(&self) -> &dyn DictationTranscriber {
-        self.dictation_transcriber.as_ref()
+    /// Cloneable handle to the dictation transcriber — used by the FFI's
+    /// dedicated dictation thread so the blocking `transcribe()` call
+    /// doesn't hold the runtime-wide lock.
+    pub fn dictation_transcriber_handle(
+        &self,
+    ) -> Arc<Mutex<Box<dyn DictationTranscriber + Send>>> {
+        self.dictation_transcriber.clone()
     }
 
     /// Return a reference to the active rewrite generator.

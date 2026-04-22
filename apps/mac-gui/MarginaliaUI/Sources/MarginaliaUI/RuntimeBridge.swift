@@ -292,6 +292,19 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         await refreshSessionSnapshot()
     }
 
+    /// Kick off a dictation. The runtime thread blocks inside SFSpeech
+    /// for up to the configured silence timeout (`[stt.dictation]`
+    /// `max_record_seconds`). Progress surfaces through the event stream:
+    /// `dictationStarted` flips the live-note card to "recording",
+    /// `voiceNoteTranscribed` fills it with the final transcript.
+    public func startDictation() {
+        do {
+            try runtime.startDictation()
+        } catch {
+            pushMessage("Errore dettatura: \(error.localizedDescription)")
+        }
+    }
+
     public func handle(event: MarginaliaEvent) {
         switch event {
         case .synthesisStarted(_, let sec, let ck):
@@ -327,6 +340,41 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             } else {
                 Task { await refreshLibrary() }
             }
+        case .dictationStarted:
+            // Seed the live-note card in "recording" state so the user
+            // sees immediate feedback the helper has switched mode.
+            liveNote = MarginNote(
+                id: "live", chunkId: currentSession?.anchor ?? "",
+                when: "ora", quote: "", body: "",
+                duration: "0:00", status: "", live: true
+            )
+        case .voiceNoteTranscribed(let text, let dur, let noteId, let err):
+            if let err {
+                liveNote = nil
+                pushMessage("Errore dettatura: \(err)")
+                transientToast = ToastMessage(
+                    text: "Dettatura fallita: \(err)", kind: .error
+                )
+            } else {
+                // Promote the live card to a saved note and refresh the
+                // canonical notes list so it shows up in the margin panel.
+                liveNote = MarginNote(
+                    id: noteId ?? "live",
+                    chunkId: currentSession?.anchor ?? "",
+                    when: "ora", quote: "", body: text,
+                    duration: String(format: "%d:%02d",
+                                     Int(dur) / 60, Int(dur) % 60),
+                    status: "salvata", live: true
+                )
+                if let docId = currentSession?.documentId {
+                    Task { await self.refreshNotes(documentId: docId) }
+                }
+                // Clear the live card after a short display window.
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    await MainActor.run { self?.liveNote = nil }
+                }
+            }
         case .runtimeError(let msg):
             pushMessage("Errore: \(msg)")
         }
@@ -350,16 +398,10 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             case "bookmark":     try? await self.bookmark()
             case "where":        _ = await MainActor.run { self.announcePosition() }
             case "note":
-                // Voice-triggered dictation isn't implemented in the runtime
-                // yet (the TUI stubs this too). Show a placeholder live-note
-                // card so the UX is coherent when the pipeline lands.
-                await MainActor.run {
-                    self.liveNote = MarginNote(
-                        id: "live", chunkId: self.currentSession?.anchor ?? "",
-                        when: "ora", quote: "", body: "…",
-                        duration: "0:00", status: "", live: true
-                    )
-                }
+                // Dictation via voice: fire the FFI. `DictationStarted`
+                // event seeds the live-note card, `VoiceNoteTranscribed`
+                // fills it with the transcript.
+                await MainActor.run { self.startDictation() }
             default:
                 self.pushMessage("Azione sconosciuta: \(action)")
             }
@@ -454,6 +496,11 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 return .ingestStarted(source: src)
             case .ingestFinished(let src, let docId, let err):
                 return .ingestFinished(source: src, documentId: docId, errorMessage: err)
+            case .dictationStarted:
+                return .dictationStarted
+            case .voiceNoteTranscribed(let text, let dur, let nid, let err):
+                return .voiceNoteTranscribed(text: text, durationSecs: dur,
+                                              noteId: nid, errorMessage: err)
             case .error(let msg):
                 return .runtimeError(msg)
             }

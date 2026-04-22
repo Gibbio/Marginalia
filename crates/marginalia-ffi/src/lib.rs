@@ -387,6 +387,13 @@ pub enum FfiRuntimeEvent {
         document_id: Option<String>,
         error_message: Option<String>,
     },
+    DictationStarted,
+    VoiceNoteTranscribed {
+        text: String,
+        duration_secs: f64,
+        note_id: Option<String>,
+        error_message: Option<String>,
+    },
     Error {
         message: String,
     },
@@ -1036,6 +1043,92 @@ impl FfiRuntime {
     }
     pub fn auto_advance(&self) -> bool {
         self.runtime.lock().unwrap().try_auto_advance()
+    }
+
+    /// Kick off a voice-note dictation. Returns immediately; the blocking
+    /// `transcribe()` call runs on a dedicated thread so the UI's 100 ms
+    /// event poll stays responsive. Events:
+    ///
+    ///   1. `DictationStarted` — helper in DICTATION mode, recording
+    ///   2. `VoiceNoteTranscribed { text, note_id }` on success
+    ///      OR `VoiceNoteTranscribed { error_message }` on failure
+    ///
+    /// No-op-ish when called with no active session: the dictation still
+    /// runs (user might want to dictate a free-floating note) but
+    /// `create_note` will fail with `NoSession`; the failure surfaces
+    /// as `VoiceNoteTranscribed { error_message: "no active session" }`.
+    pub fn start_dictation(&self) -> Result<(), FfiError> {
+        let runtime = self.runtime.clone();
+        let event_buf = self.event_buffer.clone();
+
+        // 1. Brief runtime lock: grab dictation handle. Pausing playback
+        // is left to the UI — reading stays active so the user can
+        // reference the current chunk while dictating.
+        let dictation_handle = {
+            let rt = runtime.lock().unwrap();
+            rt.dictation_transcriber_handle()
+        };
+
+        std::thread::Builder::new()
+            .name("marginalia-dictation".into())
+            .spawn(move || {
+                // 2. Announce we're listening so the UI shows the live-note
+                // card in "recording" state.
+                event_buf.push(FfiRuntimeEvent::DictationStarted);
+
+                // 3. Blocking transcribe — only the transcriber mutex is
+                // held here, not the runtime mutex, so other FFI calls
+                // keep flowing while the user speaks. session_id/note_id
+                // are currently unused by the Apple transcriber (see
+                // `crates/marginalia-stt-apple/src/lib.rs`).
+                let transcript = {
+                    let mut t = dictation_handle.lock().unwrap();
+                    t.transcribe(None, None)
+                };
+                let text = transcript.text.trim().to_string();
+                let duration = transcript
+                    .segments
+                    .iter()
+                    .map(|s| s.end_ms.saturating_sub(s.start_ms) as f64 / 1000.0)
+                    .sum::<f64>();
+
+                if text.is_empty() {
+                    event_buf.push(FfiRuntimeEvent::VoiceNoteTranscribed {
+                        text: String::new(),
+                        duration_secs: duration,
+                        note_id: None,
+                        error_message: Some(
+                            "dettatura vuota o non riconosciuta".to_string(),
+                        ),
+                    });
+                    return;
+                }
+
+                // 4. Re-lock runtime to persist the note at the current
+                // reading position. `create_note` emits its own note
+                // repository activity; we wrap with our event so the UI
+                // can light the live-note card in one place.
+                let create_result = {
+                    let mut rt = runtime.lock().unwrap();
+                    rt.create_note(&text)
+                };
+                match create_result {
+                    Ok(note) => event_buf.push(FfiRuntimeEvent::VoiceNoteTranscribed {
+                        text,
+                        duration_secs: duration,
+                        note_id: Some(note.note_id),
+                        error_message: None,
+                    }),
+                    Err(e) => event_buf.push(FfiRuntimeEvent::VoiceNoteTranscribed {
+                        text,
+                        duration_secs: duration,
+                        note_id: None,
+                        error_message: Some(format!("{e:?}")),
+                    }),
+                }
+            })
+            .map_err(|e| FfiError::Io(format!("spawn dictation thread: {e}")))?;
+        Ok(())
     }
 
     // ─────────────────────────────────────────────────────────

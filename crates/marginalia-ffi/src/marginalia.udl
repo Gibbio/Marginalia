@@ -151,6 +151,8 @@ interface FfiRuntimeEvent {
   SessionStopped(string document_id);
   IngestStarted(string source);
   IngestFinished(string source, string? document_id, string? error_message);
+  DictationStarted();
+  VoiceNoteTranscribed(string text, f64 duration_secs, string? note_id, string? error_message);
   Error(string message);
 };
 
@@ -215,6 +217,14 @@ interface FfiRuntime {
   [Throws=FfiError]
   void seek_to_chunk(u32 section_index, u32 chunk_index);
   boolean auto_advance();
+
+  // Voice note dictation — spawns a background thread that switches the
+  // STT helper to DICTATION mode, captures until silence, saves the
+  // transcript as a note at the current reading position. Returns
+  // immediately; progress and result arrive via `DictationStarted`
+  // and `VoiceNoteTranscribed` events.
+  [Throws=FfiError]
+  void start_dictation();
 
   // State ---------------------------------------------------------
   AppSnapshot app_snapshot();
