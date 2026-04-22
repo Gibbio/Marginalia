@@ -35,7 +35,7 @@ struct MarginaliaLiveApp: App {
     @StateObject private var uiState = LiveAppUIState()
     @State private var onboardingStep: OnboardingStep = .none
 
-    enum OnboardingStep { case none, welcome, installModels }
+    enum OnboardingStep { case none, welcome, permissions, installModels }
 
     init() {
         Fonts.registerBundled()
@@ -97,7 +97,13 @@ struct MarginaliaLiveApp: App {
         case .none:
             MarginaliaWindow(host: host, initialMode: .reading)
         case .welcome:
-            WelcomeView(accent: .default) { onboardingStep = .installModels }
+            WelcomeView(accent: .default) { onboardingStep = .permissions }
+        case .permissions:
+            PermissionsCheckView(
+                accent: .default,
+                onContinue: { onboardingStep = .installModels },
+                onBack: { onboardingStep = .welcome }
+            )
         case .installModels:
             InstallModelsView(
                 accent: .default,

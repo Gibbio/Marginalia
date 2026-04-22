@@ -32,7 +32,7 @@ struct MarginaliaApp: App {
 
     static let onboardedKey = "com.gibbio.marginalia.hasOnboarded"
 
-    enum OnboardingStep { case none, welcome, installModels }
+    enum OnboardingStep { case none, welcome, permissions, installModels }
 
     init() {
         Fonts.registerBundled()
@@ -90,8 +90,14 @@ struct MarginaliaApp: App {
             MarginaliaWindow(host: host, initialMode: .reading)
         case .welcome:
             WelcomeView(accent: .default) {
-                onboardingStep = .installModels
+                onboardingStep = .permissions
             }
+        case .permissions:
+            PermissionsCheckView(
+                accent: .default,
+                onContinue: { onboardingStep = .installModels },
+                onBack: { onboardingStep = .welcome }
+            )
         case .installModels:
             InstallModelsView(
                 accent: .default,
