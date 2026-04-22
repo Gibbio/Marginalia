@@ -379,6 +379,14 @@ pub enum FfiRuntimeEvent {
     SessionStopped {
         document_id: String,
     },
+    IngestStarted {
+        source: String,
+    },
+    IngestFinished {
+        source: String,
+        document_id: Option<String>,
+        error_message: Option<String>,
+    },
     Error {
         message: String,
     },
@@ -1014,6 +1022,18 @@ impl FfiRuntime {
         self.runtime.lock().unwrap().repeat_chunk()?;
         Ok(())
     }
+    /// Click-to-seek: jump to `(section, chunk)` in the active document.
+    pub fn seek_to_chunk(
+        &self,
+        section_index: u32,
+        chunk_index: u32,
+    ) -> Result<(), FfiError> {
+        self.runtime
+            .lock()
+            .unwrap()
+            .seek_to_chunk(section_index as usize, chunk_index as usize)?;
+        Ok(())
+    }
     pub fn auto_advance(&self) -> bool {
         self.runtime.lock().unwrap().try_auto_advance()
     }
@@ -1175,6 +1195,29 @@ impl FfiRuntime {
     /// looser timing needs than playback state).
     pub fn install_progress(&self) -> Vec<InstallProgress> {
         self.install_buffer.drain()
+    }
+
+    /// Remove a previously-installed asset from the HF cache. Synchronous
+    /// and fast (one `unlink` of the blob + the snapshot symlink), so we
+    /// don't bother with a background thread here. Unknown asset_id is an
+    /// error; "asset not currently installed" is a no-op (Ok).
+    pub fn uninstall_asset(&self, asset_id: String) -> Result<(), FfiError> {
+        let spec = CATALOG
+            .iter()
+            .find(|s| s.id == asset_id)
+            .ok_or_else(|| FfiError::Io(format!("unknown asset '{asset_id}'")))?;
+        let (repo, file): (&str, String) = match &spec.source {
+            AssetSource::MlxCore { file } => ("prince-canuma/Kokoro-82M", file.to_string()),
+            AssetSource::MlxVoice { voice_id } => (
+                "prince-canuma/Kokoro-82M",
+                format!("voices/{voice_id}.safetensors"),
+            ),
+            AssetSource::Whisper { file } => ("ggerganov/whisper.cpp", file.to_string()),
+            AssetSource::KokoroOnnx { file } => ("onnx-community/Kokoro-82M", file.to_string()),
+        };
+        marginalia_models::ModelManager::uninstall_from_repo(repo, &file)
+            .map_err(|e| FfiError::Io(e.to_string()))?;
+        Ok(())
     }
 }
 

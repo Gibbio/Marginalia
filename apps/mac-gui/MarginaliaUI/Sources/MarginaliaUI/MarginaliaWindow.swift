@@ -88,6 +88,24 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                 accent: accent
             )
         }
+        .overlay {
+            // Blocking ingest overlay — dims the window and runs a spinner
+            // while the runtime is chunking a freshly imported document.
+            // Cleared by `IngestFinished` in `FFIHost.handle(event:)`.
+            if let source = host.ingestingSource {
+                IngestOverlay(source: source, accent: accent)
+                    .transition(.opacity)
+            }
+        }
+        // Drop-to-import: dragging a supported document onto the window
+        // triggers the same import path as `⌘O`. `Info.plist` declares
+        // these types under `CFBundleDocumentTypes`; the `.onDrop` just
+        // mirrors that list so the OS surfaces a copy-cursor on hover.
+        .onDrop(
+            of: [.pdf, .epub, .plainText, .fileURL],
+            isTargeted: nil,
+            perform: handleDrop
+        )
         .onAppear { accent = AppTheme.accent(for: themeId) }
         .onChange(of: themeId) { _, new in
             withAnimation(.easeInOut(duration: 0.25)) {
@@ -123,6 +141,30 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
             try? await host.openDocument(id: id)
             mode = .reading
         }
+    }
+
+    /// Consume a drag-drop payload and import any file URLs we recognise.
+    /// NSItemProvider hands us URLs asynchronously — wait for all, filter
+    /// by extension, fire imports in parallel. Returns `true` iff at
+    /// least one provider vended a file URL (signals the OS to accept
+    /// the drop).
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        let accepted = Set(["pdf", "epub", "txt", "md", "markdown"])
+        var handled = false
+        for provider in providers {
+            guard provider.canLoadObject(ofClass: URL.self) else { continue }
+            handled = true
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url,
+                      accepted.contains(url.pathExtension.lowercased())
+                else { return }
+                Task { @MainActor in
+                    _ = try? await host.importFile(url: url)
+                    await host.refreshLibrary()
+                }
+            }
+        }
+        return handled
     }
 
 }

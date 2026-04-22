@@ -130,6 +130,42 @@ impl ModelManager {
     pub fn is_local(path: &std::path::Path) -> bool {
         path.exists()
     }
+
+    /// Remove a previously-downloaded file from the HF cache. Best-effort:
+    /// the file may already be gone (e.g. the user cleared the cache
+    /// manually) — that's not an error for the caller. Returns the path
+    /// that was (or would have been) removed when found, `None` if the
+    /// cache layout didn't match.
+    ///
+    /// The HF cache layout is
+    /// `{HF_HOME}/hub/models--{author}--{name}/snapshots/{rev}/{file}`
+    /// with a symlink through `blobs/…`. We rely on offline-mode `api.get`
+    /// to resolve the current path and then unlink it. The cached
+    /// `refs/{rev}` pointer is left alone — it's only a few bytes and
+    /// re-download overwrites it.
+    pub fn uninstall_from_repo(repo: &str, file: &str) -> Result<Option<PathBuf>, ModelError> {
+        // Force offline while probing so we don't accidentally refetch.
+        // Safe: single-threaded within the install worker.
+        unsafe { std::env::set_var("HF_HUB_OFFLINE", "1") };
+        let api = Api::new().map_err(|e| ModelError::Download(e.to_string()))?;
+        let repo_handle = api.model(repo.to_string());
+        match repo_handle.get(file) {
+            Ok(path) => {
+                // `path` is typically a symlink into blobs/. Delete both
+                // the symlink and the blob target so the cache reclaims
+                // real bytes.
+                if let Ok(target) = std::fs::read_link(&path) {
+                    let blob = path.parent().map(|p| p.join(target));
+                    if let Some(blob) = blob {
+                        let _ = std::fs::remove_file(&blob);
+                    }
+                }
+                let _ = std::fs::remove_file(&path);
+                Ok(Some(path))
+            }
+            Err(_) => Ok(None), // not cached — nothing to remove
+        }
+    }
 }
 
 impl Default for ModelManager {

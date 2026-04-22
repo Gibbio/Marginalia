@@ -149,6 +149,8 @@ interface FfiRuntimeEvent {
   CommandRecognized(string raw_text, string? command);
   SessionRestored(string session_id, string document_id, u32 section_index, u32 chunk_index);
   SessionStopped(string document_id);
+  IngestStarted(string source);
+  IngestFinished(string source, string? document_id, string? error_message);
   Error(string message);
 };
 
@@ -210,6 +212,8 @@ interface FfiRuntime {
   void restart_chapter();
   [Throws=FfiError]
   void repeat_chunk();
+  [Throws=FfiError]
+  void seek_to_chunk(u32 section_index, u32 chunk_index);
   boolean auto_advance();
 
   // State ---------------------------------------------------------
@@ -246,6 +250,8 @@ interface FfiRuntime {
   sequence<InstallableAsset> list_installable_assets();
   [Throws=FfiError]
   void install_asset(string asset_id);
+  [Throws=FfiError]
+  void uninstall_asset(string asset_id);
   sequence<InstallProgress> install_progress();
 };
 

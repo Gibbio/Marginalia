@@ -517,17 +517,43 @@ impl SqliteRuntime {
     }
 
     /// Import a document from a file path into the runtime's storage.
+    /// Emits `IngestStarted` / `IngestFinished` so the UI can overlay a
+    /// "sto leggendo …" spinner during chunking — large PDFs take several
+    /// seconds and the user needs to know the app isn't frozen.
     pub fn ingest_path(
         &mut self,
         source_path: &Path,
     ) -> Result<DocumentIngestionOutcome, IngestionError> {
-        let mut service = DocumentIngestionService::new(
-            &mut self.document_repository,
-            &self.importer,
-            self.event_publisher.clone(),
-            self.config.chunk_target_chars,
-        );
-        service.ingest_path(source_path)
+        let source = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("documento")
+            .to_string();
+        self.event_sink.emit(RuntimeEvent::IngestStarted {
+            source: source.clone(),
+        });
+        let result = {
+            let mut service = DocumentIngestionService::new(
+                &mut self.document_repository,
+                &self.importer,
+                self.event_publisher.clone(),
+                self.config.chunk_target_chars,
+            );
+            service.ingest_path(source_path)
+        };
+        match &result {
+            Ok(outcome) => self.event_sink.emit(RuntimeEvent::IngestFinished {
+                source,
+                document_id: Some(outcome.document.document_id.clone()),
+                error: None,
+            }),
+            Err(e) => self.event_sink.emit(RuntimeEvent::IngestFinished {
+                source,
+                document_id: None,
+                error: Some(format!("{e:?}")),
+            }),
+        }
+        result
     }
 
     /// Fetch a URL, extract its readable article via Mozilla Readability, and
@@ -535,18 +561,36 @@ impl SqliteRuntime {
     /// transparently via HTTP redirect following.
     #[cfg(feature = "url-import")]
     pub fn ingest_url(&mut self, url: &str) -> Result<DocumentIngestionOutcome, IngestionError> {
+        self.event_sink.emit(RuntimeEvent::IngestStarted {
+            source: url.to_string(),
+        });
         // A fresh importer per call: ureq::Agent construction is microseconds
         // and URL ingestion is a low-frequency user-driven action. Avoids
         // holding a long-lived TCP pool inside the runtime struct.
         let importer = UrlDocumentImporter::new();
-        let imported = importer.import_url(url)?;
-        let mut service = DocumentIngestionService::new(
-            &mut self.document_repository,
-            &self.importer,
-            self.event_publisher.clone(),
-            self.config.chunk_target_chars,
-        );
-        service.ingest_imported(imported)
+        let result: Result<DocumentIngestionOutcome, IngestionError> = (|| {
+            let imported = importer.import_url(url)?;
+            let mut service = DocumentIngestionService::new(
+                &mut self.document_repository,
+                &self.importer,
+                self.event_publisher.clone(),
+                self.config.chunk_target_chars,
+            );
+            service.ingest_imported(imported)
+        })();
+        match &result {
+            Ok(outcome) => self.event_sink.emit(RuntimeEvent::IngestFinished {
+                source: url.to_string(),
+                document_id: Some(outcome.document.document_id.clone()),
+                error: None,
+            }),
+            Err(e) => self.event_sink.emit(RuntimeEvent::IngestFinished {
+                source: url.to_string(),
+                document_id: None,
+                error: Some(format!("{e:?}")),
+            }),
+        }
+        result
     }
 
     /// Start a new reading session for the given document, synthesizing and playing the first chunk.
@@ -831,6 +875,43 @@ impl SqliteRuntime {
     /// Re-synthesize and replay the current chunk.
     pub fn repeat_chunk(&mut self) -> Result<(), RuntimeError> {
         self.replay_current_position("repeat_chunk")
+    }
+
+    /// Jump directly to a specific `(section, chunk)` position in the
+    /// active document. Used by the reading view's click-to-seek — the
+    /// user taps a chunk paragraph and playback resumes from there. The
+    /// position must exist in the document; out-of-bounds returns
+    /// `EmptyDocument` (same error variant `seek_relative_chunk` uses).
+    pub fn seek_to_chunk(
+        &mut self,
+        section_index: usize,
+        chunk_index: usize,
+    ) -> Result<(), RuntimeError> {
+        let mut session = self
+            .session_repository
+            .get_active_session()
+            .ok_or(RuntimeError::MissingActiveSession)?;
+        let document = self
+            .document_repository
+            .get_document(&session.document_id)
+            .ok_or_else(|| RuntimeError::MissingDocument {
+                document_id: session.document_id.clone(),
+            })?;
+        // Validate — the caller might pass stale indices if the document
+        // changed under them. Avoid advancing to a phantom position.
+        let valid = document
+            .sections
+            .iter()
+            .any(|s| s.index == section_index && s.chunks.iter().any(|c| c.index == chunk_index));
+        if !valid {
+            return Err(RuntimeError::EmptyDocument {
+                document_id: session.document_id.clone(),
+            });
+        }
+        session.position.section_index = section_index;
+        session.position.chunk_index = chunk_index;
+        session.position.char_offset = 0;
+        self.replay_session_at_position(session, "seek_to_chunk")
     }
 
     /// Create a voice note attached to the current reading position.

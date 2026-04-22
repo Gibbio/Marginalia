@@ -132,9 +132,12 @@ public enum InstallUiState: Equatable, Hashable, Sendable {
 // MARK: — Reading view models (mock for now; real app passes domain types)
 
 public struct ReadingChunk: Identifiable, Hashable, Sendable {
-    public let id: String          // "c1"
+    public let id: String          // anchor: "s2-c5" (section 2, chunk 5)
+    public let index: Int          // chunk index within its section (runtime-side)
     public let text: String
-    public init(id: String, text: String) { self.id = id; self.text = text }
+    public init(id: String, index: Int = 0, text: String) {
+        self.id = id; self.index = index; self.text = text
+    }
 }
 
 public struct MarginNote: Identifiable, Hashable, Sendable {
@@ -255,6 +258,8 @@ public enum MarginaliaEvent: Sendable {
     case commandRecognized(rawText: String, action: String?)
     case sessionRestored(sessionId: String, documentId: String, section: Int, chunk: Int)
     case sessionStopped(documentId: String)
+    case ingestStarted(source: String)
+    case ingestFinished(source: String, documentId: String?, errorMessage: String?)
     case runtimeError(String)
 }
 
@@ -291,6 +296,12 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// only matters with a real backend.
     var synthesizingAnchor: String? { get }
 
+    /// Non-nil while an import job (drag-drop, ⌘O, ⌘U) is being chunked
+    /// and saved. The window overlays a blocking "sto leggendo …" card
+    /// so large PDFs don't feel like a freeze. Value is a human-readable
+    /// source label ("libro.pdf", "https://…").
+    var ingestingSource: String? { get }
+
     /// Persisted reading-side settings that don't live in the ProviderSpec.
     var chunkTargetChars: Int { get }
     var sttDebug: Bool { get }
@@ -322,6 +333,9 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     func repeatCurrent() async throws
     func nextChapter() async throws
     func previousChapter() async throws
+    /// Jump to a specific `(section, chunk)` position in the active document.
+    /// Wired to chunk-click in the reading column.
+    func seekToChunk(section: Int, chunk: Int) async throws
     /// Save a "[BOOKMARK] …" note at the current position (voice: "segna").
     func bookmark() async throws
     /// Human-readable position string (voice: "dove sono"). Callers
@@ -507,6 +521,7 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     @Published public var notes: [MarginNote] = ReadingMock.notes.filter { !$0.live }
     @Published public var liveNote: MarginNote? = ReadingMock.notes.first { $0.live }
     @Published public var synthesizingAnchor: String? = nil
+    @Published public var ingestingSource: String? = nil
 
     public init(spec: ProviderSpec = ProviderSpec(ttsBackend: "mlx", voice: "if_sara",
                                                   sttEngine: "apple", language: "it-IT")) {
@@ -629,6 +644,20 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     public func repeatCurrent() async throws { /* no-op */ }
     public func nextChapter() async throws { /* no-op */ }
     public func previousChapter() async throws { /* no-op */ }
+    public func seekToChunk(section: Int, chunk: Int) async throws {
+        // Mock just snaps the current session to the target.
+        guard var s = currentSession else { return }
+        s = SessionState(
+            sessionId: s.sessionId, documentId: s.documentId,
+            documentTitle: s.documentTitle,
+            sectionIndex: section, sectionCount: s.sectionCount,
+            sectionTitle: s.sectionTitle, chunkIndex: chunk,
+            chunkText: s.chunkText, anchor: "c\(section)-\(chunk)",
+            playbackState: s.playbackState, notesCount: s.notesCount,
+            voice: s.voice
+        )
+        currentSession = s
+    }
 
     private func bumpChunk(by d: Int) {
         guard let s = currentSession else { return }

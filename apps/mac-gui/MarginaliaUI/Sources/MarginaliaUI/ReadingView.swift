@@ -3,17 +3,17 @@ import SwiftUI
 // Demo chunks / notes (mock — the real app passes domain types).
 public enum ReadingMock {
     public static let chunks: [ReadingChunk] = [
-        ReadingChunk(id: "c1",
+        ReadingChunk(id: "c1", index: 0,
             text: "Il tempo, nell'alta montagna, non è il tempo della pianura. Si dilata, si contrae, talvolta sembra fermarsi del tutto, come se l'aria rarefatta ne modificasse la sostanza stessa."),
-        ReadingChunk(id: "c2",
+        ReadingChunk(id: "c2", index: 1,
             text: "Hans Castorp osservava la neve cadere oltre il vetro, e pensava — non senza un certo stupore — che erano passate già sette settimane dal suo arrivo, sette settimane che egli aveva contato come giorni, e che ora, al solo ricordarle, gli parevano un istante."),
-        ReadingChunk(id: "c3",
+        ReadingChunk(id: "c3", index: 2,
             text: "Ma forse, pensò, non è la durata a contare, quanto la qualità del tempo vissuto. Una settimana in pianura poteva dissolversi senza lasciare traccia; mentre un solo pomeriggio quassù, trascorso a guardare il cielo cambiare colore sopra i larici, poteva pesare come un anno intero."),
-        ReadingChunk(id: "c4",
+        ReadingChunk(id: "c4", index: 3,
             text: "Joachim, suo cugino, rideva di queste sue meditazioni. \u{00AB}Tu filosofeggi, Hans\u{00BB}, diceva, \u{00AB}come fanno tutti i principianti. Tra sei mesi avrai smesso\u{00BB}."),
-        ReadingChunk(id: "c5",
+        ReadingChunk(id: "c5", index: 4,
             text: "Qui, in alto, dove persino il \u{00AB}sanatorio\u{00BB} pareva sospeso tra due cieli, le parole perdevano il loro peso quotidiano e ne assumevano uno nuovo, più lento, più pieno."),
-        ReadingChunk(id: "c6",
+        ReadingChunk(id: "c6", index: 5,
             text: "E pure nel ridere c'era una malinconia sottile, perché Joachim stesso — il giovane ufficiale che sognava di tornare al reggimento — aveva smesso, a forza, di contare i giorni."),
     ]
 
@@ -496,6 +496,15 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                 )
                 .onHover { hovering in
                     if hovering { hoverId = c.id } else if hoverId == c.id { hoverId = nil }
+                }
+                // Click to seek — snaps playback to this chunk. Uses the
+                // section from the currently-visible SectionDoc and the
+                // chunk's own `index` (preserved from the runtime via
+                // `refreshDocumentView`, not the array position).
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard let sec = currentSection?.index else { return }
+                    Task { try? await host.seekToChunk(section: sec, chunk: c.index) }
                 }
         }
     }

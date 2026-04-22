@@ -40,6 +40,18 @@ pub enum RuntimeEvent {
     SessionStopped {
         document_id: String,
     },
+    /// Import job accepted — the UI should light up a blocking overlay so
+    /// the user understands the app is working, not frozen. Fired at the
+    /// start of `ingest_path` / `ingest_url`; the paired `IngestFinished`
+    /// fires once chunking + DB save complete (success or error).
+    IngestStarted {
+        source: String,
+    },
+    IngestFinished {
+        source: String,
+        document_id: Option<String>,
+        error: Option<String>,
+    },
     Error {
         message: String,
     },

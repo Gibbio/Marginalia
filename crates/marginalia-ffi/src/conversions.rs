@@ -208,6 +208,18 @@ impl From<RuntimeEvent> for FfiRuntimeEvent {
             RuntimeEvent::SessionStopped { document_id } => {
                 FfiRuntimeEvent::SessionStopped { document_id }
             }
+            RuntimeEvent::IngestStarted { source } => {
+                FfiRuntimeEvent::IngestStarted { source }
+            }
+            RuntimeEvent::IngestFinished {
+                source,
+                document_id,
+                error,
+            } => FfiRuntimeEvent::IngestFinished {
+                source,
+                document_id,
+                error_message: error,
+            },
             RuntimeEvent::Error { message } => FfiRuntimeEvent::Error { message },
         }
     }

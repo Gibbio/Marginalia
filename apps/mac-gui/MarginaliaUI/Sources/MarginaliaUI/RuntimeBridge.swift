@@ -70,6 +70,7 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     /// this to render the "sintetizzando…" indicator. Value is the chunk
     /// anchor — useful for future per-chunk highlighting.
     @Published public var synthesizingAnchor: String? = nil
+    @Published public var ingestingSource: String? = nil
 
     public init(configPath: String) throws {
         self.runtime = try MarginaliaKit.FfiRuntime(configPath: configPath)
@@ -285,6 +286,11 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     public func repeatCurrent() async throws { try runtime.repeatChunk(); await refreshSessionSnapshot() }
     public func nextChapter() async throws { try runtime.nextChapter(); await refreshSessionSnapshot() }
     public func previousChapter() async throws { try runtime.previousChapter(); await refreshSessionSnapshot() }
+    public func seekToChunk(section: Int, chunk: Int) async throws {
+        try runtime.seekToChunk(sectionIndex: UInt32(max(0, section)),
+                                 chunkIndex: UInt32(max(0, chunk)))
+        await refreshSessionSnapshot()
+    }
 
     public func handle(event: MarginaliaEvent) {
         switch event {
@@ -300,6 +306,27 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             if sttDebug { pushMessage("stt: \"\(raw)\"") }
             guard let action else { break }
             dispatchVoiceAction(action)
+        case .ingestStarted(let source):
+            // `source` may be a full URL or a filename — pick the short
+            // form for display. File URLs use lastPathComponent; web URLs
+            // fall back to the host.
+            let label: String = {
+                if let url = URL(string: source), url.scheme != nil {
+                    return url.host ?? url.lastPathComponent
+                }
+                return source
+            }()
+            ingestingSource = label
+        case .ingestFinished(_, _, let err):
+            ingestingSource = nil
+            if let err {
+                pushMessage("Errore import: \(err)")
+                transientToast = ToastMessage(
+                    text: "Import fallito: \(err)", kind: .error
+                )
+            } else {
+                Task { await refreshLibrary() }
+            }
         case .runtimeError(let msg):
             pushMessage("Errore: \(msg)")
         }
@@ -372,7 +399,7 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                             index: Int(s.index),
                             title: s.title,
                             chunks: s.chunks.map { c in
-                                ReadingChunk(id: c.anchor, text: c.text)
+                                ReadingChunk(id: c.anchor, index: Int(c.index), text: c.text)
                             }
                         )
                     }
@@ -423,6 +450,10 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 return .sessionRestored(sessionId: sid, documentId: doc, section: Int(sec), chunk: Int(ck))
             case .sessionStopped(let doc):
                 return .sessionStopped(documentId: doc)
+            case .ingestStarted(let src):
+                return .ingestStarted(source: src)
+            case .ingestFinished(let src, let docId, let err):
+                return .ingestFinished(source: src, documentId: docId, errorMessage: err)
             case .error(let msg):
                 return .runtimeError(msg)
             }
@@ -486,14 +517,21 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         }
     }
 
-    /// Protocol conformance. Not yet backed by a real FFI `uninstall_asset`
-    /// call (see TODO in `crates/marginalia-ffi/src/lib.rs`). For now, clears
-    /// the inflight entry and asks for a refresh — the user sees the row
-    /// reset to "non installato" if the file was manually deleted, stays
-    /// "installato" otherwise.
+    /// Remove an installed asset from the HF cache. Synchronous on the FFI
+    /// side (one unlink), so we just fire-and-forget and refresh the
+    /// catalog afterwards so the row flips back to "non installato".
     public func uninstallAsset(_ id: String) {
         inflightDownloads.removeValue(forKey: id)
-        Task { await self.refreshInstallations() }
+        Task.detached { [runtime, weak self] in
+            do {
+                try runtime.uninstallAsset(assetId: id)
+            } catch {
+                await MainActor.run {
+                    self?.pushMessage("Errore rimozione: \(error.localizedDescription)")
+                }
+            }
+            await self?.refreshInstallations()
+        }
     }
 
     private func startInstallPolling() {
