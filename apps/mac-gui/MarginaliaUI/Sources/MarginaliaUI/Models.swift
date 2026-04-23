@@ -309,6 +309,9 @@ public enum MarginaliaEvent: Sendable {
     case ingestFinished(source: String, documentId: String?, errorMessage: String?)
     case dictationStarted
     case voiceNoteTranscribed(text: String, durationSecs: Double, noteId: String?, errorMessage: String?)
+    /// The document's detected language doesn't match the currently
+    /// selected voice's language — UI should prompt for a switch.
+    case voiceMismatch(documentId: String, detectedLanguage: String, currentLanguage: String)
     case runtimeError(String)
 }
 

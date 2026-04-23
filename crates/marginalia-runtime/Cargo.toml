@@ -34,3 +34,7 @@ marginalia-tts-mlx = { path = "../marginalia-tts-mlx", optional = true }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
 sha2 = "0.10"
+# Language detection for B3 — detect a document's language from its first
+# chunks at `start_session` time and warn the user if the selected voice
+# doesn't match. Pure-Rust, zero-dep, ~1ms per detection.
+whatlang = "0.16"

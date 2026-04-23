@@ -1355,6 +1355,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
+ "allocator-api2",
 ]
 
 [[package]]
@@ -2059,6 +2060,7 @@ dependencies = [
 name = "marginalia-ffi"
 version = "0.1.0"
 dependencies = [
+ "hf-hub",
  "log",
  "marginalia-config",
  "marginalia-core",
@@ -2155,6 +2157,7 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "sha2",
+ "whatlang",
 ]
 
 [[package]]
@@ -4640,6 +4643,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "998d2c24ec099a87daf9467808859f9d82b61f1d9c9701251aea037f514eae0e"
 dependencies = [
  "nom",
+]
+
+[[package]]
+name = "whatlang"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "471d1c1645d361eb782a1650b1786a8fb58dd625e681a04c09f5ff7c8764a7b0"
+dependencies = [
+ "hashbrown 0.14.5",
+ "once_cell",
 ]
 
 [[package]]

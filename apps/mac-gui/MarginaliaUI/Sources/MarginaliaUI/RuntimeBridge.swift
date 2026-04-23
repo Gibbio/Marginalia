@@ -522,8 +522,63 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     await MainActor.run { self?.liveNote = nil }
                 }
             }
+        case .voiceMismatch(_, let detected, let current):
+            // The runtime detected the document in language X but the
+            // current voice is language Y. Pick the best available voice
+            // in X (if any is installed) and offer a one-click swap.
+            let currentPrefix = String(current.prefix(2)).lowercased()
+            guard currentPrefix != detected else { break }
+            let candidates = voices.filter {
+                $0.lang.lowercased().hasPrefix(detected)
+            }
+            let bestVoice = candidates.first?.id
+            let langName = Self.languageLabel(detected)
+            let action: ToastAction?
+            if let bestVoice = bestVoice {
+                let bcp47 = candidates.first?.lang ?? detected
+                action = ToastAction(label: "passa a \(langName)") { [weak self] in
+                    guard let self = self else { return }
+                    let newSpec = ProviderSpec(
+                        ttsBackend: self.currentSpec.ttsBackend,
+                        voice: bestVoice,
+                        sttEngine: self.currentSpec.sttEngine,
+                        language: bcp47
+                    )
+                    Task { try? await self.apply(spec: newSpec) }
+                }
+            } else {
+                // No installed voice for the detected language — the
+                // actionable suggestion is "install", but the catalog
+                // lookup lives in Settings, so just point the user there.
+                action = ToastAction(label: "installa voci") { [weak self] in
+                    self?.pushMessage("Apri Impostazioni → Installazioni per aggiungere voci \(langName).")
+                }
+            }
+            transientToast = ToastMessage(
+                text: "Questo documento sembra in \(langName).",
+                kind: .info,
+                action: action
+            )
         case .runtimeError(let msg):
             pushMessage("Errore: \(msg)")
+        }
+    }
+
+    /// Italian-facing language name for the short BCP-47 prefix
+    /// surfaced by the runtime's whatlang detection. Matches the
+    /// languages Kokoro ships voices for.
+    private static func languageLabel(_ prefix: String) -> String {
+        switch prefix.lowercased() {
+        case "en": return "inglese"
+        case "it": return "italiano"
+        case "fr": return "francese"
+        case "de": return "tedesco"
+        case "es": return "spagnolo"
+        case "pt": return "portoghese"
+        case "ja": return "giapponese"
+        case "zh": return "cinese"
+        case "hi": return "hindi"
+        default:   return prefix
         }
     }
 
@@ -655,6 +710,10 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             case .voiceNoteTranscribed(let text, let dur, let nid, let err):
                 return .voiceNoteTranscribed(text: text, durationSecs: dur,
                                               noteId: nid, errorMessage: err)
+            case .voiceMismatch(let doc, let detected, let current):
+                return .voiceMismatch(documentId: doc,
+                                       detectedLanguage: detected,
+                                       currentLanguage: current)
             case .error(let msg):
                 return .runtimeError(msg)
             }

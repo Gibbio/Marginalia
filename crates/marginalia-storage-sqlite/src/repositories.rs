@@ -216,14 +216,26 @@ impl DocumentRepository for SQLiteDocumentRepository {
     }
 
     fn list_documents(&self) -> Vec<Document> {
+        // Sort by "last read" — MAX(session.updated_at) for docs with at
+        // least one session, otherwise fall back to `imported_at`. Gives
+        // the intuitive library order (recently-read on top, brand-new
+        // imports just underneath, dormant docs at the bottom) without
+        // adding a dedicated `last_opened_at` column to `documents`.
         let document_ids = {
             let connection = self
                 .connection
                 .lock()
                 .expect("sqlite connection lock poisoned");
-            let mut statement = match connection
-                .prepare("SELECT document_id FROM documents ORDER BY imported_at DESC")
-            {
+            let mut statement = match connection.prepare(
+                "SELECT d.document_id
+                 FROM documents d
+                 LEFT JOIN (
+                     SELECT document_id, MAX(updated_at) AS last_seen
+                     FROM sessions
+                     GROUP BY document_id
+                 ) s ON s.document_id = d.document_id
+                 ORDER BY COALESCE(s.last_seen, d.imported_at) DESC",
+            ) {
                 Ok(s) => s,
                 Err(e) => {
                     log::warn!("failed to list documents: {e}");

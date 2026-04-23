@@ -127,6 +127,27 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+/// Map `whatlang::Lang` to a BCP-47 2-letter prefix for matching against
+/// the runtime's configured voice language. Only the languages we ship a
+/// Kokoro voice for are mapped — unknown/unsupported detections return
+/// `None` and the `VoiceMismatch` event is suppressed (better to stay
+/// silent than to nag the user about a language we can't fix).
+fn bcp47_prefix_for(lang: whatlang::Lang) -> Option<&'static str> {
+    use whatlang::Lang;
+    match lang {
+        Lang::Eng => Some("en"),
+        Lang::Ita => Some("it"),
+        Lang::Fra => Some("fr"),
+        Lang::Deu => Some("de"),
+        Lang::Spa => Some("es"),
+        Lang::Por => Some("pt"),
+        Lang::Jpn => Some("ja"),
+        Lang::Cmn => Some("zh"),
+        Lang::Hin => Some("hi"),
+        _ => None,
+    }
+}
+
 /// Configuration for the Marginalia runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -616,6 +637,32 @@ impl SqliteRuntime {
             .ok_or_else(|| RuntimeError::EmptyDocument {
                 document_id: document_id.to_string(),
             })?;
+
+        // B3 — language auto-detect. Peek the first chunk against whatlang
+        // and emit a `VoiceMismatch` event when the detection is confident
+        // AND disagrees with the currently-selected voice's language. UI
+        // shows a toast with a "passa a voce X" action; ignoring it lets
+        // playback proceed unchanged.
+        if let Some(info) = whatlang::detect(&chunk.text) {
+            if info.is_reliable() {
+                if let Some(detected_prefix) = bcp47_prefix_for(info.lang()) {
+                    let current_prefix = self
+                        .config
+                        .default_language
+                        .split(|c: char| c == '-' || c == '_')
+                        .next()
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if !current_prefix.is_empty() && current_prefix != detected_prefix {
+                        self.event_sink.emit(RuntimeEvent::VoiceMismatch {
+                            document_id: document_id.to_string(),
+                            detected_language: detected_prefix.to_string(),
+                            current_language: self.config.default_language.clone(),
+                        });
+                    }
+                }
+            }
+        }
 
         let tts_provider = self.tts.describe_capabilities().provider_name;
         let synthesis = self.synthesize_cached(

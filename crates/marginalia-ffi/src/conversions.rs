@@ -232,6 +232,15 @@ impl From<RuntimeEvent> for FfiRuntimeEvent {
                 note_id,
                 error_message: error,
             },
+            RuntimeEvent::VoiceMismatch {
+                document_id,
+                detected_language,
+                current_language,
+            } => FfiRuntimeEvent::VoiceMismatch {
+                document_id,
+                detected_language,
+                current_language,
+            },
             RuntimeEvent::Error { message } => FfiRuntimeEvent::Error { message },
         }
     }

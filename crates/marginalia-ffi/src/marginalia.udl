@@ -153,6 +153,7 @@ interface FfiRuntimeEvent {
   IngestFinished(string source, string? document_id, string? error_message);
   DictationStarted();
   VoiceNoteTranscribed(string text, f64 duration_secs, string? note_id, string? error_message);
+  VoiceMismatch(string document_id, string detected_language, string current_language);
   Error(string message);
 };
 

@@ -63,6 +63,20 @@ pub enum RuntimeEvent {
         note_id: Option<String>,
         error: Option<String>,
     },
+    /// The document being started uses a language that doesn't match the
+    /// current TTS voice. Fired at `start_session` time when language
+    /// detection finds a clear mismatch (high-confidence). The UI should
+    /// prompt the user to switch voices; ignoring it still lets the
+    /// playback proceed with the mismatched voice (espeak-ng/Kokoro will
+    /// phonemize anyway, just with wrong-language pronunciation).
+    VoiceMismatch {
+        document_id: String,
+        /// BCP-47 prefix of the detected language ("en", "it", "fr", …).
+        detected_language: String,
+        /// Currently-selected voice's language ("it-IT" → compared on
+        /// prefix).
+        current_language: String,
+    },
     Error {
         message: String,
     },

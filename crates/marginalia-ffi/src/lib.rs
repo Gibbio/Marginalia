@@ -394,6 +394,11 @@ pub enum FfiRuntimeEvent {
         note_id: Option<String>,
         error_message: Option<String>,
     },
+    VoiceMismatch {
+        document_id: String,
+        detected_language: String,
+        current_language: String,
+    },
     Error {
         message: String,
     },
