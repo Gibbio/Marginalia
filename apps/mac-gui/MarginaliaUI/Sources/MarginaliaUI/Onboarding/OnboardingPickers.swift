@@ -201,8 +201,20 @@ public struct VoiceSelectView: View {
             }
     }
 
+    /// Full BCP-47 lookup to avoid collapsing `en-US` and `en-GB` into a
+    /// single "Inglese" row.
     private static func languageDisplay(_ bcp47: String) -> String {
-        let code = String(bcp47.prefix(2)).lowercased()
+        let full = bcp47.lowercased()
+        switch full {
+        case "en-us": return "Inglese (US)"
+        case "en-gb": return "Inglese (UK)"
+        case "pt-br": return "Portoghese (BR)"
+        case "pt-pt": return "Portoghese (PT)"
+        case "zh-cn": return "Cinese (mandarino)"
+        case "zh-tw": return "Cinese (tradizionale)"
+        default: break
+        }
+        let code = String(full.prefix(2))
         switch code {
         case "it": return "Italiano"
         case "en": return "Inglese"

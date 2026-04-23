@@ -42,23 +42,49 @@ public struct DownloadManagerView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             header
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if !engineAssets.isEmpty {
-                        engineSection
+            if installations.isEmpty {
+                loadingState
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if !engineAssets.isEmpty {
+                            engineSection
+                        }
+                        if !voiceGroups.isEmpty {
+                            voicesSection
+                        }
+                        networkBanner
                     }
-                    if !voiceGroups.isEmpty {
-                        voicesSection
-                    }
-                    networkBanner
+                    .padding(.trailing, 4)  // room for scrollbar
                 }
-                .padding(.trailing, 4)  // room for scrollbar
             }
             footer
         }
         .padding(.horizontal, 88).padding(.vertical, 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Tokens.bg)
+    }
+
+    /// Shown on the first frame after the view appears and `refreshInstallations`
+    /// is still in flight. `host.installations` starts as `[]` — the moment the
+    /// Rust side returns the catalog, this branch swaps out for the real rows.
+    private var loadingState: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .controlSize(.large)
+                .tint(accent.main)
+            Text("carico il catalogo…")
+                .font(.mono(11)).tracking(1)
+                .foregroundStyle(Tokens.textFaint)
+            Text("sto leggendo il manifest e controllando quali file sono già in cache sul disco.")
+                .font(.serif(12, italic: true))
+                .foregroundStyle(Tokens.textFaint)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(40)
     }
 
     // MARK: — Sections
@@ -255,8 +281,21 @@ public struct DownloadManagerView: View {
         return hasEngine && hasVoice
     }
 
+    /// Full BCP-47 lookup so `en-US` and `en-GB` don't collapse into the
+    /// same "Voci inglesi" row. Falls back on the 2-letter prefix, then
+    /// on the raw tag when we don't have a translation.
     private static func languageDisplay(_ bcp47: String) -> String {
-        let code = String(bcp47.prefix(2)).lowercased()
+        let full = bcp47.lowercased()
+        switch full {
+        case "en-us": return "Voci inglesi (US)"
+        case "en-gb": return "Voci inglesi (UK)"
+        case "pt-br": return "Voci portoghesi (BR)"
+        case "pt-pt": return "Voci portoghesi (PT)"
+        case "zh-cn": return "Voci cinesi (mandarino)"
+        case "zh-tw": return "Voci cinesi (tradizionale)"
+        default: break
+        }
+        let code = String(full.prefix(2))
         switch code {
         case "it": return "Voci italiane"
         case "en": return "Voci inglesi"
