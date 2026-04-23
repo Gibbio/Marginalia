@@ -9,6 +9,36 @@ import AVFoundation
 import Speech
 #endif
 
+// MARK: — TCC bridges (file-private, nonisolated)
+//
+// These MUST live at file scope. If we put them on the View (which is
+// MainActor-isolated), their inner closures inherit MainActor isolation,
+// and Swift 6 inserts a `_swift_task_checkIsolatedSwift` assertion at the
+// top of the TCC handler — guaranteed to trap because TCC calls back on
+// `com.apple.root.default-qos`. A free function is nonisolated by default,
+// so the handler runs wherever TCC invokes it, and the awaiting Task hops
+// the Sendable result back to MainActor on the consumer side.
+
+#if canImport(AVFoundation)
+private func awaitMicAuthorization() async -> Bool {
+    await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            cont.resume(returning: granted)
+        }
+    }
+}
+#endif
+
+#if canImport(Speech)
+private func awaitSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
+    await withCheckedContinuation { (cont: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+        SFSpeechRecognizer.requestAuthorization { status in
+            cont.resume(returning: status)
+        }
+    }
+}
+#endif
+
 /// Pre-flight permissions step between Welcome and InstallModels.
 ///
 /// Marginalia cannot function without mic access (AEC capture) + speech
@@ -400,24 +430,22 @@ public struct PermissionsCheckView: View {
     private func requestMic() {
         #if canImport(AVFoundation)
         micProbing = true
-        // TCC invokes both `AVCaptureDevice.requestAccess` and
-        // `SFSpeechRecognizer.requestAuthorization` completions on an
-        // arbitrary non-main dispatch queue. Under SWIFT_STRICT_CONCURRENCY
-        // `complete` + macOS 26's stricter runtime isolation enforcement
-        // in `libswift_Concurrency`, even `Task { @MainActor in … }` from
-        // inside that callback trips `_swift_task_checkIsolatedSwift`
-        // when the closure captures `self` (a MainActor-isolated View).
-        // The canonical Swift 6 bridge for legacy completion handlers is
-        // an explicit `DispatchQueue.main.async` (hits the main thread)
-        // followed by `MainActor.assumeIsolated` (tells the runtime we
-        // really are on MainActor so `@State` writes are safe).
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    micProbing = false
-                    micStatus = granted ? .granted : .denied
-                }
-            }
+        // Isolation story (Swift 6 + macOS 26): TCC invokes the completion
+        // handler on an arbitrary non-main queue. If the handler closure
+        // inherits MainActor from an enclosing context (the View's methods
+        // are all MainActor-isolated), the compiler inserts an isolation
+        // ASSERTION at the very top of the closure — it fires before any
+        // hop-to-main code can run, trapping in `_swift_task_checkIsolatedSwift`.
+        //
+        // The bridge is a file-private **nonisolated** free function that
+        // wraps the callback in `withCheckedContinuation`. Because the free
+        // function is nonisolated, none of its nested closures inherit
+        // MainActor, so the TCC handler can run on its background queue
+        // without the assertion. We hop back to MainActor here via `Task`.
+        Task { @MainActor in
+            let granted = await awaitMicAuthorization()
+            micProbing = false
+            micStatus = granted ? .granted : .denied
         }
         #endif
     }
@@ -425,22 +453,19 @@ public struct PermissionsCheckView: View {
     private func requestSpeech() {
         #if canImport(Speech)
         speechProbing = true
-        SFSpeechRecognizer.requestAuthorization { authStatus in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    speechProbing = false
-                    switch authStatus {
-                    case .authorized:  speechStatus = .granted
-                    case .denied:      speechStatus = .denied
-                    case .restricted:  speechStatus = .restricted
-                    case .notDetermined: speechStatus = .unknown
-                    @unknown default:  speechStatus = .unknown
-                    }
-                    // Re-probe dictation availability — SFSpeechRecognizer's
-                    // `isAvailable` is only meaningful once auth is granted.
-                    probeDictation()
-                }
+        Task { @MainActor in
+            let authStatus = await awaitSpeechAuthorization()
+            speechProbing = false
+            switch authStatus {
+            case .authorized:    speechStatus = .granted
+            case .denied:        speechStatus = .denied
+            case .restricted:    speechStatus = .restricted
+            case .notDetermined: speechStatus = .unknown
+            @unknown default:    speechStatus = .unknown
             }
+            // Re-probe dictation availability — SFSpeechRecognizer's
+            // `isAvailable` is only meaningful once auth is granted.
+            probeDictation()
         }
         #endif
     }

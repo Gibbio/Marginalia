@@ -1,7 +1,329 @@
 {
   "schema_version": 1,
   "voices": [
-    {"id": "if_sara", "display": "Sara", "lang": "it-IT", "gender": "female"},
-    {"id": "im_nicola", "display": "Nicola", "lang": "it-IT", "gender": "male"}
+    {
+      "id": "af_alloy",
+      "display": "Alloy",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_aoede",
+      "display": "Aoede",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_bella",
+      "display": "Bella",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_heart",
+      "display": "Heart",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_jessica",
+      "display": "Jessica",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_kore",
+      "display": "Kore",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_nicole",
+      "display": "Nicole",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_nova",
+      "display": "Nova",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_river",
+      "display": "River",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_sarah",
+      "display": "Sarah",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "af_sky",
+      "display": "Sky",
+      "lang": "en-US",
+      "gender": "female"
+    },
+    {
+      "id": "am_adam",
+      "display": "Adam",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "am_echo",
+      "display": "Echo",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "am_eric",
+      "display": "Eric",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "am_fenrir",
+      "display": "Fenrir",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "am_liam",
+      "display": "Liam",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "am_michael",
+      "display": "Michael",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "am_onyx",
+      "display": "Onyx",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "am_puck",
+      "display": "Puck",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "am_santa",
+      "display": "Santa",
+      "lang": "en-US",
+      "gender": "male"
+    },
+    {
+      "id": "bf_alice",
+      "display": "Alice",
+      "lang": "en-GB",
+      "gender": "female"
+    },
+    {
+      "id": "bf_emma",
+      "display": "Emma",
+      "lang": "en-GB",
+      "gender": "female"
+    },
+    {
+      "id": "bf_isabella",
+      "display": "Isabella",
+      "lang": "en-GB",
+      "gender": "female"
+    },
+    {
+      "id": "bf_lily",
+      "display": "Lily",
+      "lang": "en-GB",
+      "gender": "female"
+    },
+    {
+      "id": "bm_daniel",
+      "display": "Daniel",
+      "lang": "en-GB",
+      "gender": "male"
+    },
+    {
+      "id": "bm_fable",
+      "display": "Fable",
+      "lang": "en-GB",
+      "gender": "male"
+    },
+    {
+      "id": "bm_george",
+      "display": "George",
+      "lang": "en-GB",
+      "gender": "male"
+    },
+    {
+      "id": "bm_lewis",
+      "display": "Lewis",
+      "lang": "en-GB",
+      "gender": "male"
+    },
+    {
+      "id": "ef_dora",
+      "display": "Dora",
+      "lang": "es-ES",
+      "gender": "female"
+    },
+    {
+      "id": "em_alex",
+      "display": "Alex",
+      "lang": "es-ES",
+      "gender": "male"
+    },
+    {
+      "id": "em_santa",
+      "display": "Santa",
+      "lang": "es-ES",
+      "gender": "male"
+    },
+    {
+      "id": "ff_siwis",
+      "display": "Siwis",
+      "lang": "fr-FR",
+      "gender": "female"
+    },
+    {
+      "id": "hf_alpha",
+      "display": "Alpha",
+      "lang": "hi-IN",
+      "gender": "female"
+    },
+    {
+      "id": "hf_beta",
+      "display": "Beta",
+      "lang": "hi-IN",
+      "gender": "female"
+    },
+    {
+      "id": "hm_omega",
+      "display": "Omega",
+      "lang": "hi-IN",
+      "gender": "male"
+    },
+    {
+      "id": "hm_psi",
+      "display": "Psi",
+      "lang": "hi-IN",
+      "gender": "male"
+    },
+    {
+      "id": "if_sara",
+      "display": "Sara",
+      "lang": "it-IT",
+      "gender": "female"
+    },
+    {
+      "id": "im_nicola",
+      "display": "Nicola",
+      "lang": "it-IT",
+      "gender": "male"
+    },
+    {
+      "id": "jf_alpha",
+      "display": "Alpha",
+      "lang": "ja-JP",
+      "gender": "female"
+    },
+    {
+      "id": "jf_gongitsune",
+      "display": "Gongitsune",
+      "lang": "ja-JP",
+      "gender": "female"
+    },
+    {
+      "id": "jf_nezumi",
+      "display": "Nezumi",
+      "lang": "ja-JP",
+      "gender": "female"
+    },
+    {
+      "id": "jf_tebukuro",
+      "display": "Tebukuro",
+      "lang": "ja-JP",
+      "gender": "female"
+    },
+    {
+      "id": "jm_kumo",
+      "display": "Kumo",
+      "lang": "ja-JP",
+      "gender": "male"
+    },
+    {
+      "id": "pf_dora",
+      "display": "Dora",
+      "lang": "pt-BR",
+      "gender": "female"
+    },
+    {
+      "id": "pm_alex",
+      "display": "Alex",
+      "lang": "pt-BR",
+      "gender": "male"
+    },
+    {
+      "id": "pm_santa",
+      "display": "Santa",
+      "lang": "pt-BR",
+      "gender": "male"
+    },
+    {
+      "id": "zf_xiaobei",
+      "display": "Xiaobei",
+      "lang": "zh-CN",
+      "gender": "female"
+    },
+    {
+      "id": "zf_xiaoni",
+      "display": "Xiaoni",
+      "lang": "zh-CN",
+      "gender": "female"
+    },
+    {
+      "id": "zf_xiaoxiao",
+      "display": "Xiaoxiao",
+      "lang": "zh-CN",
+      "gender": "female"
+    },
+    {
+      "id": "zf_xiaoyi",
+      "display": "Xiaoyi",
+      "lang": "zh-CN",
+      "gender": "female"
+    },
+    {
+      "id": "zm_yunjian",
+      "display": "Yunjian",
+      "lang": "zh-CN",
+      "gender": "male"
+    },
+    {
+      "id": "zm_yunxi",
+      "display": "Yunxi",
+      "lang": "zh-CN",
+      "gender": "male"
+    },
+    {
+      "id": "zm_yunxia",
+      "display": "Yunxia",
+      "lang": "zh-CN",
+      "gender": "male"
+    },
+    {
+      "id": "zm_yunyang",
+      "display": "Yunyang",
+      "lang": "zh-CN",
+      "gender": "male"
+    }
   ]
 }

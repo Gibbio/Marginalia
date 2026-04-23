@@ -21,6 +21,10 @@ public struct InstallModelsView: View {
     /// Per-asset transient state, keyed by asset id. Missing keys = idle.
     public var inflightStates: [String: InstallUiState]
     public var onInstall: (String) -> Void
+    /// Optional — when provided, installed rows show a "rimuovi" button.
+    /// Nil (the default) hides it, keeping the view compatible with flows
+    /// that don't support uninstall (preview / mock).
+    public var onUninstall: ((String) -> Void)?
     public var onProceed: () -> Void
     public var onSkip: () -> Void
 
@@ -29,6 +33,7 @@ public struct InstallModelsView: View {
         assets: [Asset],
         inflightStates: [String: InstallUiState] = [:],
         onInstall: @escaping (String) -> Void = { _ in },
+        onUninstall: ((String) -> Void)? = nil,
         onProceed: @escaping () -> Void,
         onSkip: @escaping () -> Void
     ) {
@@ -36,6 +41,7 @@ public struct InstallModelsView: View {
         self.assets = assets
         self.inflightStates = inflightStates
         self.onInstall = onInstall
+        self.onUninstall = onUninstall
         self.onProceed = onProceed
         self.onSkip = onSkip
     }
@@ -250,7 +256,21 @@ public struct InstallModelsView: View {
     @ViewBuilder
     private func trailingControl(for asset: Asset, state: RowState) -> some View {
         switch state {
-        case .installed, .queued:
+        case .installed:
+            if let onUninstall = onUninstall {
+                Button("rimuovi") { onUninstall(asset.id) }
+                    .buttonStyle(.plain)
+                    .font(.mono(11))
+                    .foregroundStyle(Tokens.textDim)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.white.opacity(0.04)))
+                    .overlay(RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Tokens.line, lineWidth: 1))
+            } else {
+                EmptyView()
+            }
+        case .queued:
             EmptyView()
         case .downloading(let f):
             // Linear bar here, visible next to the label, so the user

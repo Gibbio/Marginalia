@@ -37,9 +37,24 @@ struct MarginaliaLiveApp: App {
 
     enum OnboardingStep { case none, welcome, permissions, installModels }
 
+    /// Persisted across launches — `true` once the user clicks "continua"
+    /// or "salta per ora" on the InstallModels step. Lives in UserDefaults
+    /// (scoped by bundle id automatically). `--reset` clears this.
+    static let onboardingCompleteKey = "marginalia.onboardingComplete"
+
     init() {
         Fonts.registerBundled()
-        let (path, isFirstRun) = Self.resolveConfigPath()
+
+        // `--reset` wipes config / sqlite / notes / TTS cache / mlx mirror
+        // and clears the onboarding flag. HuggingFace-cached model weights
+        // stay put (expensive to redownload, `is_asset_cached` picks them
+        // up on the next install). TCC cannot be reset from inside the
+        // app — we print the tccutil commands to stderr for the user.
+        if CommandLine.arguments.contains("--reset") {
+            Self.performReset()
+        }
+
+        let (path, _) = Self.resolveConfigPath()
         let ffi: FFIHost
         do {
             ffi = try FFIHost(configPath: path)
@@ -55,11 +70,11 @@ struct MarginaliaLiveApp: App {
             alert.runModal()
             fatalError("FFIHost init failed: \(error)")
         }
-        // Seed the onboarding banner if this was a fresh install (no config
-        // existed before). The FFIHost itself also maintains a
-        // `needsOnboarding` flag that can refine this — e.g. config exists
-        // but no models are installed — which we'll honor in onAppear.
-        if isFirstRun {
+        // The config file is NOT a reliable "first run" signal —
+        // resolveConfigPath() seeds a stub before the user sees the
+        // welcome screen. UserDefaults is durable across launches, so
+        // quitting mid-onboarding resumes the flow next time.
+        if !UserDefaults.standard.bool(forKey: Self.onboardingCompleteKey) {
             ffi.markNeedsOnboarding()
         }
         _host = StateObject(wrappedValue: ffi)
@@ -110,6 +125,7 @@ struct MarginaliaLiveApp: App {
                 assets: onboardingAssets(from: host),
                 inflightStates: host.inflightDownloads,
                 onInstall: { host.installAsset($0) },
+                onUninstall: { host.uninstallAsset($0) },
                 onProceed: {
                     host.markOnboardingComplete()
                     onboardingStep = .none
@@ -128,8 +144,10 @@ struct MarginaliaLiveApp: App {
 
     /// Resolves `~/Library/Application Support/Marginalia/marginalia.toml`.
     /// Creates the directory and seeds a minimal TOML on first run (the
-    /// Rust side fills in its own defaults). Returns the path plus a flag so
-    /// the caller can route to onboarding when this was a fresh install.
+    /// Rust side fills in its own defaults). The returned `isFirstRun`
+    /// flag is based on prior existence of the config file — kept for
+    /// callers who want it, but onboarding uses UserDefaults instead
+    /// (more reliable — this path is written before the user interacts).
     private static func resolveConfigPath() -> (path: String, isFirstRun: Bool) {
         let fm = FileManager.default
         let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -138,51 +156,105 @@ struct MarginaliaLiveApp: App {
         let cfg = support.appendingPathComponent("marginalia.toml")
         let existed = fm.fileExists(atPath: cfg.path)
         if !existed {
-            // Minimal seed. `marginalia-config::load_from` will merge against
-            // its defaults; a richer file gets written once the user
-            // completes onboarding (voice choice, language, etc.).
+            // Absolute path for `[mlx] model` so Discovery::list_mlx_voices
+            // has a real directory to scan — the stock default is a HF
+            // repo id, not a filesystem path. install_asset mirrors
+            // downloaded weights into this dir so the voice picker
+            // populates as soon as onboarding finishes.
+            let modelsDir = support.appendingPathComponent("models/mlx", isDirectory: true)
+            try? fm.createDirectory(at: modelsDir, withIntermediateDirectories: true)
             let seed = """
             # Marginalia — config seed (first run, \(ISO8601DateFormatter().string(from: Date())))
             # The app rewrites this file via save_config() once settings change.
 
-            [tts]
+            [mlx]
+            model = "\(modelsDir.path)"
             voice = "if_sara"
             """
             try? seed.write(to: cfg, atomically: true, encoding: .utf8)
         }
         return (cfg.path, !existed)
     }
+
+    /// Wipe the Application Support directory so the next launch behaves
+    /// like a fresh install. The HuggingFace model cache is NOT touched
+    /// — weights are expensive to redownload and `is_asset_cached` picks
+    /// them up transparently. TCC cannot be reset from inside the app
+    /// (sandboxed or not, it's a privileged system service), so we print
+    /// the tccutil incantation to stderr for the user.
+    ///
+    /// Pass via: `open Marginalia.app --args --reset`
+    /// Or: `make reset-gui` (also revokes TCC).
+    private static func performReset() {
+        let fm = FileManager.default
+        guard let support = fm.urls(for: .applicationSupportDirectory,
+                                     in: .userDomainMask).first?
+            .appendingPathComponent("Marginalia", isDirectory: true),
+              fm.fileExists(atPath: support.path)
+        else {
+            FileHandle.standardError.write(Data("[reset] no support directory to wipe\n".utf8))
+            // Still clear the flag — user explicitly asked for reset.
+            UserDefaults.standard.removeObject(forKey: Self.onboardingCompleteKey)
+            return
+        }
+        do {
+            try fm.removeItem(at: support)
+            FileHandle.standardError.write(Data(
+                "[reset] wiped \(support.path)\n".utf8
+            ))
+        } catch {
+            FileHandle.standardError.write(Data(
+                "[reset] failed to wipe \(support.path): \(error)\n".utf8
+            ))
+            return
+        }
+        UserDefaults.standard.removeObject(forKey: Self.onboardingCompleteKey)
+        FileHandle.standardError.write(Data("[reset] cleared onboarding flag\n".utf8))
+
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.gibbio.marginalia.dev"
+        FileHandle.standardError.write(Data(
+            """
+            [reset] to also revoke microphone + speech-recognition prompts:
+                tccutil reset Microphone \(bundleId)
+                tccutil reset SpeechRecognition \(bundleId)
+            (or all: tccutil reset All \(bundleId))
+
+            """.utf8
+        ))
+    }
 }
 
 // MARK: — Install UX glue
 
-/// Required assets shown in the onboarding installer. We want the smallest
-/// workable set: the MLX core + one voice matching the user's language.
-///
-/// Why this is Live-only: `InstallableAsset` (mapped from FFI) carries
-/// the `id`/`label` shape we need, and we're in the MARGINALIA_FFI target
-/// by construction here.
+/// Onboarding installer catalog — derived entirely from `host.installations`
+/// (the Rust CATALOG, exposed via UniFFI and scanned from disk for the
+/// `installed` flag). No voice-id hardcoding: the TTS core row is the
+/// first `tts_core` entry the catalog declares, and the voice rows are
+/// every `voice` entry whose declared language matches the user's system
+/// language. If the catalog ever grows (new voice, new engine, Whisper
+/// added as an opt-in) this view rebuilds automatically.
 @MainActor
 private func onboardingAssets(from host: FFIHost) -> [InstallModelsView.Asset] {
-    let langPrefix = Locale.current.language.languageCode?.identifier ?? "en"
-    // Voice ids map language to letter: i = it, a = en-US, j = ja, etc.
-    // Pick a default voice id for the detected language — fall back to
-    // `af_bella` (English) if we don't have a curated pick.
-    let defaultVoice: String
-    switch langPrefix {
-    case "it": defaultVoice = "voice:if_sara"
-    case "en": defaultVoice = "voice:af_bella"
-    default:   defaultVoice = "voice:af_bella"
-    }
+    let langPrefix = (Locale.current.language.languageCode?.identifier ?? "en").lowercased()
 
-    let required = ["mlx-core", defaultVoice]
-    return host.installations
-        .filter { required.contains($0.id) }
-        .map {
-            InstallModelsView.Asset(
-                id: $0.id, label: $0.label, size: $0.size, installed: $0.installed
-            )
+    // First declared tts_core — on macOS the catalog puts mlx-core first;
+    // taking the first is catalog-order-dependent but avoids naming any
+    // specific engine id in Swift.
+    let core = host.installations.first { $0.category == "tts_core" }
+
+    let voices = host.installations
+        .filter { $0.category == "voice" }
+        .filter { asset in
+            guard let lang = asset.language?.lowercased() else { return false }
+            return lang.hasPrefix(langPrefix)
         }
+
+    let rows: [InstallableAsset] = ([core].compactMap { $0 }) + voices
+    return rows.map {
+        InstallModelsView.Asset(
+            id: $0.id, label: $0.label, size: $0.size, installed: $0.installed
+        )
+    }
 }
 
 /// Demo sentence auto-played when a voice finishes installing during

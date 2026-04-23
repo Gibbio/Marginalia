@@ -48,6 +48,11 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
 
     public func markOnboardingComplete() {
         needsOnboarding = false
+        // Persisted in UserDefaults (key defined in MarginaliaApp) so the
+        // flow doesn't restart on next launch. String is duplicated here
+        // rather than shared to keep MarginaliaUI buildable without the
+        // app target's symbols.
+        UserDefaults.standard.set(true, forKey: "marginalia.onboardingComplete")
     }
 
     /// Set the onboarding flag after construction. The live `@main` uses

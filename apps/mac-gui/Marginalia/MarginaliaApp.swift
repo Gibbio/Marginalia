@@ -45,6 +45,11 @@ struct MarginaliaApp: App {
 
     enum OnboardingStep { case none, welcome, permissions, installModels }
 
+    /// Persisted flag — true once the user has finished (or skipped) the
+    /// model-install step. Lives in UserDefaults so it survives app quits,
+    /// scoped to the bundle id automatically. `--reset` clears it.
+    static let onboardingCompleteKey = "marginalia.onboardingComplete"
+
     init() {
         Fonts.registerBundled()
         Self.pointHelperAtBundleIfAvailable()
@@ -63,7 +68,7 @@ struct MarginaliaApp: App {
             Self.performReset()
         }
 
-        let (path, isFirstRun) = Self.resolveConfigPath()
+        let (path, _) = Self.resolveConfigPath()
         let ffi: FFIHost
         do {
             ffi = try FFIHost(configPath: path)
@@ -79,7 +84,13 @@ struct MarginaliaApp: App {
             alert.runModal()
             fatalError("FFIHost init failed: \(error)")
         }
-        if isFirstRun {
+        // Persisted across launches via UserDefaults so that quitting
+        // mid-onboarding resumes the flow on next open. Wiped by `--reset`
+        // (see performReset()) alongside the support directory. The config
+        // file on disk is NOT a reliable proxy for "onboarding done" —
+        // resolveConfigPath() seeds a stub before the user even sees the
+        // welcome screen.
+        if !UserDefaults.standard.bool(forKey: Self.onboardingCompleteKey) {
             ffi.markNeedsOnboarding()
         }
         _host = StateObject(wrappedValue: ffi)
@@ -232,6 +243,9 @@ struct MarginaliaApp: App {
             ))
             return
         }
+        // Clear the onboarding flag so the next launch restarts the flow.
+        UserDefaults.standard.removeObject(forKey: Self.onboardingCompleteKey)
+        FileHandle.standardError.write(Data("[reset] cleared onboarding flag\n".utf8))
         // TCC can only be reset from outside the app (sandboxed or not —
         // TCC is a privileged system service). Print the incantation so
         // the user can do it manually.
@@ -259,26 +273,29 @@ struct MarginaliaApp: App {
 
 // MARK: — Install UX glue
 
-/// Minimum required assets for the onboarding installer — the TTS core plus
-/// one voice matching the user's system language. Future iterations could
-/// add Whisper if the user opted out of Apple STT; for now we keep it lean.
+/// Onboarding installer catalog — derived entirely from `host.installations`
+/// (the Rust CATALOG). No voice-id hardcoding: TTS core = first `tts_core`
+/// entry declared by the catalog; voice rows = every `voice` whose
+/// `language` field matches the user's system language. Keep in sync with
+/// `MarginaliaUILive/main.swift`.
 @MainActor
 private func onboardingAssets(from host: FFIHost) -> [InstallModelsView.Asset] {
-    let langPrefix = Locale.current.language.languageCode?.identifier ?? "en"
-    let defaultVoice: String
-    switch langPrefix {
-    case "it": defaultVoice = "voice:if_sara"
-    case "en": defaultVoice = "voice:af_bella"
-    default:   defaultVoice = "voice:af_bella"
-    }
-    let required = ["mlx-core", defaultVoice]
-    return host.installations
-        .filter { required.contains($0.id) }
-        .map {
-            InstallModelsView.Asset(
-                id: $0.id, label: $0.label, size: $0.size, installed: $0.installed
-            )
+    let langPrefix = (Locale.current.language.languageCode?.identifier ?? "en").lowercased()
+
+    let core = host.installations.first { $0.category == "tts_core" }
+    let voices = host.installations
+        .filter { $0.category == "voice" }
+        .filter { asset in
+            guard let lang = asset.language?.lowercased() else { return false }
+            return lang.hasPrefix(langPrefix)
         }
+
+    let rows: [InstallableAsset] = ([core].compactMap { $0 }) + voices
+    return rows.map {
+        InstallModelsView.Asset(
+            id: $0.id, label: $0.label, size: $0.size, installed: $0.installed
+        )
+    }
 }
 
 /// Demo sentence played the first time a voice is installed during
