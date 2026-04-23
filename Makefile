@@ -478,6 +478,13 @@ reset-gui:
 	-@killall -v Marginalia.bin 2>/dev/null || true
 	@rm -rf "$$HOME/Library/Application Support/Marginalia"
 	@echo "  wiped ~/Library/Application Support/Marginalia"
+	@# UserDefaults (onboardingComplete, theme, uiLocale, custom hue,
+	@# window frames) live in ~/Library/Preferences/<bundle-id>.plist.
+	@# `defaults delete <domain>` nukes the whole domain; killing
+	@# cfprefsd forces macOS to discard its in-memory cache of the
+	@# plist, otherwise the app relaunch would see stale values.
+	-@defaults delete $(GUI_BUNDLE_ID) 2>/dev/null && echo "  wiped UserDefaults for $(GUI_BUNDLE_ID)" || echo "  no UserDefaults to wipe"
+	-@killall -v cfprefsd 2>/dev/null >/dev/null || true
 	@tccutil reset Microphone          $(GUI_BUNDLE_ID) 2>/dev/null || true
 	@tccutil reset SpeechRecognition   $(GUI_BUNDLE_ID) 2>/dev/null || true
 	@echo "  revoked TCC prompts (Microphone + SpeechRecognition)"

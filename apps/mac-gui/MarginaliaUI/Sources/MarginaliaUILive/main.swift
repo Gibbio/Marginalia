@@ -248,8 +248,17 @@ struct MarginaliaLiveApp: App {
             ))
             return
         }
-        UserDefaults.standard.removeObject(forKey: Self.onboardingCompleteKey)
-        FileHandle.standardError.write(Data("[reset] cleared onboarding flag\n".utf8))
+        // Nuke the whole preferences domain — covers the onboarding
+        // flag, theme, custom hue, UI locale, and window frames.
+        // `synchronize()` forces the plist flush so a sibling `open`
+        // launched immediately after sees a clean state.
+        if let bundleId = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleId)
+            UserDefaults.standard.synchronize()
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.onboardingCompleteKey)
+        }
+        FileHandle.standardError.write(Data("[reset] cleared UserDefaults\n".utf8))
 
         let bundleId = Bundle.main.bundleIdentifier ?? "com.gibbio.marginalia.dev"
         FileHandle.standardError.write(Data(
