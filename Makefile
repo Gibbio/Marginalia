@@ -96,6 +96,7 @@ PDFIUM_DIR         ?= models/pdf
 	mlx-manifest _kokoro-hf-cli _kokoro-curl \
 	build-stt-helper build-xcframework bundle-mock bundle-live xcodegen gui-xcode \
 	check-deps tui-rs beta-test beta-doctor \
+	reset-gui \
 	clean
 
 # ---------------------------------------------------------------------------
@@ -122,6 +123,7 @@ help:
 	@echo "    gui-xcode            xcodegen + open the .xcodeproj in Xcode"
 	@echo "    bundle-mock          assemble Marginalia.app with MockHost (design iteration)"
 	@echo "    bundle-live          assemble Marginalia.app with FFIHost (shippable)"
+	@echo "    reset-gui            wipe GUI state + TCC permissions and relaunch (dev)"
 	@echo ""
 	@echo "  Dev"
 	@echo "    check-deps           verify system dependencies are installed"
@@ -459,6 +461,32 @@ bundle-live:
 		$(MAKE) build-xcframework; \
 	fi
 	apps/mac-gui/scripts/build-app-bundle.sh --live
+
+# Full GUI reset: kills any running instance, wipes Application Support
+# (config + sqlite + notes + TTS cache + mlx mirror), revokes TCC
+# prompts (mic + speech recognition), opens the .app again. HuggingFace
+# cache is NOT touched — downloaded weights stay reusable across resets.
+#
+# Pass `GUI_BUNDLE_ID=com.gibbio.marginalia` for the release build
+# (defaults to the dev bundle id).
+GUI_BUNDLE_ID ?= com.gibbio.marginalia.dev
+GUI_APP       ?= apps/mac-gui/build/Marginalia.app
+
+reset-gui:
+	@echo "Resetting Marginalia GUI state for $(GUI_BUNDLE_ID)…"
+	-@killall -v Marginalia 2>/dev/null || true
+	-@killall -v Marginalia.bin 2>/dev/null || true
+	@rm -rf "$$HOME/Library/Application Support/Marginalia"
+	@echo "  wiped ~/Library/Application Support/Marginalia"
+	@tccutil reset Microphone          $(GUI_BUNDLE_ID) 2>/dev/null || true
+	@tccutil reset SpeechRecognition   $(GUI_BUNDLE_ID) 2>/dev/null || true
+	@echo "  revoked TCC prompts (Microphone + SpeechRecognition)"
+	@if [ -d "$(GUI_APP)" ]; then \
+		echo "  relaunching $(GUI_APP)…"; \
+		open "$(GUI_APP)"; \
+	else \
+		echo "  app bundle not found at $(GUI_APP) — run 'make bundle-live' first."; \
+	fi
 
 # Regenerate the Xcode project from `apps/mac-gui/project.yml`. The generated
 # `.xcodeproj` is .gitignored — only `project.yml` is source-of-truth.

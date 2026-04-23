@@ -49,6 +49,20 @@ struct MarginaliaApp: App {
         Fonts.registerBundled()
         Self.pointHelperAtBundleIfAvailable()
 
+        // `--reset` wipes config / sqlite / notes / TTS cache / mlx mirror
+        // so the app behaves like a fresh install. Downloaded weights in
+        // the HuggingFace cache stay put (they're expensive to redownload
+        // and `is_asset_cached` picks them up transparently on next
+        // install). TCC permissions (mic, speech recognition) cannot be
+        // reset from inside the app — only `tccutil` can, so we print an
+        // instruction to stderr and surface it in the log pane.
+        //
+        // Pass via: `open Marginalia.app --args --reset`
+        // Or: `make reset-gui` (Makefile target handles tccutil too).
+        if CommandLine.arguments.contains("--reset") {
+            Self.performReset()
+        }
+
         let (path, isFirstRun) = Self.resolveConfigPath()
         let ffi: FFIHost
         do {
@@ -191,6 +205,46 @@ struct MarginaliaApp: App {
             else { return }
             Task { try? await h.pause() }
         }
+    }
+
+    /// Wipe the Application Support directory so the next launch behaves
+    /// like a first install. TCC and the HF model cache are NOT touched
+    /// — TCC needs `tccutil` (privileged, outside the sandbox), and the
+    /// HF cache is expensive to rebuild and safe to reuse.
+    private static func performReset() {
+        let fm = FileManager.default
+        guard let support = fm.urls(for: .applicationSupportDirectory,
+                                     in: .userDomainMask).first?
+            .appendingPathComponent("Marginalia", isDirectory: true),
+              fm.fileExists(atPath: support.path)
+        else {
+            FileHandle.standardError.write(Data("[reset] no support directory to wipe\n".utf8))
+            return
+        }
+        do {
+            try fm.removeItem(at: support)
+            FileHandle.standardError.write(Data(
+                "[reset] wiped \(support.path)\n".utf8
+            ))
+        } catch {
+            FileHandle.standardError.write(Data(
+                "[reset] failed to wipe \(support.path): \(error)\n".utf8
+            ))
+            return
+        }
+        // TCC can only be reset from outside the app (sandboxed or not —
+        // TCC is a privileged system service). Print the incantation so
+        // the user can do it manually.
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.gibbio.marginalia.dev"
+        FileHandle.standardError.write(Data(
+            """
+            [reset] to also revoke microphone + speech-recognition prompts:
+                tccutil reset Microphone \(bundleId)
+                tccutil reset SpeechRecognition \(bundleId)
+            (or all: tccutil reset All \(bundleId))
+
+            """.utf8
+        ))
     }
 
     private static func pointHelperAtBundleIfAvailable() {
