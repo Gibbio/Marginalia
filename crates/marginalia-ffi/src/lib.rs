@@ -573,15 +573,14 @@ fn fallback_voices() -> Vec<AssetSpec> {
 }
 
 /// Hardcoded engine specs — adding one is a source change because each
-/// maps to a distinct backend crate.
+/// maps to a distinct backend crate. Order matters: `mlx-core` stays
+/// first so `list_installable_assets` surfaces the macOS primary before
+/// the cross-platform ONNX fallback.
 ///
-/// `kokoro-onnx` used to live here as a cross-platform fallback, but
-/// `onnx-community/Kokoro-82M` went private (401 on public downloads)
-/// in 2026-Q1 and there's no mirror we can publish from. macOS ships
-/// MLX as the primary, so the catalog drops the ONNX row rather than
-/// showing a button that always errors. TUI users on Linux still have
-/// `make bootstrap-kokoro` to populate the HF cache manually from a
-/// source of their choosing.
+/// The Kokoro ONNX weights live at `onnx-community/Kokoro-82M-v1.0-ONNX`.
+/// The older `onnx-community/Kokoro-82M` repo went gated in 2026-Q1
+/// (401 on public downloads) — make sure future edits target the
+/// `-v1.0-ONNX` slug.
 fn engine_specs() -> Vec<AssetSpec> {
     vec![
         AssetSpec {
@@ -604,6 +603,17 @@ fn engine_specs() -> Vec<AssetSpec> {
             size_bytes: 465_000_000,
             source: AssetSource::Whisper {
                 file: "ggml-small.bin".to_string(),
+            },
+        },
+        AssetSpec {
+            id: "kokoro-onnx".to_string(),
+            display_name: "Kokoro ONNX (fallback cross-platform)".to_string(),
+            category: "tts_core".to_string(),
+            language: None,
+            gender: None,
+            size_bytes: 86_000_000,
+            source: AssetSource::KokoroOnnx {
+                file: "onnx/model_q8f16.onnx".to_string(),
             },
         },
     ]
@@ -760,7 +770,7 @@ fn is_asset_cached(source: &AssetSource) -> bool {
             format!("voices/{voice_id}.safetensors"),
         ),
         AssetSource::Whisper { file } => ("ggerganov", "whisper.cpp", file.clone()),
-        AssetSource::KokoroOnnx { file } => ("onnx-community", "Kokoro-82M", file.clone()),
+        AssetSource::KokoroOnnx { file } => ("onnx-community", "Kokoro-82M-v1.0-ONNX", file.clone()),
     };
     let repo_dir = hf_cache_root().join(format!("models--{owner}--{name}"));
     let Ok(rev) = std::fs::read_to_string(repo_dir.join("refs/main")) else {
@@ -846,7 +856,7 @@ fn download_asset_with_progress(
             format!("voices/{voice_id}.safetensors"),
         ),
         AssetSource::Whisper { file } => ("ggerganov/whisper.cpp", file.to_string()),
-        AssetSource::KokoroOnnx { file } => ("onnx-community/Kokoro-82M", file.to_string()),
+        AssetSource::KokoroOnnx { file } => ("onnx-community/Kokoro-82M-v1.0-ONNX", file.to_string()),
     };
     mgr.download_with_progress(repo, &file, progress)
         .map_err(|e| e.to_string())
@@ -1671,7 +1681,7 @@ impl FfiRuntime {
                 format!("voices/{voice_id}.safetensors"),
             ),
             AssetSource::Whisper { file } => ("ggerganov/whisper.cpp", file.to_string()),
-            AssetSource::KokoroOnnx { file } => ("onnx-community/Kokoro-82M", file.to_string()),
+            AssetSource::KokoroOnnx { file } => ("onnx-community/Kokoro-82M-v1.0-ONNX", file.to_string()),
         };
         marginalia_models::ModelManager::uninstall_from_repo(repo, &file)
             .map_err(|e| FfiError::Io(e.to_string()))?;

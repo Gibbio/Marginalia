@@ -68,10 +68,10 @@ impl ModelManager {
     }
 
     /// Ensure a Kokoro ONNX model file is available locally.
-    /// Downloads from `onnx-community/Kokoro-82M` on HuggingFace if not cached.
+    /// Downloads from `onnx-community/Kokoro-82M-v1.0-ONNX` on HuggingFace if not cached.
     /// Returns the local path to the model file.
     pub fn ensure_kokoro_onnx(&self, file_name: &str) -> Result<PathBuf, ModelError> {
-        let repo = self.api.model("onnx-community/Kokoro-82M".to_string());
+        let repo = self.api.model("onnx-community/Kokoro-82M-v1.0-ONNX".to_string());
         log::info!("[models] ensuring kokoro onnx: {file_name}");
         let path = repo
             .get(file_name)
