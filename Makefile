@@ -96,7 +96,7 @@ PDFIUM_DIR         ?= models/pdf
 	mlx-manifest _kokoro-hf-cli _kokoro-curl \
 	build-stt-helper build-xcframework bundle-mock bundle-live xcodegen gui-xcode \
 	check-deps tui-rs beta-test beta-doctor \
-	reset-gui \
+	reset-gui reset-hf-cache reset-deep \
 	clean
 
 # ---------------------------------------------------------------------------
@@ -124,6 +124,8 @@ help:
 	@echo "    bundle-mock          assemble Marginalia.app with MockHost (design iteration)"
 	@echo "    bundle-live          assemble Marginalia.app with FFIHost (shippable)"
 	@echo "    reset-gui            wipe GUI state + TCC permissions and relaunch (dev)"
+	@echo "    reset-hf-cache       remove HuggingFace cache for Marginalia's model repos (~800 MB)"
+	@echo "    reset-deep           reset-gui + reset-hf-cache (true first-install flow)"
 	@echo ""
 	@echo "  Dev"
 	@echo "    check-deps           verify system dependencies are installed"
@@ -471,6 +473,40 @@ bundle-live:
 # (defaults to the dev bundle id).
 GUI_BUNDLE_ID ?= com.gibbio.marginalia.dev
 GUI_APP       ?= apps/mac-gui/build/Marginalia.app
+
+# Wipe the HuggingFace model cache for the three Marginalia repos so the
+# next onboarding / Settings install actually hits the network. Leaves
+# every other HF-cached model (e.g. ones you use in other projects)
+# alone.
+#
+# Typical bytes freed: ~800 MB (mlx-core 310 MB + 54 voices ~30 MB +
+# whisper-small 465 MB + kokoro-onnx 34 MB).
+reset-hf-cache:
+	@echo "Wiping HuggingFace cache for Marginalia's model repos…"
+	@for REPO in \
+	    "models--prince-canuma--Kokoro-82M" \
+	    "models--ggerganov--whisper.cpp" \
+	    "models--onnx-community--Kokoro-82M"; do \
+	    DIR="$$HOME/.cache/huggingface/hub/$$REPO"; \
+	    if [ -d "$$DIR" ]; then \
+	        echo "  rm -rf $$DIR"; \
+	        rm -rf "$$DIR"; \
+	    else \
+	        echo "  (skip) $$DIR not present"; \
+	    fi; \
+	done
+	@# Also drop the app-side mirror so Discovery doesn't keep listing
+	@# voices that the runtime would try to load from the now-missing
+	@# HF cache.
+	@if [ -d "$$HOME/Library/Application Support/Marginalia/models/mlx" ]; then \
+	    rm -rf "$$HOME/Library/Application Support/Marginalia/models/mlx"; \
+	    echo "  rm -rf ~/Library/Application Support/Marginalia/models/mlx"; \
+	fi
+
+# Full cold-start — reset-gui + wipe HF cache. Use when you want to
+# reproduce the first-install-ever flow (blank onboarding, real network
+# progress bars, TCC prompts). For faster iteration reuse `reset-gui`.
+reset-deep: reset-hf-cache reset-gui
 
 reset-gui:
 	@echo "Resetting Marginalia GUI state for $(GUI_BUNDLE_ID)…"
