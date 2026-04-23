@@ -400,17 +400,23 @@ public struct PermissionsCheckView: View {
     private func requestMic() {
         #if canImport(AVFoundation)
         micProbing = true
-        // Both `AVCaptureDevice.requestAccess` and `SFSpeechRecognizer.
-        // requestAuthorization` invoke their completion on an arbitrary
-        // non-main queue. Under `SWIFT_STRICT_CONCURRENCY: complete`
-        // (set in project.yml), touching @State from a non-MainActor
-        // context aborts the process via `dispatch_assert_queue_fail`.
-        // `Task { @MainActor in }` is the strict-concurrency-safe
-        // equivalent of `DispatchQueue.main.async`.
+        // TCC invokes both `AVCaptureDevice.requestAccess` and
+        // `SFSpeechRecognizer.requestAuthorization` completions on an
+        // arbitrary non-main dispatch queue. Under SWIFT_STRICT_CONCURRENCY
+        // `complete` + macOS 26's stricter runtime isolation enforcement
+        // in `libswift_Concurrency`, even `Task { @MainActor in … }` from
+        // inside that callback trips `_swift_task_checkIsolatedSwift`
+        // when the closure captures `self` (a MainActor-isolated View).
+        // The canonical Swift 6 bridge for legacy completion handlers is
+        // an explicit `DispatchQueue.main.async` (hits the main thread)
+        // followed by `MainActor.assumeIsolated` (tells the runtime we
+        // really are on MainActor so `@State` writes are safe).
         AVCaptureDevice.requestAccess(for: .audio) { granted in
-            Task { @MainActor in
-                micProbing = false
-                micStatus = granted ? .granted : .denied
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    micProbing = false
+                    micStatus = granted ? .granted : .denied
+                }
             }
         }
         #endif
@@ -420,18 +426,20 @@ public struct PermissionsCheckView: View {
         #if canImport(Speech)
         speechProbing = true
         SFSpeechRecognizer.requestAuthorization { authStatus in
-            Task { @MainActor in
-                speechProbing = false
-                switch authStatus {
-                case .authorized:  speechStatus = .granted
-                case .denied:      speechStatus = .denied
-                case .restricted:  speechStatus = .restricted
-                case .notDetermined: speechStatus = .unknown
-                @unknown default:  speechStatus = .unknown
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    speechProbing = false
+                    switch authStatus {
+                    case .authorized:  speechStatus = .granted
+                    case .denied:      speechStatus = .denied
+                    case .restricted:  speechStatus = .restricted
+                    case .notDetermined: speechStatus = .unknown
+                    @unknown default:  speechStatus = .unknown
+                    }
+                    // Re-probe dictation availability — SFSpeechRecognizer's
+                    // `isAvailable` is only meaningful once auth is granted.
+                    probeDictation()
                 }
-                // Re-probe dictation availability — the SFSpeechRecognizer
-                // availability flag can only be queried after authorization.
-                probeDictation()
             }
         }
         #endif
@@ -439,19 +447,20 @@ public struct PermissionsCheckView: View {
 
     private func probeDictation() {
         #if canImport(Speech)
-        // Give SFSpeechRecognizer a beat to update after auth changes.
-        // `Task.sleep` + `@MainActor` replaces the old
-        // `DispatchQueue.main.asyncAfter` so strict concurrency stays
-        // happy with the @State write below.
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard let recognizer = SFSpeechRecognizer(locale: Locale.current)
-                ?? SFSpeechRecognizer()
-            else {
-                dictationAvailable = false
-                return
+        // Give SFSpeechRecognizer a beat to update its availability flag
+        // after an auth status change. `DispatchQueue.main.asyncAfter` +
+        // `MainActor.assumeIsolated` — same bridge pattern as the two
+        // request methods above.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            MainActor.assumeIsolated {
+                guard let recognizer = SFSpeechRecognizer(locale: Locale.current)
+                    ?? SFSpeechRecognizer()
+                else {
+                    dictationAvailable = false
+                    return
+                }
+                dictationAvailable = recognizer.isAvailable
             }
-            dictationAvailable = recognizer.isAvailable
         }
         #else
         dictationAvailable = true
