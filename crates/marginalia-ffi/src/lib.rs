@@ -741,10 +741,30 @@ impl FfiRuntime {
         // thread rather than on the sidecar.
         let tui = AppConfig::load_from(&config_path).map_err(FfiError::Config)?;
 
-        let db_path = tui
-            .database_path
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(".marginalia/beta.sqlite3"));
+        // Relative `database_path` / `tts_cache_dir` in the TOML are
+        // resolved against the config file's parent directory. Without
+        // this, a sandboxed `.app` launched from `/` tries to open
+        // `.marginalia/beta.sqlite3` literally — which fails because
+        // CWD is not under a writable location. The TUI on desktop
+        // works fine because it runs from the repo root, but the
+        // .app bundle needs the explicit resolution.
+        let config_dir: PathBuf = config_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let resolve_rel = |p: PathBuf| -> PathBuf {
+            if p.is_absolute() {
+                p
+            } else {
+                config_dir.join(p)
+            }
+        };
+
+        let db_path = resolve_rel(
+            tui.database_path
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(".marginalia/beta.sqlite3")),
+        );
         let mlx_model_dir = PathBuf::from(&tui.mlx.model);
         let whisper_model_path = tui.stt.whisper.model_path.clone();
         let whisper_path_cached = whisper_model_path.clone();
@@ -772,9 +792,12 @@ impl FfiRuntime {
             runtime_cfg.chunk_target_chars = v;
         }
         if let Some(dir) = tui.tts_cache_dir.clone() {
-            runtime_cfg.tts_cache_dir = Some(dir);
+            runtime_cfg.tts_cache_dir = Some(resolve_rel(dir));
         }
         let db_path_clone = db_path.clone();
+        // Captured for use inside the sidecar thread when the config
+        // didn't specify a cache dir — same resolution rule as db_path.
+        let default_cache_dir = config_dir.join(".marginalia/tts-cache");
 
         let handle = std::thread::Builder::new()
             .name("marginalia-sidecar".into())
@@ -820,7 +843,7 @@ impl FfiRuntime {
                     .config()
                     .tts_cache_dir
                     .clone()
-                    .unwrap_or_else(|| PathBuf::from(".marginalia/tts-cache"));
+                    .unwrap_or_else(|| default_cache_dir.clone());
 
                 // Install the event drainer: subscribe once, spawn a thread
                 // that pushes every RuntimeEvent into the shared buffer so
