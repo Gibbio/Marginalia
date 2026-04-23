@@ -22,6 +22,9 @@ struct LiveMarginaliaCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(host.currentSession == nil || host.notes.isEmpty)
             Divider()
+            Button("Esporta backup…") { exportBackup() }
+            Button("Importa backup…") { importBackup() }
+            Divider()
             Button("Chiudi sessione") { Task { try? await host.stop() } }
                 .keyboardShortcut("w", modifiers: [.command])
                 .disabled(host.currentSession == nil)
@@ -122,6 +125,63 @@ struct LiveMarginaliaCommands: Commands {
             Task {
                 _ = try? await host.importFile(url: url)
                 await host.refreshLibrary()
+            }
+        }
+    }
+
+    private func exportBackup() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withFullDate]
+        panel.nameFieldStringValue = "marginalia-\(iso.string(from: Date())).zip"
+        panel.canCreateDirectories = true
+        panel.title = "Esporta backup Marginalia"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            do {
+                try await host.exportBackup(path: url.path)
+                await MainActor.run {
+                    host.transientToast = ToastMessage(
+                        text: "Backup salvato.", kind: .info
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    host.pushMessage("Errore export backup: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func importBackup() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.title = "Importa backup Marginalia"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // Confirmation — import overwrites marginalia.toml and the
+        // sqlite db. Anything saved after the backup is lost unless the
+        // user exported first.
+        let alert = NSAlert()
+        alert.messageText = "Importare questo backup?"
+        alert.informativeText = "Le preferenze, la libreria e le note correnti verranno sostituite con quelle nel backup. Marginalia dovrà essere riavviata per caricare i dati ripristinati."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Importa e esci")
+        alert.addButton(withTitle: "Annulla")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        Task {
+            do {
+                try await host.importBackup(path: url.path)
+                await MainActor.run { NSApp.terminate(nil) }
+            } catch {
+                await MainActor.run {
+                    host.pushMessage("Errore import backup: \(error.localizedDescription)")
+                }
             }
         }
     }

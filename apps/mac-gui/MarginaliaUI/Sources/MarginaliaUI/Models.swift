@@ -409,6 +409,14 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// menu's `Esporta note…` action. Empty string when no session.
     func exportNotesMarkdown() -> String
 
+    /// Write a backup zip (config + sqlite + voices manifest) to `path`.
+    /// Throws on I/O errors.
+    func exportBackup(path: String) async throws
+    /// Restore a backup zip from `path`. The caller is expected to
+    /// terminate the app afterwards — the runtime doesn't hot-reload
+    /// from swapped-out files.
+    func importBackup(path: String) async throws
+
     /// Linear playback volume, 0.0–1.0. Rodio accepts >1.0 as amplifi-
     /// cation but the slider caps at 1.0 to avoid distortion by default.
     var volume: Double { get set }
@@ -711,6 +719,16 @@ public final class MockHost: MarginaliaHost, ObservableObject {
             docTitle: currentSession?.documentTitle ?? "Documento",
             notes: notes
         )
+    }
+
+    public func exportBackup(path: String) async throws {
+        // Mock: write a placeholder marker so preview targets can test
+        // the menu flow without a real runtime underneath.
+        try "Marginalia mock backup\n".write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    public func importBackup(path: String) async throws {
+        // Mock: no-op. Preview never has data to restore.
     }
 
     /// Shared markdown formatter used by both the mock and the live host

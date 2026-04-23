@@ -272,6 +272,14 @@ interface FfiRuntime {
   [Throws=FfiError]
   void uninstall_asset(string asset_id);
   sequence<InstallProgress> install_progress();
+
+  // Backup / restore (B9) — zip containing marginalia.toml + sqlite db
+  // + voices manifest. Import writes files back but does NOT hot-reload
+  // the runtime; the caller restarts the app.
+  [Throws=FfiError]
+  void export_backup(string out_path);
+  [Throws=FfiError]
+  void import_backup(string src_path);
 };
 
 dictionary WaveformSnapshot {

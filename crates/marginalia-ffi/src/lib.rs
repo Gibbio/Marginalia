@@ -704,6 +704,11 @@ pub struct FfiRuntime {
     /// runtime lock. Re-reads on every call are acceptable too but this is
     /// simpler.
     whisper_path_cached: Option<PathBuf>,
+    /// Config file path — stored so `export_backup` / `import_backup`
+    /// can include/restore it without the caller re-supplying.
+    config_path: PathBuf,
+    /// SQLite database path — same reason as `config_path`.
+    db_path: PathBuf,
     #[cfg(feature = "apple-stt")]
     waveform_handle:
         Option<Arc<Mutex<marginalia_runtime::builder::WaveformData>>>,
@@ -896,6 +901,8 @@ impl FfiRuntime {
             event_buffer,
             install_buffer: InstallBuffer::default(),
             whisper_path_cached,
+            config_path,
+            db_path,
             #[cfg(feature = "apple-stt")]
             waveform_handle: init.waveform_handle,
             _sidecar: Mutex::new(Some(handle)),
@@ -1440,6 +1447,101 @@ impl FfiRuntime {
         };
         marginalia_models::ModelManager::uninstall_from_repo(repo, &file)
             .map_err(|e| FfiError::Io(e.to_string()))?;
+        Ok(())
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // Backup / restore (B9)
+    //
+    // Export zips the config TOML + sqlite DB + voices manifest into a
+    // single archive the user can stash on iCloud or elsewhere. Import
+    // reverses it; because the sqlite connection is open while the app
+    // runs, importing requires the user to restart — we write the files
+    // but don't hot-reload the runtime. The Swift side shows an
+    // NSAlert telling them to quit + reopen.
+    //
+    // Explicitly NOT included in the archive: TTS cache (re-generatable,
+    // large), downloaded model weights (user-controlled via Installa-
+    // zioni), or the STT helper binary (re-compiled from source).
+    // ─────────────────────────────────────────────────────────
+
+    /// Write a backup zip at `out_path`. Overwrites if the file exists.
+    pub fn export_backup(&self, out_path: String) -> Result<(), FfiError> {
+        let out = PathBuf::from(&out_path);
+        // Collect the paths we care about. Missing ones are skipped
+        // with a log warning — not every install has every file (e.g.
+        // first-run may not have a voices manifest yet).
+        let mlx_manifest = PathBuf::from("models/tts/mlx/voices.manifest.json");
+        let files: Vec<(PathBuf, &str)> = [
+            (self.config_path.clone(), "marginalia.toml"),
+            (self.db_path.clone(), "beta.sqlite3"),
+            (mlx_manifest, "voices.manifest.json"),
+        ]
+        .into_iter()
+        .filter(|(p, _)| p.is_file())
+        .collect();
+
+        let file = std::fs::File::create(&out)
+            .map_err(|e| FfiError::Io(format!("create backup: {e}")))?;
+        let mut zip = zip::ZipWriter::new(file);
+        let opts: zip::write::SimpleFileOptions =
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .unix_permissions(0o644);
+
+        for (src, archive_name) in files {
+            let bytes = std::fs::read(&src)
+                .map_err(|e| FfiError::Io(format!("read {}: {e}", src.display())))?;
+            zip.start_file(archive_name, opts)
+                .map_err(|e| FfiError::Io(format!("zip start {archive_name}: {e}")))?;
+            std::io::Write::write_all(&mut zip, &bytes)
+                .map_err(|e| FfiError::Io(format!("zip write {archive_name}: {e}")))?;
+        }
+
+        zip.finish()
+            .map_err(|e| FfiError::Io(format!("zip finalize: {e}")))?;
+        log::info!("[ffi] backup written to {}", out.display());
+        Ok(())
+    }
+
+    /// Restore a backup zip at `src_path`. Writes config + sqlite back
+    /// to their expected locations, overwriting existing files. Does
+    /// NOT hot-reload the runtime — the caller must restart the app.
+    pub fn import_backup(&self, src_path: String) -> Result<(), FfiError> {
+        let src = PathBuf::from(&src_path);
+        let file = std::fs::File::open(&src)
+            .map_err(|e| FfiError::Io(format!("open backup: {e}")))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| FfiError::Io(format!("read zip: {e}")))?;
+
+        // Map archive entries back to destination paths. Unknown names
+        // are skipped (forward-compat when future backups include extra
+        // files).
+        let mlx_manifest = PathBuf::from("models/tts/mlx/voices.manifest.json");
+        for i in 0..archive.len() {
+            let mut entry = archive
+                .by_index(i)
+                .map_err(|e| FfiError::Io(format!("zip entry {i}: {e}")))?;
+            let name = entry.name().to_string();
+            let dest: Option<PathBuf> = match name.as_str() {
+                "marginalia.toml" => Some(self.config_path.clone()),
+                "beta.sqlite3" => Some(self.db_path.clone()),
+                "voices.manifest.json" => Some(mlx_manifest.clone()),
+                _ => {
+                    log::warn!("[ffi] backup contains unknown entry '{name}', skipping");
+                    None
+                }
+            };
+            let Some(dest) = dest else { continue };
+            if let Some(parent) = dest.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let mut out = std::fs::File::create(&dest)
+                .map_err(|e| FfiError::Io(format!("create {}: {e}", dest.display())))?;
+            std::io::copy(&mut entry, &mut out)
+                .map_err(|e| FfiError::Io(format!("write {}: {e}", dest.display())))?;
+        }
+        log::info!("[ffi] backup restored from {}", src.display());
         Ok(())
     }
 }

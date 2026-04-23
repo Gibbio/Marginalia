@@ -20,6 +20,12 @@ import MarginaliaKit
 #if canImport(AudioToolbox)
 import AudioToolbox
 #endif
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 @MainActor
 public final class FFIHost: MarginaliaHost, ObservableObject {
@@ -434,6 +440,18 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         )
     }
 
+    public func exportBackup(path: String) async throws {
+        try await Task.detached { [runtime] in
+            try runtime.exportBackup(outPath: path)
+        }.value
+    }
+
+    public func importBackup(path: String) async throws {
+        try await Task.detached { [runtime] in
+            try runtime.importBackup(srcPath: path)
+        }.value
+    }
+
     public func handle(event: MarginaliaEvent) {
         switch event {
         case .synthesisStarted(_, let sec, let ck):
@@ -499,9 +517,27 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             if let err {
                 liveNote = nil
                 pushMessage("Errore dettatura: \(err)")
-                transientToast = ToastMessage(
-                    text: "Dettatura fallita: \(err)", kind: .error
-                )
+                // B14 — discriminate "no audio captured" from "you
+                // didn't speak". If the OS reports no audio input
+                // device, assume the mic is unplugged / disabled.
+                if Self.noMicInputAvailable() {
+                    let openPrefs = ToastAction(label: "apri preferenze") {
+                        #if canImport(AppKit)
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.sound?input") {
+                            NSWorkspace.shared.open(url)
+                        }
+                        #endif
+                    }
+                    transientToast = ToastMessage(
+                        text: "Microfono non disponibile. Controlla che sia collegato e selezionato.",
+                        kind: .error,
+                        action: openPrefs
+                    )
+                } else {
+                    transientToast = ToastMessage(
+                        text: "Dettatura fallita: \(err)", kind: .error
+                    )
+                }
             } else {
                 // Promote the live card to a saved note and refresh the
                 // canonical notes list so it shows up in the margin panel.
@@ -562,6 +598,30 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         case .runtimeError(let msg):
             pushMessage("Errore: \(msg)")
         }
+    }
+
+    /// True when the OS reports zero audio input devices — used to
+    /// discriminate "user didn't speak" (normal empty dictation) from
+    /// "mic unplugged" in the `voiceNoteTranscribed` error path.
+    ///
+    /// Conservative: if AVFoundation is unavailable (non-macOS build)
+    /// or the discovery session fails, returns false so we don't
+    /// spuriously claim the mic is gone.
+    private static func noMicInputAvailable() -> Bool {
+        #if canImport(AVFoundation)
+        // Any "builtInMicrophone" or "externalUnknown" device counts.
+        // The system mic (even if muted in sound prefs) shows up here —
+        // genuine unplug + no internal mic is the only way to get an
+        // empty list on a Mac.
+        let session = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external],
+            mediaType: .audio,
+            position: .unspecified
+        )
+        return session.devices.isEmpty
+        #else
+        return false
+        #endif
     }
 
     /// Italian-facing language name for the short BCP-47 prefix
