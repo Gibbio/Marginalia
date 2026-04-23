@@ -34,8 +34,12 @@ struct MarginaliaLiveApp: App {
     @StateObject private var poller: EventPoller
     @StateObject private var uiState = LiveAppUIState()
     @State private var onboardingStep: OnboardingStep = .none
+    @AppStorage(AppTheme.storageKey) private var themeId: String = AppTheme.default.id
+    @AppStorage("marginalia.uiLocale") private var uiLocale: String = "it"
 
-    enum OnboardingStep { case none, welcome, permissions, installModels }
+    enum OnboardingStep {
+        case none, welcome, permissions, installModels, voice, uiLanguage, theme
+    }
 
     /// Persisted across launches — `true` once the user clicks "continua"
     /// or "salta per ora" on the InstallModels step. Lives in UserDefaults
@@ -120,25 +124,61 @@ struct MarginaliaLiveApp: App {
                 onBack: { onboardingStep = .welcome }
             )
         case .installModels:
-            InstallModelsView(
-                accent: .default,
-                assets: onboardingAssets(from: host),
+            DownloadManagerView(
+                accent: AppTheme.accent(for: themeId),
+                installations: host.installations,
                 inflightStates: host.inflightDownloads,
                 onInstall: { host.installAsset($0) },
                 onUninstall: { host.uninstallAsset($0) },
-                onProceed: {
-                    host.markOnboardingComplete()
-                    onboardingStep = .none
-                },
-                onSkip: {
-                    host.markOnboardingComplete()
-                    onboardingStep = .none
-                }
+                onProceed: { onboardingStep = .voice },
+                onSkip: { onboardingStep = .voice }
             )
             .onAppear { Task { await host.refreshInstallations() } }
             .onChange(of: host.inflightDownloads) { oldValue, newValue in
                 playPreviewForNewlyInstalledVoice(old: oldValue, new: newValue, host: host)
             }
+
+        case .voice:
+            VoiceSelectView(
+                accent: AppTheme.accent(for: themeId),
+                voices: host.installations.filter { $0.category == "voice" && $0.installed },
+                selectedId: host.currentSpec.voice,
+                onSelect: { voiceId in
+                    // Persist the pick: build a new ProviderSpec with the
+                    // selected voice and apply. Keeps the TTS backend /
+                    // language / STT engine untouched.
+                    let spec = ProviderSpec(
+                        ttsBackend: host.currentSpec.ttsBackend,
+                        voice: voiceId,
+                        sttEngine: host.currentSpec.sttEngine,
+                        language: host.currentSpec.language
+                    )
+                    Task { _ = try? await host.apply(spec: spec) }
+                },
+                onProceed: { onboardingStep = .uiLanguage },
+                onBack: { onboardingStep = .installModels }
+            )
+
+        case .uiLanguage:
+            UILanguageSelectView(
+                accent: AppTheme.accent(for: themeId),
+                selectedLocale: uiLocale,
+                onSelect: { uiLocale = $0 },
+                onProceed: { onboardingStep = .theme },
+                onBack: { onboardingStep = .voice }
+            )
+
+        case .theme:
+            ThemeSelectView(
+                accent: AppTheme.accent(for: themeId),
+                selectedThemeId: themeId,
+                onSelect: { themeId = $0 },
+                onProceed: {
+                    host.markOnboardingComplete()
+                    onboardingStep = .none
+                },
+                onBack: { onboardingStep = .uiLanguage }
+            )
         }
     }
 
@@ -225,37 +265,6 @@ struct MarginaliaLiveApp: App {
 }
 
 // MARK: — Install UX glue
-
-/// Onboarding installer catalog — derived entirely from `host.installations`
-/// (the Rust CATALOG, exposed via UniFFI and scanned from disk for the
-/// `installed` flag). No voice-id hardcoding: the TTS core row is the
-/// first `tts_core` entry the catalog declares, and the voice rows are
-/// every `voice` entry whose declared language matches the user's system
-/// language. If the catalog ever grows (new voice, new engine, Whisper
-/// added as an opt-in) this view rebuilds automatically.
-@MainActor
-private func onboardingAssets(from host: FFIHost) -> [InstallModelsView.Asset] {
-    let langPrefix = (Locale.current.language.languageCode?.identifier ?? "en").lowercased()
-
-    // First declared tts_core — on macOS the catalog puts mlx-core first;
-    // taking the first is catalog-order-dependent but avoids naming any
-    // specific engine id in Swift.
-    let core = host.installations.first { $0.category == "tts_core" }
-
-    let voices = host.installations
-        .filter { $0.category == "voice" }
-        .filter { asset in
-            guard let lang = asset.language?.lowercased() else { return false }
-            return lang.hasPrefix(langPrefix)
-        }
-
-    let rows: [InstallableAsset] = ([core].compactMap { $0 }) + voices
-    return rows.map {
-        InstallModelsView.Asset(
-            id: $0.id, label: $0.label, size: $0.size, installed: $0.installed
-        )
-    }
-}
 
 /// Demo sentence auto-played when a voice finishes installing during
 /// onboarding. Short, neutral — lets the user immediately hear that the

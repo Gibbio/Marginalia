@@ -430,100 +430,198 @@ impl EventBuffer {
 // Installable asset catalog (onboarding + Settings downloader)
 // ──────────────────────────────────────────────────────────────────────
 
-/// What the catalog declares about a downloadable asset. Hardcoded here
-/// because we ship a fixed set of providers — adding a new row is a
-/// source change, not a user-facing config knob.
-#[derive(Debug, Clone, Copy)]
+/// What the catalog declares about a downloadable asset. The engine specs
+/// are hardcoded (adding a new engine is a source change). The voice specs
+/// are built from `voices.manifest.json` at startup so adding a voice is
+/// a manifest edit — no recompile required.
+#[derive(Debug, Clone)]
 struct AssetSpec {
-    id: &'static str,
-    display_name: &'static str,
-    category: &'static str,
-    language: Option<&'static str>,
-    gender: Option<&'static str>,
+    id: String,
+    display_name: String,
+    category: String,
+    language: Option<String>,
+    gender: Option<String>,
     size_bytes: u64,
     source: AssetSource,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum AssetSource {
     /// Kokoro MLX safetensors — root file (`kokoro-v1_0.safetensors`).
-    MlxCore { file: &'static str },
+    MlxCore { file: String },
     /// Kokoro MLX voice embedding (`voices/{id}.safetensors`).
-    MlxVoice { voice_id: &'static str },
+    MlxVoice { voice_id: String },
     /// Whisper ggml (`ggml-small.bin`, `ggml-medium.bin`, …).
-    Whisper { file: &'static str },
+    Whisper { file: String },
     /// Kokoro ONNX fallback (`onnx/model_q8f16.onnx`).
-    KokoroOnnx { file: &'static str },
+    KokoroOnnx { file: String },
 }
 
-const CATALOG: &[AssetSpec] = &[
-    AssetSpec {
-        id: "mlx-core",
-        display_name: "Kokoro TTS (MLX)",
-        category: "tts_core",
-        language: None,
-        gender: None,
-        size_bytes: 310_000_000,
-        source: AssetSource::MlxCore {
-            file: "kokoro-v1_0.safetensors",
+/// Resolve the voices manifest path at runtime.
+///
+/// Priority:
+///   1. `MARGINALIA_VOICES_MANIFEST` env var (explicit override)
+///   2. `<exe>/../../Resources/models/tts/mlx/voices.manifest.json`
+///      (macOS .app bundle layout — `Contents/MacOS/bin` → `Contents/Resources/…`)
+///   3. `models/tts/mlx/voices.manifest.json` (dev mode, CWD-relative)
+///
+/// Used by `load_voices_from_manifest()`. When none of the paths exist
+/// we fall back to a tiny hardcoded voice list so the catalog isn't empty
+/// on a broken install (see `fallback_voices()`).
+fn resolve_voices_manifest_path() -> PathBuf {
+    if let Ok(p) = std::env::var("MARGINALIA_VOICES_MANIFEST") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return path;
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(macos_dir) = exe.parent() {
+            if let Some(contents) = macos_dir.parent() {
+                let p = contents.join("Resources/models/tts/mlx/voices.manifest.json");
+                if p.is_file() {
+                    return p;
+                }
+            }
+        }
+    }
+    PathBuf::from("models/tts/mlx/voices.manifest.json")
+}
+
+/// Parse `voices.manifest.json` into `AssetSpec`s. Each voice row becomes
+/// a `voice` category spec with the id prefixed `voice:` (matches the
+/// onboarding + settings id convention) and the Kokoro HF source.
+fn load_voices_from_manifest() -> Vec<AssetSpec> {
+    let path = resolve_voices_manifest_path();
+    let Ok(bytes) = std::fs::read(&path) else {
+        log::warn!(
+            "[catalog] voices manifest not readable at {}, using fallback list",
+            path.display()
+        );
+        return fallback_voices();
+    };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        log::warn!(
+            "[catalog] voices manifest at {} is not valid JSON, using fallback",
+            path.display()
+        );
+        return fallback_voices();
+    };
+    let Some(arr) = v.get("voices").and_then(|x| x.as_array()) else {
+        return fallback_voices();
+    };
+    arr.iter()
+        .filter_map(|item| {
+            let id = item.get("id")?.as_str()?.to_string();
+            let display = item.get("display")?.as_str()?.to_string();
+            let lang = item.get("lang").and_then(|x| x.as_str()).map(String::from);
+            let gender = item
+                .get("gender")
+                .and_then(|x| x.as_str())
+                .map(String::from);
+            // Human-readable label: "Sara (it-IT, F)" — keeps the row
+            // compact while still surfacing language + gender.
+            let gender_tag = match gender.as_deref() {
+                Some("female") => "F",
+                Some("male") => "M",
+                _ => "?",
+            };
+            let lang_tag = lang.as_deref().unwrap_or("und");
+            let label = format!("{display} ({lang_tag}, {gender_tag})");
+            Some(AssetSpec {
+                id: format!("voice:{id}"),
+                display_name: label,
+                category: "voice".to_string(),
+                language: lang,
+                gender,
+                // All MLX voice embeddings are roughly the same size.
+                size_bytes: 500_000,
+                source: AssetSource::MlxVoice { voice_id: id },
+            })
+        })
+        .collect()
+}
+
+/// Minimal voice set used when the manifest can't be read. Keeps the UI
+/// functional (user sees at least one Italian + one English voice) while
+/// surfacing the underlying error in the log.
+fn fallback_voices() -> Vec<AssetSpec> {
+    vec![
+        AssetSpec {
+            id: "voice:if_sara".to_string(),
+            display_name: "Sara (it-IT, F)".to_string(),
+            category: "voice".to_string(),
+            language: Some("it-IT".to_string()),
+            gender: Some("female".to_string()),
+            size_bytes: 500_000,
+            source: AssetSource::MlxVoice {
+                voice_id: "if_sara".to_string(),
+            },
         },
-    },
-    AssetSpec {
-        id: "voice:if_sara",
-        display_name: "Sara (italiano, F)",
-        category: "voice",
-        language: Some("it-IT"),
-        gender: Some("female"),
-        size_bytes: 500_000,
-        source: AssetSource::MlxVoice {
-            voice_id: "if_sara",
+        AssetSpec {
+            id: "voice:af_bella".to_string(),
+            display_name: "Bella (en-US, F)".to_string(),
+            category: "voice".to_string(),
+            language: Some("en-US".to_string()),
+            gender: Some("female".to_string()),
+            size_bytes: 500_000,
+            source: AssetSource::MlxVoice {
+                voice_id: "af_bella".to_string(),
+            },
         },
-    },
-    AssetSpec {
-        id: "voice:im_nicola",
-        display_name: "Nicola (italiano, M)",
-        category: "voice",
-        language: Some("it-IT"),
-        gender: Some("male"),
-        size_bytes: 500_000,
-        source: AssetSource::MlxVoice {
-            voice_id: "im_nicola",
+    ]
+}
+
+/// Hardcoded engine specs — adding one is a source change because each
+/// maps to a distinct backend crate. Order matters: `mlx-core` must come
+/// before `kokoro-onnx` so `list_installable_assets` surfaces the
+/// preferred backend first on macOS.
+fn engine_specs() -> Vec<AssetSpec> {
+    vec![
+        AssetSpec {
+            id: "mlx-core".to_string(),
+            display_name: "Kokoro TTS (MLX)".to_string(),
+            category: "tts_core".to_string(),
+            language: None,
+            gender: None,
+            size_bytes: 310_000_000,
+            source: AssetSource::MlxCore {
+                file: "kokoro-v1_0.safetensors".to_string(),
+            },
         },
-    },
-    AssetSpec {
-        id: "voice:af_bella",
-        display_name: "Bella (English, F)",
-        category: "voice",
-        language: Some("en-US"),
-        gender: Some("female"),
-        size_bytes: 500_000,
-        source: AssetSource::MlxVoice {
-            voice_id: "af_bella",
+        AssetSpec {
+            id: "whisper-small".to_string(),
+            display_name: "Whisper small (multilingue)".to_string(),
+            category: "stt".to_string(),
+            language: None,
+            gender: None,
+            size_bytes: 465_000_000,
+            source: AssetSource::Whisper {
+                file: "ggml-small.bin".to_string(),
+            },
         },
-    },
-    AssetSpec {
-        id: "whisper-small",
-        display_name: "Whisper small (multilingue)",
-        category: "stt",
-        language: None,
-        gender: None,
-        size_bytes: 465_000_000,
-        source: AssetSource::Whisper {
-            file: "ggml-small.bin",
+        AssetSpec {
+            id: "kokoro-onnx".to_string(),
+            display_name: "Kokoro ONNX (fallback)".to_string(),
+            category: "tts_core".to_string(),
+            language: None,
+            gender: None,
+            size_bytes: 34_000_000,
+            source: AssetSource::KokoroOnnx {
+                file: "onnx/model_q8f16.onnx".to_string(),
+            },
         },
-    },
-    AssetSpec {
-        id: "kokoro-onnx",
-        display_name: "Kokoro ONNX (fallback)",
-        category: "tts_core",
-        language: None,
-        gender: None,
-        size_bytes: 34_000_000,
-        source: AssetSource::KokoroOnnx {
-            file: "onnx/model_q8f16.onnx",
-        },
-    },
-];
+    ]
+}
+
+/// Full catalog: engines first (hardcoded), then voices from the manifest.
+/// Built once per process via `LazyLock` — the manifest is read once at
+/// startup, subsequent calls return the cached vec.
+static CATALOG: std::sync::LazyLock<Vec<AssetSpec>> = std::sync::LazyLock::new(|| {
+    let mut out = engine_specs();
+    out.extend(load_voices_from_manifest());
+    out
+});
 
 /// FFI-exposed catalog row.
 pub struct InstallableAsset {
@@ -541,11 +639,11 @@ pub struct InstallableAsset {
 impl InstallableAsset {
     fn from_spec(spec: &AssetSpec) -> Self {
         Self {
-            id: spec.id.to_string(),
-            display_name: spec.display_name.to_string(),
-            category: spec.category.to_string(),
-            language: spec.language.map(String::from),
-            gender: spec.gender.map(String::from),
+            id: spec.id.clone(),
+            display_name: spec.display_name.clone(),
+            category: spec.category.clone(),
+            language: spec.language.clone(),
+            gender: spec.gender.clone(),
             size_bytes: spec.size_bytes,
             installed: is_asset_cached(&spec.source),
             source_host: "huggingface.co".to_string(),
@@ -1429,7 +1527,7 @@ impl FfiRuntime {
             .find(|s| s.id == asset_id)
             .ok_or_else(|| FfiError::Io(format!("unknown asset '{asset_id}'")))?;
         let buf = self.install_buffer.clone();
-        let source = spec.source;
+        let source = spec.source.clone();
         let id = asset_id.clone();
 
         // If the config's `[mlx] model` is an absolute filesystem path,

@@ -2066,6 +2066,7 @@ dependencies = [
  "marginalia-core",
  "marginalia-models",
  "marginalia-runtime",
+ "serde_json",
  "thiserror 2.0.18",
  "uniffi",
  "zip 4.6.1",

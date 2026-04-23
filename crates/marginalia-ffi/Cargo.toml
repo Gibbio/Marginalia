@@ -28,6 +28,7 @@ url-import = ["marginalia-runtime/url-import"]
 [dependencies]
 hf-hub = "0.5"  # for the `Progress` trait used by the install downloader
 log = "0.4"
+serde_json = "1"  # reading voices.manifest.json at catalog build time
 # Zip for B9 backup/restore (export/import marginalia.toml + sqlite db +
 # voices manifest as a single archive). `deflate` is all we need — the
 # archive is small enough that compression is basically free.

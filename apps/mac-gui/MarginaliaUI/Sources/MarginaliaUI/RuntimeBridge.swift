@@ -839,7 +839,11 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     label: rawAsset.displayName,
                     size: Self.formatBytes(rawAsset.sizeBytes),
                     installed: rawAsset.installed,
-                    removable: rawAsset.category == "voice",
+                    // Only ENGINES are user-removable. Voices are managed
+                    // as a library the user picks from — removing single
+                    // voice files would confuse the picker state without
+                    // a meaningful payoff (a voice is ~500 KB).
+                    removable: rawAsset.category != "voice",
                     category: rawAsset.category,
                     language: rawAsset.language
                 )
