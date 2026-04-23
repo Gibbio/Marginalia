@@ -149,11 +149,20 @@ struct MarginaliaApp: App {
         let cfg = support.appendingPathComponent("marginalia.toml")
         let existed = fm.fileExists(atPath: cfg.path)
         if !existed {
+            // Absolute paths for `[mlx] model` so `Discovery::list_mlx_voices`
+            // has a real directory to scan — the stock default is
+            // `prince-canuma/Kokoro-82M` which is a HF repo id, not a
+            // filesystem path. The install flow copies downloaded
+            // weights into `<support>/models/mlx/` so the picker
+            // populates as soon as onboarding finishes.
+            let modelsDir = support.appendingPathComponent("models/mlx", isDirectory: true)
+            try? fm.createDirectory(at: modelsDir, withIntermediateDirectories: true)
             let seed = """
             # Marginalia — config seed (first run, \(ISO8601DateFormatter().string(from: Date())))
             # The app rewrites this file via save_config() once settings change.
 
-            [tts]
+            [mlx]
+            model = "\(modelsDir.path)"
             voice = "if_sara"
             """
             try? seed.write(to: cfg, atomically: true, encoding: .utf8)

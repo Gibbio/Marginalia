@@ -667,6 +667,43 @@ fn is_asset_cached(source: &AssetSource) -> bool {
     }
 }
 
+/// Copy a downloaded asset from its HF-cache path into the user's
+/// configured `mlx_model_dir` so `Discovery::list_voices` (which scans
+/// that directory) sees it. Non-MLX assets (Whisper, Kokoro ONNX) are
+/// skipped — they don't belong in the MLX dir and the runtime knows
+/// how to find them in the HF cache on its own.
+///
+/// Target layout mirrors what `make bootstrap-mlx` produces:
+///   {dir}/kokoro-v1_0.safetensors
+///   {dir}/voices/{voice_id}.safetensors
+///
+/// Failures are propagated; the caller logs and continues (the TTS
+/// runtime still finds the file in the HF cache via hf-hub, so the
+/// mirror miss only affects the UI's voice picker visibility).
+fn mirror_to_mlx_dir(
+    cached: &std::path::Path,
+    source: &AssetSource,
+    dir: &std::path::Path,
+) -> std::io::Result<()> {
+    let target: PathBuf = match source {
+        AssetSource::MlxCore { file } => dir.join(file),
+        AssetSource::MlxVoice { voice_id } => dir
+            .join("voices")
+            .join(format!("{voice_id}.safetensors")),
+        _ => return Ok(()), // non-MLX, nothing to do
+    };
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // Copy rather than symlink: HF cache can be pruned, and the .app
+    // may not have permission to write into the cache dir anyway.
+    // Overwrites any existing file (covers the "reinstall after
+    // manual deletion" case cleanly).
+    std::fs::copy(cached, &target)?;
+    log::info!("[install] mirrored to {}", target.display());
+    Ok(())
+}
+
 /// Download the asset with byte-level progress reporting via the supplied
 /// `InstallProgressReporter`. Must be called with `HF_HUB_OFFLINE` unset
 /// — the caller (`install_asset`) flips the env var around this call.
@@ -1000,6 +1037,18 @@ impl FfiRuntime {
     /// Provider settings (TTS/STT/voice/language) are persisted by
     /// `apply_provider_spec` updating the context; this method catches
     /// everything else: voice-command triggers, chunk size, STT debug.
+    /// Snapshot of the current voice-command bindings. Re-reads
+    /// `marginalia.toml` so we always return what's on disk (incl.
+    /// changes made by `save_config` during the session). Empty list is
+    /// returned on read failure — callers render the default Italian
+    /// command set when they see zero rows.
+    pub fn list_voice_commands(&self) -> Vec<VoiceCommandEntry> {
+        let Ok(cfg) = AppConfig::load_from(&self.config_path) else {
+            return Vec::new();
+        };
+        voice_commands_section_to_entries(&cfg.voice_commands)
+    }
+
     pub fn save_config(
         &self,
         voice_commands: Vec<VoiceCommandEntry>,
@@ -1382,6 +1431,20 @@ impl FfiRuntime {
         let buf = self.install_buffer.clone();
         let source = spec.source;
         let id = asset_id.clone();
+
+        // If the config's `[mlx] model` is an absolute filesystem path,
+        // mirror downloaded weights into it after the hf-hub download so
+        // `Discovery::list_voices` (which scans `{mlx_model_dir}/voices/`)
+        // can see them. The TUI's relative path gets treated as a HF
+        // repo id here and the copy is skipped — the TUI uses
+        // `make bootstrap-mlx` to populate that directory instead.
+        let mlx_mirror_dir: Option<PathBuf> = AppConfig::load_from(&self.config_path)
+            .ok()
+            .and_then(|cfg| {
+                let p = PathBuf::from(&cfg.mlx.model);
+                p.is_absolute().then_some(p)
+            });
+
         std::thread::Builder::new()
             .name(format!("install-{id}"))
             .spawn(move || {
@@ -1403,13 +1466,28 @@ impl FfiRuntime {
                 let result = download_asset_with_progress(&source, reporter);
                 unsafe { std::env::set_var("HF_HUB_OFFLINE", "1") };
                 match result {
-                    Ok(_path) => buf.push(InstallProgress {
-                        asset_id: id,
-                        state: "installed".into(),
-                        bytes_done: 0,
-                        bytes_total: 0,
-                        error_message: None,
-                    }),
+                    Ok(cached_path) => {
+                        // Sync into `mlx_model_dir` if the config asks
+                        // for a local dir. Failures here are non-fatal
+                        // — the TTS runtime can still find the file in
+                        // the HF cache via hf-hub. Discovery just stays
+                        // blind until the copy succeeds on a retry.
+                        if let Some(ref dir) = mlx_mirror_dir {
+                            if let Err(e) = mirror_to_mlx_dir(&cached_path, &source, dir) {
+                                log::warn!(
+                                    "[install] mirror to {} failed: {e}",
+                                    dir.display()
+                                );
+                            }
+                        }
+                        buf.push(InstallProgress {
+                            asset_id: id,
+                            state: "installed".into(),
+                            bytes_done: 0,
+                            bytes_total: 0,
+                            error_message: None,
+                        })
+                    }
                     Err(e) => {
                         // Classify common error strings into friendly
                         // messages. The hf-hub error bubbles up as a
@@ -1470,6 +1548,25 @@ impl FfiRuntime {
         };
         marginalia_models::ModelManager::uninstall_from_repo(repo, &file)
             .map_err(|e| FfiError::Io(e.to_string()))?;
+
+        // Also drop the mirror in `mlx_model_dir` if we wrote one during
+        // install — otherwise Discovery would keep listing the voice
+        // because `list_voices` scans that directory.
+        if let Ok(cfg) = AppConfig::load_from(&self.config_path) {
+            let p = PathBuf::from(&cfg.mlx.model);
+            if p.is_absolute() {
+                let mirror = match &spec.source {
+                    AssetSource::MlxCore { file } => Some(p.join(file)),
+                    AssetSource::MlxVoice { voice_id } => Some(
+                        p.join("voices").join(format!("{voice_id}.safetensors")),
+                    ),
+                    _ => None,
+                };
+                if let Some(mirror) = mirror {
+                    let _ = std::fs::remove_file(&mirror);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1588,6 +1685,28 @@ fn ingest_outcome_to_result(
 pub struct VoiceCommandEntry {
     pub action: String,
     pub triggers: Vec<String>,
+}
+
+/// Inverse of `voice_commands_entries_to_section` — project the 11
+/// fixed fields of the config section into the flat FFI shape
+/// (action, triggers). Stable order so the UI row ordering matches
+/// the config file.
+fn voice_commands_section_to_entries(
+    section: &marginalia_config::VoiceCommandsSection,
+) -> Vec<VoiceCommandEntry> {
+    vec![
+        VoiceCommandEntry { action: "pause".into(),        triggers: section.pause.clone() },
+        VoiceCommandEntry { action: "resume".into(),       triggers: section.resume.clone() },
+        VoiceCommandEntry { action: "next".into(),         triggers: section.next.clone() },
+        VoiceCommandEntry { action: "back".into(),         triggers: section.back.clone() },
+        VoiceCommandEntry { action: "repeat".into(),       triggers: section.repeat.clone() },
+        VoiceCommandEntry { action: "stop".into(),         triggers: section.stop.clone() },
+        VoiceCommandEntry { action: "next_chapter".into(), triggers: section.next_chapter.clone() },
+        VoiceCommandEntry { action: "prev_chapter".into(), triggers: section.prev_chapter.clone() },
+        VoiceCommandEntry { action: "bookmark".into(),     triggers: section.bookmark.clone() },
+        VoiceCommandEntry { action: "note".into(),         triggers: section.note.clone() },
+        VoiceCommandEntry { action: "where".into(),        triggers: section.r#where.clone() },
+    ]
 }
 
 fn voice_commands_entries_to_section(

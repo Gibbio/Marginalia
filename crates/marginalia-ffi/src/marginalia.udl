@@ -182,6 +182,12 @@ interface FfiRuntime {
     boolean stt_debug
   );
 
+  /// Return the currently configured voice commands (11 rows, one per
+  /// action, each with its list of trigger words). Reflects the TOML on
+  /// disk — re-reads the config file so it stays in sync with whatever
+  /// `save_config` wrote last.
+  sequence<VoiceCommandEntry> list_voice_commands();
+
   // Library / documents ----------------------------------------
   sequence<DocumentListItem> list_documents();
   DocumentView? document_view(string? document_id);

@@ -109,6 +109,15 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         // read-through in case the runtime persisted it across restarts.
         self.volume = Double(runtime.volume())
         refreshDiscovery()
+        // Seed voice commands from the config on disk. Without this the
+        // Settings → Comandi vocali table renders empty on first launch
+        // (the @Published starts at [] and only `saveVoiceCommands`
+        // populated it before).
+        self.voiceCommands = runtime.listVoiceCommands().map {
+            VoiceCommand(action: $0.action,
+                         label: Self.voiceCommandLabel($0.action),
+                         triggers: $0.triggers)
+        }
         Task { [weak self] in
             await self?.refreshLibrary()
             // Session restore at launch — the runtime persists the active
@@ -622,6 +631,26 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         #else
         return false
         #endif
+    }
+
+    /// Display label for a voice-command action id. Mirrors the labels
+    /// the MockHost's `voiceCommands` default uses so the Settings row
+    /// order + strings match across mock and live hosts.
+    private static func voiceCommandLabel(_ action: String) -> String {
+        switch action {
+        case "pause":        return "Pausa"
+        case "resume":       return "Riprendi"
+        case "next":         return "Prossimo chunk"
+        case "back":         return "Chunk precedente"
+        case "repeat":       return "Ripeti"
+        case "stop":         return "Ferma"
+        case "next_chapter": return "Prossimo capitolo"
+        case "prev_chapter": return "Capitolo precedente"
+        case "bookmark":     return "Salva posizione"
+        case "note":         return "Nuova nota"
+        case "where":        return "Dove sono"
+        default:             return action
+        }
     }
 
     /// Italian-facing language name for the short BCP-47 prefix
