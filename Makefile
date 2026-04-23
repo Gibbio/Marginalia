@@ -87,15 +87,53 @@ WHISPER_MODEL_URL  ?= https://huggingface.co/ggerganov/whisper.cpp/resolve/main/
 PDFIUM_VERSION     ?= 7763
 PDFIUM_DIR         ?= models/pdf
 
+.DEFAULT_GOAL := help
+
 .PHONY: \
+	help \
 	bootstrap-beta bootstrap-kokoro bootstrap-ort bootstrap-vosk bootstrap-vosk-lib \
-	bootstrap-mlx mlx-manifest build-stt-helper _kokoro-hf-cli _kokoro-curl bootstrap-pdf \
+	bootstrap-mlx bootstrap-whisper bootstrap-pdf \
+	mlx-manifest _kokoro-hf-cli _kokoro-curl \
+	build-stt-helper build-xcframework bundle-mock bundle-live xcodegen gui-xcode \
 	check-deps tui-rs beta-test beta-doctor \
-	build-xcframework bundle-mock bundle-live xcodegen gui-xcode \
-	setup bootstrap bootstrap-runtime-deps bootstrap-providers \
-	bootstrap-kokoro-python bootstrap-whisper bootstrap-system-deps setup-config \
-	format lint test smoke run-cli-help doctor \
-	clean clean-alpha clean-session
+	clean
+
+# ---------------------------------------------------------------------------
+# Help — quick reference for the most-used targets. Grouped by stage.
+# ---------------------------------------------------------------------------
+
+help:
+	@echo ""
+	@echo "Marginalia — make targets (most-used)"
+	@echo ""
+	@echo "  Bootstrap / first-run"
+	@echo "    bootstrap-beta       download all Beta providers (kokoro + vosk + whisper + mlx)"
+	@echo "    bootstrap-mlx        Kokoro MLX weights + Italian voices (macOS arm64)"
+	@echo "    bootstrap-whisper    Whisper STT ggml model (~465 MB)"
+	@echo "    bootstrap-pdf        PDFium dynamic library (for PDF import)"
+	@echo ""
+	@echo "  Build"
+	@echo "    tui-rs               build + run the terminal UI (depends on bootstrap-mlx)"
+	@echo "    build-xcframework    build the Rust FFI as xcframework for the mac-gui"
+	@echo "    build-stt-helper     compile the Swift STT helper (macOS arm64)"
+	@echo ""
+	@echo "  mac-gui"
+	@echo "    xcodegen             regenerate apps/mac-gui/Marginalia.xcodeproj from project.yml"
+	@echo "    gui-xcode            xcodegen + open the .xcodeproj in Xcode"
+	@echo "    bundle-mock          assemble Marginalia.app with MockHost (design iteration)"
+	@echo "    bundle-live          assemble Marginalia.app with FFIHost (shippable)"
+	@echo ""
+	@echo "  Dev"
+	@echo "    check-deps           verify system dependencies are installed"
+	@echo "    beta-test            cargo test across the workspace"
+	@echo "    beta-doctor          run the Kokoro assets doctor"
+	@echo "    clean                remove all build artifacts, caches, session data"
+	@echo ""
+	@echo "Env overrides:"
+	@echo "    MARGINALIA_LANG=it   force language for voice/STT defaults (otherwise auto-detected)"
+	@echo "    MLX_VOICE_DEFAULT    override default voice resolved from MARGINALIA_LANG"
+	@echo "    PROFILE=debug        release (default) or debug for build-xcframework"
+	@echo ""
 
 # ---------------------------------------------------------------------------
 # Beta — provider bootstrapping
@@ -667,98 +705,3 @@ clean:
 	rm -f *.log *.db *.db-shm *.db-wal
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@echo "All build artifacts, caches, and session data cleaned."
-
-# ---------------------------------------------------------------------------
-# Alpha reference (migration reference only — do not use for Beta development)
-# ---------------------------------------------------------------------------
-
-PYTHON           ?= python3
-VENV_DIR         ?= .venv
-VENV_PYTHON      := $(VENV_DIR)/bin/python
-VENV_PIP         := $(VENV_PYTHON) -m pip
-PYTHONPATH_LOCAL := apps/backend/src:apps/cli/src:packages/core/src:packages/adapters/src:packages/infra/src
-
-setup: bootstrap-system-deps bootstrap bootstrap-runtime-deps bootstrap-providers setup-config
-	@echo "Alpha setup complete. Run 'make doctor' to verify."
-
-bootstrap-system-deps:
-	@echo "Checking system dependencies (macOS/Homebrew)..."
-	@command -v brew >/dev/null 2>&1 || { echo "Error: Homebrew required."; exit 1; }
-	@brew list portaudio >/dev/null 2>&1 || brew install portaudio
-	@brew list espeak-ng >/dev/null 2>&1 || brew install espeak-ng
-	@command -v uv >/dev/null 2>&1 || brew install uv
-	@echo "System dependencies OK."
-
-bootstrap:
-	$(PYTHON) -m venv $(VENV_DIR)
-	$(VENV_PIP) install --upgrade pip
-	$(VENV_PIP) install -e ".[dev]"
-
-bootstrap-runtime-deps:
-	$(VENV_PIP) install vosk sounddevice numpy
-
-bootstrap-providers: bootstrap-kokoro-python bootstrap-vosk bootstrap-whisper
-	@echo "Alpha providers bootstrapped."
-
-# Alpha Python Kokoro (not used by Beta runtime).
-bootstrap-kokoro-python:
-	@echo "Setting up Alpha Python Kokoro TTS..."
-	uv venv .venv-kokoro --python 3.12 --seed --clear
-	uv pip install --python .venv-kokoro/bin/python "kokoro>=0.9.4,<1.0" soundfile
-
-setup-config:
-	@if [ -f marginalia.toml ]; then \
-		echo "Config file marginalia.toml already exists, skipping."; \
-	else \
-		ROOT_DIR=$$(pwd); \
-		cat > marginalia.toml <<-TOML_EOF
-	environment = "local"
-	log_level = "INFO"
-	database_path = ".marginalia/marginalia.sqlite3"
-	audio_cache_dir = ".marginalia/audio-cache"
-	command_language = "it"
-
-	[providers]
-	command_stt = "vosk"
-	dictation_stt = "whisper-cpp"
-	tts = "kokoro"
-	playback = "subprocess"
-	llm = "fake"
-	allow_fallback = true
-
-	[vosk]
-	model_path = "$$ROOT_DIR/models/stt/vosk/$(VOSK_MODEL_NAME)"
-	sample_rate = 16000
-	timeout_seconds = 4.0
-
-	[whisper_cpp]
-	executable = "$$ROOT_DIR/.whisper-cpp/main"
-	model_path = "$$ROOT_DIR/.whisper-cpp/models/ggml-base.bin"
-	language = "it"
-	max_record_seconds = 120
-
-	[playback]
-	command = "afplay"
-	TOML_EOF
-		echo "Config generated at marginalia.toml"; \
-	fi
-
-format:
-	$(VENV_DIR)/bin/ruff format .
-	$(VENV_DIR)/bin/ruff check . --fix
-
-lint:
-	$(VENV_DIR)/bin/ruff check .
-	$(VENV_DIR)/bin/mypy apps/backend/src apps/cli/src packages/core/src packages/adapters/src packages/infra/src tests
-
-test:
-	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_DIR)/bin/pytest
-
-smoke:
-	./scripts/smoke.sh
-
-doctor:
-	PYTHONPATH=$(PYTHONPATH_LOCAL) MARGINALIA_CONFIG=marginalia.toml $(VENV_PYTHON) -m marginalia_cli doctor
-
-run-cli-help:
-	PYTHONPATH=$(PYTHONPATH_LOCAL) $(VENV_PYTHON) -m marginalia_cli --help
