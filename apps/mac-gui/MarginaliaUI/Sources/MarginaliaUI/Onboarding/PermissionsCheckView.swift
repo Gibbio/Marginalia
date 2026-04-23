@@ -400,8 +400,15 @@ public struct PermissionsCheckView: View {
     private func requestMic() {
         #if canImport(AVFoundation)
         micProbing = true
+        // Both `AVCaptureDevice.requestAccess` and `SFSpeechRecognizer.
+        // requestAuthorization` invoke their completion on an arbitrary
+        // non-main queue. Under `SWIFT_STRICT_CONCURRENCY: complete`
+        // (set in project.yml), touching @State from a non-MainActor
+        // context aborts the process via `dispatch_assert_queue_fail`.
+        // `Task { @MainActor in }` is the strict-concurrency-safe
+        // equivalent of `DispatchQueue.main.async`.
         AVCaptureDevice.requestAccess(for: .audio) { granted in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 micProbing = false
                 micStatus = granted ? .granted : .denied
             }
@@ -413,7 +420,7 @@ public struct PermissionsCheckView: View {
         #if canImport(Speech)
         speechProbing = true
         SFSpeechRecognizer.requestAuthorization { authStatus in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 speechProbing = false
                 switch authStatus {
                 case .authorized:  speechStatus = .granted
@@ -433,7 +440,11 @@ public struct PermissionsCheckView: View {
     private func probeDictation() {
         #if canImport(Speech)
         // Give SFSpeechRecognizer a beat to update after auth changes.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        // `Task.sleep` + `@MainActor` replaces the old
+        // `DispatchQueue.main.asyncAfter` so strict concurrency stays
+        // happy with the @State write below.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
             guard let recognizer = SFSpeechRecognizer(locale: Locale.current)
                 ?? SFSpeechRecognizer()
             else {
