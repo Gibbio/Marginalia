@@ -573,9 +573,15 @@ fn fallback_voices() -> Vec<AssetSpec> {
 }
 
 /// Hardcoded engine specs — adding one is a source change because each
-/// maps to a distinct backend crate. Order matters: `mlx-core` must come
-/// before `kokoro-onnx` so `list_installable_assets` surfaces the
-/// preferred backend first on macOS.
+/// maps to a distinct backend crate.
+///
+/// `kokoro-onnx` used to live here as a cross-platform fallback, but
+/// `onnx-community/Kokoro-82M` went private (401 on public downloads)
+/// in 2026-Q1 and there's no mirror we can publish from. macOS ships
+/// MLX as the primary, so the catalog drops the ONNX row rather than
+/// showing a button that always errors. TUI users on Linux still have
+/// `make bootstrap-kokoro` to populate the HF cache manually from a
+/// source of their choosing.
 fn engine_specs() -> Vec<AssetSpec> {
     vec![
         AssetSpec {
@@ -598,17 +604,6 @@ fn engine_specs() -> Vec<AssetSpec> {
             size_bytes: 465_000_000,
             source: AssetSource::Whisper {
                 file: "ggml-small.bin".to_string(),
-            },
-        },
-        AssetSpec {
-            id: "kokoro-onnx".to_string(),
-            display_name: "Kokoro ONNX (fallback)".to_string(),
-            category: "tts_core".to_string(),
-            language: None,
-            gender: None,
-            size_bytes: 34_000_000,
-            source: AssetSource::KokoroOnnx {
-                file: "onnx/model_q8f16.onnx".to_string(),
             },
         },
     ]
@@ -745,24 +740,58 @@ impl InstallBuffer {
     }
 }
 
-/// Probe HF cache for the given asset. Uses offline-mode `ensure_*` — it
-/// resolves when the file is cached, errors when it isn't. This never
-/// hits the network.
+/// Probe the HuggingFace cache for the given asset — **filesystem only,
+/// no hf-hub round-trip**. The old implementation used `ensure_*` with
+/// `HF_HUB_OFFLINE=1`, which racily flipped a process-wide env var
+/// alongside `install_asset` (which flips it off to allow network). When
+/// a Settings refresh (57 probes in a row) overlapped with an install,
+/// some probes saw `HF_HUB_OFFLINE` unset and went online — one stuck
+/// network retry would block `list_installable_assets` for minutes.
+///
+/// HF cache layout used here (stable since hf-hub 0.5):
+///   $HF_HOME/hub/models--{owner}--{name}/refs/main   → the current rev
+///   $HF_HOME/hub/models--{owner}--{name}/snapshots/{rev}/{relative_path}
 fn is_asset_cached(source: &AssetSource) -> bool {
-    // `set_var` is unsafe in Rust 2024+; wrap for forward compat. The app
-    // is single-process so the env mutation is race-free for this guard —
-    // no other thread flips `HF_HUB_OFFLINE` at runtime.
-    unsafe { std::env::set_var("HF_HUB_OFFLINE", "1") };
-    let mgr = match marginalia_models::ModelManager::new() {
-        Ok(m) => m,
-        Err(_) => return false,
+    let (owner, name, rel): (&str, &str, String) = match source {
+        AssetSource::MlxCore { file } => ("prince-canuma", "Kokoro-82M", file.clone()),
+        AssetSource::MlxVoice { voice_id } => (
+            "prince-canuma",
+            "Kokoro-82M",
+            format!("voices/{voice_id}.safetensors"),
+        ),
+        AssetSource::Whisper { file } => ("ggerganov", "whisper.cpp", file.clone()),
+        AssetSource::KokoroOnnx { file } => ("onnx-community", "Kokoro-82M", file.clone()),
     };
-    match source {
-        AssetSource::MlxCore { file } => mgr.ensure_mlx_core(file).is_ok(),
-        AssetSource::MlxVoice { voice_id } => mgr.ensure_mlx_voice(voice_id).is_ok(),
-        AssetSource::Whisper { file } => mgr.ensure_whisper(file).is_ok(),
-        AssetSource::KokoroOnnx { file } => mgr.ensure_kokoro_onnx(file).is_ok(),
+    let repo_dir = hf_cache_root().join(format!("models--{owner}--{name}"));
+    let Ok(rev) = std::fs::read_to_string(repo_dir.join("refs/main")) else {
+        return false;
+    };
+    let rev = rev.trim();
+    if rev.is_empty() {
+        return false;
     }
+    let target = repo_dir.join("snapshots").join(rev).join(&rel);
+    // `symlink_metadata` accepts dangling symlinks (returns the link's
+    // own metadata) — that would give false positives if the blob was
+    // removed out-of-band. `metadata` follows the symlink and returns
+    // an error for dangling, which is what we want.
+    std::fs::metadata(&target).is_ok()
+}
+
+/// Resolve the HuggingFace Hub cache root the same way hf-hub does:
+/// `HF_HOME/hub` wins, then `HUGGINGFACE_HUB_CACHE`, then
+/// `$HOME/.cache/huggingface/hub` (macOS/Linux). Matches hf-hub 0.5.
+fn hf_cache_root() -> PathBuf {
+    if let Ok(p) = std::env::var("HF_HOME") {
+        return PathBuf::from(p).join("hub");
+    }
+    if let Ok(p) = std::env::var("HUGGINGFACE_HUB_CACHE") {
+        return PathBuf::from(p);
+    }
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    home.join(".cache/huggingface/hub")
 }
 
 /// Copy a downloaded asset from its HF-cache path into the user's
