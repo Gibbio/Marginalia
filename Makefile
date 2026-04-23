@@ -478,12 +478,18 @@ reset-gui:
 	-@killall -v Marginalia.bin 2>/dev/null || true
 	@rm -rf "$$HOME/Library/Application Support/Marginalia"
 	@echo "  wiped ~/Library/Application Support/Marginalia"
-	@# UserDefaults (onboardingComplete, theme, uiLocale, custom hue,
-	@# window frames) live in ~/Library/Preferences/<bundle-id>.plist.
-	@# `defaults delete <domain>` nukes the whole domain; killing
-	@# cfprefsd forces macOS to discard its in-memory cache of the
-	@# plist, otherwise the app relaunch would see stale values.
-	-@defaults delete $(GUI_BUNDLE_ID) 2>/dev/null && echo "  wiped UserDefaults for $(GUI_BUNDLE_ID)" || echo "  no UserDefaults to wipe"
+	@# UserDefaults live in ~/Library/Preferences/<bundle-id>.plist.
+	@# Why not `defaults delete <bundle-id>`? On macOS with a sandbox
+	@# container metadata present (even for ad-hoc signed apps), that
+	@# form retargets to the empty container plist at
+	@# ~/Library/Containers/<bundle-id>/Data/Library/Preferences/ and
+	@# reports "domain not found" — leaving the real plist untouched.
+	@# Using the full path bypasses the container indirection. Killing
+	@# cfprefsd drops its in-memory cache so the app sees empty defaults
+	@# on relaunch instead of stale values.
+	-@rm -f "$$HOME/Library/Preferences/$(GUI_BUNDLE_ID).plist" && \
+	    echo "  wiped ~/Library/Preferences/$(GUI_BUNDLE_ID).plist" || \
+	    echo "  no UserDefaults plist to wipe"
 	-@killall -v cfprefsd 2>/dev/null >/dev/null || true
 	@tccutil reset Microphone          $(GUI_BUNDLE_ID) 2>/dev/null || true
 	@tccutil reset SpeechRecognition   $(GUI_BUNDLE_ID) 2>/dev/null || true
