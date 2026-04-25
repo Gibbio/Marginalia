@@ -146,14 +146,26 @@ struct MarginaliaLiveApp: App {
                 onSelect: { voiceId in
                     // Persist the pick: build a new ProviderSpec with the
                     // selected voice and apply. Keeps the TTS backend /
-                    // language / STT engine untouched.
+                    // language / STT engine untouched. Surface failures —
+                    // a silently-swallowed apply is why users reported
+                    // "I picked im_nicola but a female voice plays": the
+                    // voice file wasn't where MlxSpeechSynthesizer looks,
+                    // apply returned an error, and the old default
+                    // stayed in place with no indication why.
                     let spec = ProviderSpec(
                         ttsBackend: host.currentSpec.ttsBackend,
                         voice: voiceId,
                         sttEngine: host.currentSpec.sttEngine,
                         language: host.currentSpec.language
                     )
-                    Task { _ = try? await host.apply(spec: spec) }
+                    Task {
+                        do {
+                            _ = try await host.apply(spec: spec)
+                            host.pushMessage("Voce impostata: \(voiceId)")
+                        } catch {
+                            host.pushMessage("Errore voce: \(error)")
+                        }
+                    }
                 },
                 onProceed: { onboardingStep = .uiLanguage },
                 onBack: { onboardingStep = .installModels }

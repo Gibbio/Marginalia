@@ -177,11 +177,17 @@ public struct MarginNote: Identifiable, Hashable, Sendable {
     public let duration: String    // "0:21"
     public let status: String      // "" | "applicato" | "rielaborato"
     public let live: Bool
+    /// Absolute path of the persisted WAV recorded during dictation.
+    /// `nil` for typed notes and bookmarks — the playback path falls
+    /// back to TTS synthesis of the transcript in that case.
+    public let audioReference: String?
     public init(id: String, chunkId: String, when: String, quote: String,
-                body: String, duration: String, status: String, live: Bool = false) {
+                body: String, duration: String, status: String, live: Bool = false,
+                audioReference: String? = nil) {
         self.id = id; self.chunkId = chunkId; self.when = when
         self.quote = quote; self.body = body; self.duration = duration
         self.status = status; self.live = live
+        self.audioReference = audioReference
     }
 }
 
@@ -190,13 +196,18 @@ public struct LibraryEntry: Identifiable, Hashable, Sendable {
     public let title: String
     public let subtitle: String    // "Thomas Mann" | "bozza"
     public let progressPct: Int
+    public let chapterCount: Int
+    public let chunkCount: Int
     public let notes: Int
     public let active: Bool
 
     public init(id: String, title: String, subtitle: String,
-                progressPct: Int, notes: Int, active: Bool) {
+                progressPct: Int, chapterCount: Int = 0, chunkCount: Int = 0,
+                notes: Int, active: Bool) {
         self.id = id; self.title = title; self.subtitle = subtitle
-        self.progressPct = progressPct; self.notes = notes; self.active = active
+        self.progressPct = progressPct
+        self.chapterCount = chapterCount; self.chunkCount = chunkCount
+        self.notes = notes; self.active = active
     }
 }
 
@@ -394,6 +405,23 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// `voiceNoteTranscribed`.
     func startDictation()
 
+    /// Create a note with the supplied typed text, auto-attached to the
+    /// current reading position on the runtime side. Throws on failure
+    /// (no active session, storage error).
+    func createNote(text: String) async throws
+
+    /// Dismiss the pending live-note state. Used by the compose-note
+    /// sheet on cancel (so the in-flight dictation card doesn't linger
+    /// after we've deleted its backing persisted note).
+    func clearLiveNote()
+
+    /// Mark the next-to-arrive `voiceNoteTranscribed` as cancelled —
+    /// the runtime creates the note synchronously after dictation
+    /// stops, so a Cancel pressed BEFORE the silence-final still ends
+    /// up persisting a note. Setting this flag tells the host to
+    /// delete that note as soon as it's created. Self-clearing.
+    func cancelPendingDictation()
+
     /// Remove a document from the library. Cascades to chunks, notes,
     /// sessions in storage. If the doc is the active one, the host stops
     /// the session first so the reader doesn't render a ghost chunk.
@@ -429,6 +457,12 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// Transient log / status messages (voice command echoes, errors,
     /// informational toasts). Bounded to ~64 entries by convention.
     var messages: [String] { get }
+
+    /// Append a line to `messages`. Callers are any view that wants
+    /// to surface an action or diagnostic in the log pane without
+    /// going through a toast. Both MockHost and FFIHost implement it
+    /// as `messages.append(_)` with trimming to the ~64 entry cap.
+    func pushMessage(_ line: String)
 
     /// Last-in-first-out transient toast. Non-nil for a few seconds after
     /// an error/alert. ToastOverlay clears this to nil after its fade-out.
@@ -570,17 +604,17 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     // document so the preview shows something reasonable.
     @Published public var library: [LibraryEntry] = [
         LibraryEntry(id: "lib-1", title: "La montagna incantata", subtitle: "Thomas Mann",
-                     progressPct: 34, notes: 12, active: true),
+                     progressPct: 34, chapterCount: 8,  chunkCount: 214, notes: 12, active: true),
         LibraryEntry(id: "lib-2", title: "Lettera a Giulia — v4", subtitle: "bozza",
-                     progressPct: 88, notes: 1, active: false),
+                     progressPct: 88, chapterCount: 1,  chunkCount: 7,   notes: 1,  active: false),
         LibraryEntry(id: "lib-3", title: "Appunti sul Simposio", subtitle: "Platone",
-                     progressPct: 12, notes: 4, active: false),
+                     progressPct: 12, chapterCount: 5,  chunkCount: 68,  notes: 4,  active: false),
         LibraryEntry(id: "lib-4", title: "Note al convegno", subtitle: "bozza",
-                     progressPct: 56, notes: 7, active: false),
+                     progressPct: 56, chapterCount: 3,  chunkCount: 22,  notes: 7,  active: false),
         LibraryEntry(id: "lib-5", title: "Il giovane Holden", subtitle: "J.D. Salinger",
-                     progressPct: 0, notes: 0, active: false),
+                     progressPct: 0,  chapterCount: 26, chunkCount: 312, notes: 0,  active: false),
         LibraryEntry(id: "lib-6", title: "Paesaggi della mente", subtitle: "saggio · v2",
-                     progressPct: 22, notes: 3, active: false),
+                     progressPct: 22, chapterCount: 4,  chunkCount: 48,  notes: 3,  active: false),
     ]
 
     @Published public var currentSession: SessionState? = SessionState(
@@ -808,6 +842,25 @@ public final class MockHost: MarginaliaHost, ObservableObject {
             voice: s.voice
         )
         currentSession = s
+    }
+
+    public func createNote(text: String) async throws {
+        let anchor = currentSession?.anchor ?? ""
+        let newNote = MarginNote(
+            id: "m-\(UUID().uuidString.prefix(8))",
+            chunkId: anchor, when: "ora", quote: "",
+            body: text, duration: "", status: "", live: false
+        )
+        notes.insert(newNote, at: 0)
+        pushMessage("Nota aggiunta")
+    }
+
+    public func clearLiveNote() { liveNote = nil }
+
+    public func cancelPendingDictation() {
+        // Mock has no real dictation thread to abort; just drop the
+        // live card so the preview UX matches the real flow.
+        liveNote = nil
     }
 
     /// Mock dictation: pop a live note placeholder, then resolve it after

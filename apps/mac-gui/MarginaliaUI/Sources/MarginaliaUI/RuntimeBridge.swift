@@ -241,35 +241,58 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
 
     public func refreshLibrary() async {
         let docs = runtime.listDocuments()
-        await MainActor.run {
-            self.library = docs.map { d in
-                LibraryEntry(
-                    id: d.id, title: d.title,
-                    subtitle: "",  // FFI DocumentListItem doesn't carry author/subtitle today
-                    progressPct: 0, notes: 0, active: false
-                )
-            }
+        // Counts per doc: chapters + chunks come free in the FFI list
+        // item; notes require a per-doc query (listNotes). That's N small
+        // sqlite reads on refresh — fine for libraries up to a few
+        // hundred entries. If it ever becomes a hotspot we extend
+        // DocumentListItem with a note_count field on the Rust side.
+        let activeId = self.currentSession?.documentId
+        let entries = docs.map { d -> LibraryEntry in
+            let noteCount = runtime.listNotes(documentId: d.id).count
+            return LibraryEntry(
+                id: d.id, title: d.title,
+                subtitle: "",  // FFI DocumentListItem doesn't carry author/subtitle today
+                progressPct: 0,
+                chapterCount: Int(d.chapterCount),
+                chunkCount: Int(d.chunkCount),
+                notes: noteCount,
+                active: d.id == activeId
+            )
         }
+        await MainActor.run { self.library = entries }
     }
 
     public func openDocument(id: String) async throws {
         try runtime.startSession(documentId: id)
+        // Start paused: the runtime begins synthesis/playback on
+        // `startSession`, but the user has explicitly asked that opening
+        // a document NOT auto-play. An immediate `pauseSession()` halts
+        // audio before the first chunk reaches the speakers while
+        // keeping the session loaded and positioned at chunk 0, so the
+        // play button works normally from there. Ignore failures — the
+        // worst case is that playback starts and the user hits pause.
+        try? runtime.pauseSession()
         await refreshSessionSnapshot()
         await refreshDocumentView(id: id)
         await refreshNotes(documentId: id)
+        // Warm the cache for chunk 1 so when the user finally hits play,
+        // chunk 0 starts instantly (already cached by start_session) and
+        // chunk 1 is ready by the time auto-advance fires.
+        runtime.prefetchNext()
     }
 
     public func importFile(url: URL) async throws -> String {
+        // Log message is emitted from the `.ingestFinished` event handler
+        // so it can include chunk count + elapsed time (data computed
+        // around the ingest start/finish events, not at this call site).
         let result = try runtime.ingestFile(path: url.path)
         await refreshLibrary()
-        pushMessage("Importato: \(result.title)")
         return result.documentId
     }
 
     public func importUrl(_ url: String) async throws -> String {
         let result = try runtime.ingestUrl(url: url)
         await refreshLibrary()
-        pushMessage("URL: \(result.title)")
         return result.documentId
     }
 
@@ -312,12 +335,33 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
 
     public func tick() -> [MarginaliaEvent] {
         // Fire-and-forget auto-advance; its side effects (chunk index bump,
-        // synthesis start) arrive back through the event stream.
-        _ = runtime.autoAdvance()
+        // synthesis start) arrive back through the event stream. When the
+        // runtime actually advanced (return value `true`), spawn a
+        // prefetch for the next-next chunk so sequential reading stays
+        // fluid without a 1–2 s synthesis gap between chunks.
+        if runtime.autoAdvance() {
+            runtime.prefetchNext()
+        }
         // Also refresh the waveform so the Sidebar footer shows live mic/TTS.
         let snap = runtime.pollWaveform()
         micLevels = snap.micLevels
         ttsLevels = snap.ttsLevels
+
+        // Poll the live partial transcript (Apple STT). When the user
+        // is dictating a note, the helper streams "DICT_PARTIAL <text>"
+        // lines as the recognizer updates its hypothesis; we copy the
+        // latest into `liveNote.body` so the UI renders the running
+        // transcript in real time. Empty string means nothing in flight.
+        let partial = runtime.dictationPartial()
+        if !partial.isEmpty, let live = liveNote, live.live, live.body != partial {
+            liveNote = MarginNote(
+                id: live.id, chunkId: live.chunkId, when: live.when,
+                quote: live.quote, body: partial,
+                duration: live.duration, status: live.status, live: true,
+                audioReference: live.audioReference
+            )
+        }
+
         return pollEvents()
     }
 
@@ -326,6 +370,16 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     /// enough that the user likely lost context (threshold: 5 min).
     private var lastPausedAt: Date? = nil
     private static let longPauseThreshold: TimeInterval = 300  // 5 min
+
+    /// Wall-clock when the current ingest started. Captured on
+    /// `.ingestStarted`, consumed on `.ingestFinished` to emit a log
+    /// line with the elapsed time. Nil outside an active ingest.
+    private var ingestStartedAt: Date? = nil
+
+    /// Wall-clock when the current TTS synthesis started, captured on
+    /// `.synthesisStarted` and consumed on `.synthesisReady` to log
+    /// "sintesi Xs" with real timing (cache hits report separately).
+    private var synthesisStartedAt: Date? = nil
 
     public func pause() async throws {
         try runtime.pauseSession()
@@ -363,32 +417,38 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     public func next() async throws {
         try runtime.nextChunk()
         await refreshSessionSnapshot()
+        runtime.prefetchNext()
         await MainActor.run { self.showActionFeedback("next") }
     }
     public func back() async throws {
         try runtime.previousChunk()
         await refreshSessionSnapshot()
+        runtime.prefetchNext()
         await MainActor.run { self.showActionFeedback("back") }
     }
     public func repeatCurrent() async throws {
         try runtime.repeatChunk()
         await refreshSessionSnapshot()
+        runtime.prefetchNext()
         await MainActor.run { self.showActionFeedback("repeat") }
     }
     public func nextChapter() async throws {
         try runtime.nextChapter()
         await refreshSessionSnapshot()
+        runtime.prefetchNext()
         await MainActor.run { self.showActionFeedback("next_chapter") }
     }
     public func previousChapter() async throws {
         try runtime.previousChapter()
         await refreshSessionSnapshot()
+        runtime.prefetchNext()
         await MainActor.run { self.showActionFeedback("prev_chapter") }
     }
     public func seekToChunk(section: Int, chunk: Int) async throws {
         try runtime.seekToChunk(sectionIndex: UInt32(max(0, section)),
                                  chunkIndex: UInt32(max(0, chunk)))
         await refreshSessionSnapshot()
+        runtime.prefetchNext()
     }
 
     /// Kick off a dictation. The runtime thread blocks inside SFSpeech
@@ -396,12 +456,56 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     /// `max_record_seconds`). Progress surfaces through the event stream:
     /// `dictationStarted` flips the live-note card to "recording",
     /// `voiceNoteTranscribed` fills it with the final transcript.
+    /// Set when we paused playback to start a dictation. The
+    /// `voiceNoteTranscribed` (or cancel) handler reads this and
+    /// resumes if true. Self-clearing on every dictation termination.
+    private var resumeAfterDictation: Bool = false
+
     public func startDictation() {
+        // If TTS is currently reading, pause it for the duration of
+        // the dictation: the model's voice and the user's voice
+        // shouldn't overlap, and the AEC has a clearer silence to
+        // operate against. Remember the play state so we can resume
+        // automatically when dictation finishes (success path).
+        if currentSession?.playbackState == .playing {
+            resumeAfterDictation = true
+            Task { [weak self] in try? await self?.pause() }
+        }
         do {
             try runtime.startDictation()
         } catch {
+            // Pause already happened above; resume right away since
+            // dictation never actually started.
+            if resumeAfterDictation {
+                resumeAfterDictation = false
+                Task { [weak self] in try? await self?.resume() }
+            }
             pushMessage("Errore dettatura: \(error.localizedDescription)")
         }
+    }
+
+    public func createNote(text: String) async throws {
+        guard let s = currentSession else {
+            pushMessage("Nessuna sessione attiva.")
+            throw NSError(domain: "Marginalia", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Nessuna sessione attiva"])
+        }
+        _ = try runtime.createNote(text: text)
+        await refreshNotes(documentId: s.documentId)
+        pushMessage("Nota aggiunta · ch.\(s.sectionIndex + 1) chunk \(s.chunkIndex + 1)")
+    }
+
+    public func clearLiveNote() { liveNote = nil }
+
+    /// Set when the user cancels the compose-note sheet while dictation
+    /// is still in flight. The next `voiceNoteTranscribed` event will
+    /// see this flag, delete the just-created note instead of refreshing
+    /// notes, then clear the flag. Self-clearing on next emit.
+    private var pendingDictationCancelled: Bool = false
+
+    public func cancelPendingDictation() {
+        pendingDictationCancelled = true
+        liveNote = nil
     }
 
     public func deleteDocument(id: String) async {
@@ -436,6 +540,9 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         if let docId = currentSession?.documentId {
             await refreshNotes(documentId: docId)
         }
+        await MainActor.run {
+            self.pushMessage("Nota eliminata (\(id.prefix(8)))")
+        }
     }
 
     public func updateNote(id: String, text: String) async throws {
@@ -444,6 +551,9 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         }.value
         if let docId = currentSession?.documentId {
             await refreshNotes(documentId: docId)
+        }
+        await MainActor.run {
+            self.pushMessage("Nota modificata (\(id.prefix(8)))")
         }
     }
 
@@ -470,16 +580,49 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         switch event {
         case .synthesisStarted(_, let sec, let ck):
             synthesizingAnchor = "c\(sec)-\(ck)"
-        case .synthesisReady:
+            synthesisStartedAt = Date()
+            pushMessage("Sintesi ch.\(sec + 1).\(ck + 1)…")
+        case .synthesisReady(_, let sec, let ck, let cacheHit):
             synthesizingAnchor = nil
+            let elapsed = synthesisStartedAt.map { -$0.timeIntervalSinceNow } ?? 0
+            synthesisStartedAt = nil
+            if cacheHit {
+                pushMessage("Cache hit ch.\(sec + 1).\(ck + 1)")
+            } else {
+                pushMessage(String(format: "Sintesi ch.%d.%d pronta in %.2fs",
+                                   sec + 1, ck + 1, elapsed))
+            }
             Task { await refreshSessionSnapshot() }
-        case .chunkAdvanced, .playbackFinished,
-             .sessionRestored, .sessionStopped:
+        case .chunkAdvanced(_, let sec, let ck):
+            pushMessage("▶ ch.\(sec + 1).\(ck + 1)")
+            Task { await refreshSessionSnapshot() }
+        case .playbackFinished(_, let sec, let ck):
+            pushMessage("Fine ch.\(sec + 1).\(ck + 1)")
+            Task { await refreshSessionSnapshot() }
+        case .sessionRestored, .sessionStopped:
             Task { await refreshSessionSnapshot() }
         case .commandRecognized(let raw, let action):
-            if sttDebug { pushMessage("stt: \"\(raw)\"") }
-            guard let action else { break }
-            dispatchVoiceAction(action)
+            // The runtime's `command` field carries the matched trigger
+            // word (e.g. "pausa"), not the action name (e.g. "pause") —
+            // the TUI's app layer does the trigger→action mapping via
+            // `voice_commands.resolve_action`. We do the same here using
+            // the locally-cached `voiceCommands` map. Without this the
+            // dispatcher case "pausa" misses every action and nothing
+            // fires when the user speaks a command.
+            //
+            // Log every interception (matched OR not) so the user can
+            // see in the LogPane what the STT heard, what trigger it
+            // matched, and which action got dispatched.
+            let resolved = action.flatMap { resolveVoiceAction($0) }
+                ?? resolveVoiceAction(raw)
+            if let resolved {
+                pushMessage("Comando vocale: \"\(raw)\" → \(resolved)")
+                dispatchVoiceAction(resolved)
+            } else if !raw.isEmpty {
+                pushMessage("Comando vocale: \"\(raw)\" (nessun trigger)")
+            } else if sttDebug {
+                pushMessage("Comando vocale: cattura vuota")
+            }
         case .ingestStarted(let source):
             // `source` is either a web URL (scheme + host) or a filesystem
             // path (starts with `/`). Pick the compact form for the
@@ -493,8 +636,11 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 return (source as NSString).lastPathComponent
             }()
             ingestingSource = label
-        case .ingestFinished(let source, _, let err):
+            ingestStartedAt = Date()
+        case .ingestFinished(let source, let docId, let err):
             ingestingSource = nil
+            let elapsed = ingestStartedAt.map { -$0.timeIntervalSinceNow } ?? 0
+            ingestStartedAt = nil
             if let err {
                 pushMessage("Errore import: \(err)")
                 // Actionable: "Riprova" re-runs the same import path.
@@ -517,6 +663,18 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     action: retry
                 )
             } else {
+                // Probe the document view for a chunk count so the log
+                // line tells the user how much work the ingest produced.
+                // `documentView` reads from sqlite — cheap, synchronous.
+                if let docId, let view = runtime.documentView(documentId: docId) {
+                    let chunks = view.sections.reduce(0) { $0 + $1.chunks.count }
+                    pushMessage(String(
+                        format: "Importato: %@ — %d chunk in %.2fs",
+                        view.title, chunks, elapsed
+                    ))
+                } else {
+                    pushMessage(String(format: "Import completato in %.2fs", elapsed))
+                }
                 Task { await refreshLibrary() }
             }
         case .dictationStarted:
@@ -528,6 +686,17 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 duration: "0:00", status: "", live: true
             )
         case .voiceNoteTranscribed(let text, let dur, let noteId, let err):
+            // Auto-resume the TTS reading if we paused it on dictation
+            // start (whatever the outcome — success, error, or cancel).
+            // The flag is consumed here so a stray subsequent event
+            // can't trigger a phantom resume.
+            let shouldResumePlayback = resumeAfterDictation
+            resumeAfterDictation = false
+            defer {
+                if shouldResumePlayback {
+                    Task { [weak self] in try? await self?.resume() }
+                }
+            }
             if let err {
                 liveNote = nil
                 pushMessage("Errore dettatura: \(err)")
@@ -553,6 +722,20 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     )
                 }
             } else {
+                // The user pressed Cancel on the compose sheet while
+                // the dictation thread was still running. The runtime
+                // has just persisted a note from whatever audio was
+                // captured before the cancel; delete it back out and
+                // clear the cancel flag.
+                if pendingDictationCancelled {
+                    pendingDictationCancelled = false
+                    liveNote = nil
+                    if let id = noteId {
+                        Task { await self.deleteNote(id: id) }
+                    }
+                    pushMessage("Dettatura annullata, nota scartata")
+                    break
+                }
                 // Promote the live card to a saved note and refresh the
                 // canonical notes list so it shows up in the margin panel.
                 liveNote = MarginNote(
@@ -564,12 +747,21 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     status: "salvata", live: true
                 )
                 if let docId = currentSession?.documentId {
-                    Task { await self.refreshNotes(documentId: docId) }
-                }
-                // Clear the live card after a short display window.
-                Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    await MainActor.run { self?.liveNote = nil }
+                    // Refresh notes, then clear the live card. Doing the
+                    // clear inside the same Task — AFTER refreshNotes
+                    // populates host.notes with the persisted note —
+                    // means the margin panel never shows the same note
+                    // twice. The de-dup guard in `notes` covers any
+                    // remaining edge case.
+                    Task { [weak self] in
+                        await self?.refreshNotes(documentId: docId)
+                        await MainActor.run { self?.liveNote = nil }
+                    }
+                } else {
+                    Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        await MainActor.run { self?.liveNote = nil }
+                    }
                 }
             }
         case .voiceMismatch(_, let detected, let current):
@@ -684,6 +876,30 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     /// keyboard shortcuts and voice commands get identical UI. Here we
     /// only play the "heard you" chime — the audible half of the
     /// confirmation.
+    /// Map a raw STT phrase or single trigger word back to an action
+    /// name. Mirror of `VoiceCommandsSection::resolve_action` on the
+    /// Rust side: longer multi-word triggers ("prossimo capitolo") are
+    /// checked before shorter ones ("prossimo") so a command like
+    /// "next_chapter" doesn't get swallowed by "next". Returns nil if
+    /// no trigger is contained in the raw text.
+    private func resolveVoiceAction(_ raw: String) -> String? {
+        let lower = raw.lowercased()
+        let priority = [
+            "next_chapter", "prev_chapter",
+            "bookmark", "note", "where",
+            "pause", "resume", "next", "back", "stop", "repeat",
+        ]
+        for action in priority {
+            guard let cmd = voiceCommands.first(where: { $0.action == action }) else {
+                continue
+            }
+            if cmd.triggers.contains(where: { lower.contains($0.lowercased()) }) {
+                return action
+            }
+        }
+        return nil
+    }
+
     private func dispatchVoiceAction(_ action: String) {
         pushMessage("→ \(action)")
         playCommandChime()
@@ -701,9 +917,16 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             case "bookmark":     try? await self.bookmark()
             case "where":        _ = await MainActor.run { self.announcePosition() }
             case "note":
-                // Dictation via voice: fire the FFI. `DictationStarted`
-                // event seeds the live-note card, `VoiceNoteTranscribed`
-                // fills it with the transcript.
+                // Dictation via voice: pause TTS playback first so the
+                // user's voice doesn't have to compete with the model's
+                // (and the AEC has a stable silence to operate against),
+                // then fire the FFI. `DictationStarted` event seeds the
+                // live-note card, `VoiceNoteTranscribed` fills it with
+                // the transcript. Mirrors the "+" button flow in
+                // `ReadingView.openComposeNote`.
+                if self.currentSession?.playbackState == .playing {
+                    try? await self.pause()
+                }
                 await MainActor.run { self.startDictation() }
             default:
                 self.pushMessage("Azione sconosciuta: \(action)")
@@ -761,7 +984,8 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     id: n.noteId, chunkId: n.anchor,
                     when: String(n.createdAtIso.prefix(10)),
                     quote: "", body: n.text,
-                    duration: "", status: "", live: false
+                    duration: "", status: "", live: false,
+                    audioReference: n.audioReference
                 )
             }
         }
@@ -952,18 +1176,18 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     /// unknown actions fall back to the raw identifier.
     private func voiceFeedbackLabel(for action: String) -> String {
         switch action {
-        case "pause":        return "↓ pausa"
-        case "resume":       return "↑ riprendi"
-        case "next":         return "→ prossimo"
-        case "back":         return "← indietro"
-        case "repeat":       return "↻ ripeti"
-        case "stop":         return "■ stop"
-        case "next_chapter": return "→→ prossimo capitolo"
-        case "prev_chapter": return "←← capitolo precedente"
-        case "bookmark":     return "★ segnalibro"
-        case "note":         return "🎙 nota"
-        case "where":        return "? dove sono"
-        default:             return "→ \(action)"
+        case "pause":        return "pausa"
+        case "resume":       return "riprendi"
+        case "next":         return "prossimo"
+        case "back":         return "indietro"
+        case "repeat":       return "ripeti"
+        case "stop":         return "stop"
+        case "next_chapter": return "capitolo +"
+        case "prev_chapter": return "capitolo −"
+        case "bookmark":     return "segnalibro"
+        case "note":         return "nota"
+        case "where":        return "posizione"
+        default:             return action
         }
     }
 

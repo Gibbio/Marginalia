@@ -37,6 +37,10 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                     library: host.library,
                     micLevels: host.micLevels,
                     ttsLevels: host.ttsLevels,
+                    voiceName: voiceDisplayName,
+                    languageCode: languageShortCode,
+                    playbackState: host.currentSession?.playbackState ?? .idle,
+                    onTogglePlay: togglePlay,
                     onAddDocument: handleImport,
                     onOpenDocument: handleOpenDocument,
                     onDeleteDocument: handleDeleteDocument
@@ -82,6 +86,14 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
             LogPane(messages: host.messages, accent: accent, expanded: $logExpanded)
         }
         .background(Tokens.bg)
+        // Hard floor wide enough to fit the library sidebar (264) +
+        // Settings inner content + margins without anything getting
+        // clipped. The window stays freely resizable above this — the
+        // user can stretch it as much as they like; macOS just won't
+        // let them drag past the floor where Settings would start to
+        // truncate. Earlier we tried hiding the sidebar dynamically
+        // when narrow, but the appear/disappear was visually jarring
+        // — better a hard min and free resize.
         .frame(minWidth: 1100, minHeight: 700)
         .overlay {
             ToastOverlay(
@@ -154,6 +166,42 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
         }
         .sheet(isPresented: $showingShortcuts) {
             ShortcutsSheet(accent: accent, onDismiss: { showingShortcuts = false })
+        }
+    }
+
+    /// Human-readable name of the currently-selected TTS voice. Resolves
+    /// `currentSpec.voice` (id like "if_sara") against `host.voices`; falls
+    /// back to the id itself if the voice list hasn't loaded yet.
+    private var voiceDisplayName: String {
+        let id = host.currentSpec.voice
+        if let v = host.voices.first(where: { $0.id == id }) { return v.display }
+        return id
+    }
+
+    /// Primary subtag of the current BCP-47 language code, uppercased.
+    /// "it-IT" → "IT". Empty only if no language is set.
+    private var languageShortCode: String {
+        String(host.currentSpec.language.prefix(2)).uppercased()
+    }
+
+    /// Toggle playback on the active session. `playing → pause`,
+    /// `paused → resume`; for any other state (finished, unknown, or
+    /// a sink rodio left as "stopped" after a short paused clip
+    /// drained) we fall back to `repeatCurrent()` which re-synthesizes
+    /// and restarts the active chunk. Without that fallback the play
+    /// button would silently no-op when the sink had nothing queued
+    /// even though a session was clearly active ("play doesn't play").
+    private func togglePlay() {
+        guard let session = host.currentSession else { return }
+        Task {
+            switch session.playbackState {
+            case .playing:
+                try? await host.pause()
+            case .paused:
+                try? await host.resume()
+            case .idle, .finished, .unknown:
+                try? await host.repeatCurrent()
+            }
         }
     }
 

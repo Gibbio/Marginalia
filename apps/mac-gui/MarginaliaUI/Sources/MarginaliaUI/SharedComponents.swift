@@ -43,9 +43,12 @@ public struct Waveform: View {
     }
 
     private func barHeight(_ i: Int) -> CGFloat {
-        if let levels = liveLevels, !levels.isEmpty {
-            // Pick the amplitude at the right stride; fall back to a low value
-            // when the index is out of range. Clamp to 0…1.
+        // Explicit empty array means "real source, currently silent" — render
+        // flat minimum-height bars. The deterministic sine fallback kicks in
+        // only when the caller passed no `liveLevels` at all (nil), i.e.
+        // decorative contexts with no real source wired up.
+        if let levels = liveLevels {
+            guard !levels.isEmpty else { return minHeight }
             let idx = (i * levels.count) / max(count, 1)
             let v = CGFloat(max(0, min(1, levels[min(idx, levels.count - 1)])))
             return minHeight + v * maxBump * 1.6

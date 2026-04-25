@@ -18,6 +18,44 @@
 "settings.top.apply"          = "Apply";
 "settings.top.applying"       = "Applying…";
 
+// Section titles not already covered by the nav keys
+"settings.sec.text-prep.title"  = "Text preparation";
+"settings.sec.theme.title"      = "Theme";
+
+// Section subs (short single-line caption under the title)
+"settings.sub.language"       = "controls which voices are available and the default recognition locale.";
+"settings.sub.voice"          = "the voice used to read your text aloud.";
+"settings.sub.stt"            = "listens to your commands and records dictated notes.";
+"settings.sub.commands"       = "words that, when spoken, trigger an action. edits save instantly.";
+"settings.sub.text-prep"      = "chunk size, library paths, and audio cache.";
+"settings.sub.installations"  = "models and voices on disk. this is the only section that reaches the network.";
+"settings.sub.theme"          = "the interface palette. changes are instant.";
+"settings.sub.diagnostics"    = "useful information for support — read-only.";
+"settings.sub.interface"      = "the language of the app's own text. requires a restart.";
+
+// Section info (longer explanation, shown on hover / in the info box)
+"settings.info.language"      = "The chosen language filters the TTS voices shown below and sets the default recognition locale. The interface language is changed at the bottom of this page.";
+"settings.info.voice"         = "Each voice is a small neural embedding (≈500 KB) downloaded locally. The picker shows only voices installed for the current language; uninstalled ones are greyed out.";
+"settings.info.stt"           = "Apple Speech is the system recognizer (low cost, high quality, requires macOS Dictation to be enabled). Whisper is a local ggml model (~465 MB), fully offline. Switching restarts the helper — a few hundred milliseconds.";
+"settings.info.commands"      = "Each action has one or more synonyms. Words can be in any language — they aren't translated, the raw audio is what matters. Words already used by another action will be rejected to avoid ambiguity.";
+"settings.info.text-prep"     = "A chunk is the atomic unit of synthesis and voice navigation. Smaller chunks = snappier command response and finer jumps, but more fragmentation. Changes require re-importing existing documents. The audio cache holds synthesized FLACs; clearing it loses no work, only regeneration time.";
+"settings.info.installations" = "Marginalia runs offline. Only in this section, and only when you explicitly act, may the app reach huggingface.co and github.com to download missing models. All assets are Apache-2.0 or MIT.";
+"settings.info.theme"         = "Changes the accent tint — highlights, player pill, audio bars, note hover. The warm-dark background stays — it's part of Marginalia's identity.";
+"settings.info.diagnostics"   = "Live provider status and filesystem paths. Includes the last ApplyReport (elapsed time, what was swapped). Handy when something isn't working — selectable for copy-paste.";
+"settings.info.interface"     = "Different from the reading/recognition language in the Language section: here you pick the language the app itself speaks to you — menus, buttons, Settings.";
+
+// Inline labels + hint copy used across sections
+"settings.lang.no-voices"         = "No voices installed for this language.";
+"settings.lang.install-cta"       = "Install voices…";
+"settings.voice.preview-kicker"   = "PREVIEW";
+"settings.stt.apple-requires"     = "Apple Speech requires macOS Dictation.";
+"settings.stt.open-sys-prefs"     = "Open System Settings →";
+"settings.audio.volume"           = "Volume";
+"settings.text-prep.chunk-size"   = "CHUNK SIZE";
+"settings.theme.accent-tint"      = "Accent tint";
+"settings.diagnostics.export-log" = "Export log…";
+"settings.diagnostics.restore-defaults" = "Restore defaults…";
+
 // Settings — Interface language
 "settings.interface.title"    = "Interface language";
 "settings.interface.sub"      = "the language of the app's own text. Restart Marginalia to apply the change.";

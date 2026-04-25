@@ -8,6 +8,16 @@ public struct Sidebar: View {
     public var library: [LibraryEntry]
     public var micLevels: [Float]
     public var ttsLevels: [Float]
+    /// Display name of the active TTS voice (e.g. "Sara"). Shown in the
+    /// footer so the user always knows which voice is speaking.
+    public var voiceName: String
+    /// Short language code (e.g. "IT"). Empty hides the subtitle line.
+    public var languageCode: String
+    /// Playback state of the currently-active document — drives the
+    /// inline play/pause button on the active library row. `.idle` hides
+    /// the button so inactive rows stay visually quiet.
+    public var playbackState: PlaybackState
+    public var onTogglePlay: () -> Void
     public var onAddDocument: () -> Void
     public var onOpenDocument: (String) -> Void
     /// Optional: triggered by the sidebar row's context menu "Rimuovi".
@@ -18,11 +28,20 @@ public struct Sidebar: View {
     /// title and any subtitle text. Bound to the sidebar's search field;
     /// also focusable via ⌘K (see `.onReceive` on MarginaliaWindow — TBD).
     @State private var libraryFilter: String = ""
+    /// Explicit focus management for the search TextField so it doesn't
+    /// auto-grab keyboard focus on window activation (which was
+    /// swallowing shortcuts like Space for play/pause). Only taps on the
+    /// field set it to true; Esc clears it.
+    @FocusState private var searchFocused: Bool
 
     public init(accent: Accent,
                 library: [LibraryEntry],
                 micLevels: [Float] = [],
                 ttsLevels: [Float] = [],
+                voiceName: String = "",
+                languageCode: String = "",
+                playbackState: PlaybackState = .idle,
+                onTogglePlay: @escaping () -> Void = {},
                 onAddDocument: @escaping () -> Void = {},
                 onOpenDocument: @escaping (String) -> Void = { _ in },
                 onDeleteDocument: @escaping (String) -> Void = { _ in }) {
@@ -30,6 +49,10 @@ public struct Sidebar: View {
         self.library = library
         self.micLevels = micLevels
         self.ttsLevels = ttsLevels
+        self.voiceName = voiceName
+        self.languageCode = languageCode
+        self.playbackState = playbackState
+        self.onTogglePlay = onTogglePlay
         self.onAddDocument = onAddDocument
         self.onOpenDocument = onOpenDocument
         self.onDeleteDocument = onDeleteDocument
@@ -50,17 +73,21 @@ public struct Sidebar: View {
 
     public var body: some View {
         VStack(spacing: 0) {
+            // Invisible focusable absorber: macOS's first-responder
+            // chain hands keyboard focus to the first focusable view in
+            // the window on activation. Without this, the search
+            // TextField below gets it, swallowing every key press
+            // (Space for play/pause, Option-N for new note, …) until
+            // the user clicks elsewhere. A 0×0 focusable Color absorbs
+            // that initial focus harmlessly.
+            Color.clear
+                .frame(width: 0, height: 0)
+                .focusable(true)
             header
             Divider().frame(height: 1).overlay(Tokens.line)
             searchBarRow
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    SideSection(title: "raccolte", accent: accent) {
-                        SideRow(label: "Tutto", count: 47, active: false, accent: accent)
-                        SideRow(label: "In ascolto", count: 3, active: true, accent: accent)
-                        SideRow(label: "Bozze", count: 4, active: false, accent: accent)
-                        SideRow(label: "Archivio", count: 28, active: false, accent: accent)
-                    }
                     SideSection(title: "libreria", accent: accent) {
                         ForEach(filteredLibrary) { entry in
                             Button(action: { onOpenDocument(entry.id) }) {
@@ -155,8 +182,20 @@ public struct Sidebar: View {
                 .textFieldStyle(.plain)
                 .font(.sans(12))
                 .foregroundStyle(Tokens.text)
+                .focused($searchFocused)
+                // Esc while typing → unfocus + clear so the play/pause
+                // spacebar shortcut and other key commands start firing
+                // again without clicking elsewhere.
+                .onKeyPress(.escape) {
+                    libraryFilter = ""
+                    searchFocused = false
+                    return .handled
+                }
             if !libraryFilter.isEmpty {
-                Button(action: { libraryFilter = "" }) {
+                Button(action: {
+                    libraryFilter = ""
+                    searchFocused = false
+                }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(Tokens.textFaint)
@@ -179,18 +218,16 @@ public struct Sidebar: View {
     private var footer: some View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle().strokeBorder(Tokens.textGhost, lineWidth: 1)
-                    Circle().fill(accent.main).frame(width: 5, height: 5).shadow(color: accent.main, radius: 5)
-                }
-                .frame(width: 26, height: 26)
+                footerPlayButton
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Voce: Elena")
+                    Text(voiceName.isEmpty ? "Voce: —" : "Voce: \(voiceName)")
                         .font(.serif(13, italic: true))
                         .foregroundStyle(Tokens.text)
-                    Text("IT · 1.0×")
-                        .font(.mono(9))
-                        .foregroundStyle(Tokens.textFaint)
+                    if !languageCode.isEmpty {
+                        Text(languageCode)
+                            .font(.mono(9))
+                            .foregroundStyle(Tokens.textFaint)
+                    }
                 }
                 Spacer()
             }
@@ -198,34 +235,82 @@ public struct Sidebar: View {
             // Live AEC meters — TTS render (top, accent) and mic capture
             // (bottom, green). Mirrors the TUI's sidebar bars; driven by
             // `host.ttsLevels` / `host.micLevels`.
-            VStack(spacing: 3) {
+            VStack(spacing: 4) {
                 meterRow(label: "TTS",
                          levels: ttsLevels,
-                         color: accent.main.opacity(0.85))
+                         color: accent.main)
                 meterRow(label: "MIC",
                          levels: micLevels,
-                         color: Color(red: 0.45, green: 0.75, blue: 0.55))
+                         color: Color(red: 0.55, green: 0.85, blue: 0.65))
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
+    }
+
+    /// Play/pause button anchored in the sidebar footer next to the
+    /// voice name. Lives here (and not inside the active `LibRow`)
+    /// because the active row can scroll off-screen and the user still
+    /// needs a visible control. The button stays tappable in every
+    /// non-idle state (paused, finished, unknown) so the user can
+    /// resume from any kind of interruption — previously `.unknown`
+    /// (which the FFI mapping produces for rodio's "stopped" sink
+    /// state after a short paused chunk) disabled the button and
+    /// made "play doesn't play" — that bug is gone.
+    private var footerPlayButton: some View {
+        let state = playbackState
+        let noSession = (state == .idle)
+        let dim = noSession
+        return Button(action: onTogglePlay) {
+            ZStack {
+                Circle()
+                    .fill(dim ? Color.white.opacity(0.05) : accent.main)
+                    .shadow(color: dim ? .clear : accent.glow, radius: 5)
+                Circle()
+                    .strokeBorder(dim ? Tokens.textGhost : accent.main, lineWidth: 1)
+                if state == .playing {
+                    HStack(spacing: 2) {
+                        Rectangle().fill(Tokens.bg).frame(width: 2, height: 9)
+                        Rectangle().fill(Tokens.bg).frame(width: 2, height: 9)
+                    }
+                } else {
+                    Path { p in
+                        p.move(to: CGPoint(x: 9, y: 7))
+                        p.addLine(to: CGPoint(x: 9, y: 19))
+                        p.addLine(to: CGPoint(x: 19, y: 13))
+                        p.closeSubpath()
+                    }
+                    .fill(dim ? Tokens.textDim : Tokens.bg)
+                    .frame(width: 26, height: 26)
+                }
+            }
+            .frame(width: 26, height: 26)
+        }
+        .buttonStyle(.plain)
+        .disabled(noSession)
+        .accessibilityLabel(state == .playing ? "Pausa" : "Riprendi lettura")
+        .help(state == .playing ? "Pausa" : "Riprendi")
     }
 
     @ViewBuilder
     private func meterRow(label: String, levels: [Float], color: Color) -> some View {
         HStack(spacing: 6) {
             Text(label)
-                .font(.mono(8))
+                .font(.mono(9))
                 .tracking(1)
-                .foregroundStyle(Tokens.textFaint)
-                .frame(width: 22, alignment: .leading)
+                .foregroundStyle(Tokens.textDim)
+                .frame(width: 24, alignment: .leading)
             Waveform(
-                count: 32,
+                // More bars + brighter rest colour for legibility against
+                // the dark sidebar. Idle state (`dim` at 0.6) renders as
+                // a visible strip instead of disappearing; active peaks
+                // hit ~22pt tall so a real spike reads at a glance.
+                count: 48,
                 accent: color,
-                dim: color.opacity(0.25),
-                seed: 0.7, minHeight: 2, maxBump: 10,
+                dim: color.opacity(0.6),
+                seed: 0.7, minHeight: 4, maxBump: 18,
                 liveLevels: levels
             )
-            .frame(height: 12)
+            .frame(height: 22)
             .frame(maxWidth: .infinity)
         }
     }
@@ -288,37 +373,33 @@ struct SideRow: View {
 struct LibRow: View {
     var entry: LibraryEntry
     var accent: Accent
+
+    /// Compact, real metadata line: "N cap · M chunk · K note". The three
+    /// parts each drop out when they'd be 0 so a fresh-ingested doc
+    /// doesn't say "0 note" next to 214 chunks. No percentage anymore —
+    /// `progressPct` wasn't wired to real data and read as mock.
+    private var metadataLine: String {
+        var parts: [String] = []
+        if entry.chapterCount > 0 { parts.append("\(entry.chapterCount) cap") }
+        if entry.chunkCount > 0   { parts.append("\(entry.chunkCount) chunk") }
+        if entry.notes > 0        { parts.append("\(entry.notes) note") }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.title)
-                    .font(.serif(15, italic: entry.active))
-                    .foregroundStyle(entry.active ? Tokens.text : Tokens.textDim)
-                    .lineLimit(1)
-                Text("\(entry.subtitle) · \(entry.progressPct)%")
+        VStack(alignment: .leading, spacing: 2) {
+            Text(entry.title)
+                .font(.serif(15, italic: entry.active))
+                .foregroundStyle(entry.active ? Tokens.text : Tokens.textDim)
+                .lineLimit(1)
+            if !metadataLine.isEmpty {
+                Text(metadataLine)
                     .font(.mono(9))
                     .tracking(0.3)
                     .foregroundStyle(Tokens.textFaint)
-                    .padding(.bottom, 5)
-                if entry.progressPct > 0 {
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Rectangle().fill(Tokens.line).frame(height: 1)
-                            Rectangle()
-                                .fill(entry.active ? accent.main : Color(hex: 0xEFE5CF, opacity: 0.35))
-                                .frame(width: g.size.width * CGFloat(entry.progressPct) / 100.0, height: 1)
-                        }
-                    }
-                    .frame(height: 1)
-                }
-            }
-            if entry.notes > 0 {
-                Text("\(entry.notes)")
-                    .font(.mono(9))
-                    .foregroundStyle(entry.active ? accent.main : Tokens.textFaint)
-                    .padding(.top, 2)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10).padding(.vertical, 8)
         // Accent-washed bg on the active document, so the current reading
         // context is always visible and the theme colour reads across the

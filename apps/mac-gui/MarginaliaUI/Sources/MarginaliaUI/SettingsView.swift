@@ -261,9 +261,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var languageSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(
-                kicker: "001", title: "Lingua",
-                sub: "determina le voci disponibili e la lingua di default del riconoscimento.",
-                info: "La lingua scelta filtra le voci del TTS mostrate qui sotto e imposta il locale di default del riconoscimento vocale. La lingua dell'interfaccia si cambia in fondo a questa pagina."
+                kicker: "001",
+                title: T("settings.nav.language"),
+                sub: T("settings.sub.language"),
+                info: T("settings.info.language")
             )
             LangPicker(
                 languages: host.languages,
@@ -274,8 +275,8 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             if host.voices.filter({ $0.lang == draft.language && $0.installed }).isEmpty {
                 HintCard(accent: accent) {
                     HStack(spacing: 4) {
-                        Text("Nessuna voce installata per questa lingua.")
-                        Text("Installa voci…")
+                        Text(T("settings.lang.no-voices"))
+                        Text(T("settings.lang.install-cta"))
                             .foregroundStyle(accent.main)
                             .underline()
                     }
@@ -296,9 +297,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var voiceSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(
-                kicker: "002", title: "Voce",
-                sub: "la voce usata per leggerti il testo ad alta voce.",
-                info: "Ogni voce è un piccolo modello neurale (≈500 KB) scaricato in locale. Il picker mostra solo le voci installate per la lingua corrente; quelle non installate sono grigie."
+                kicker: "002",
+                title: T("settings.nav.voice"),
+                sub: T("settings.sub.voice"),
+                info: T("settings.info.voice")
             )
             VoicePicker(
                 voices: host.voices.filter { $0.lang == draft.language },
@@ -319,7 +321,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             .disabled(previewing)
             .accessibilityLabel("Ascolta anteprima voce")
             VStack(alignment: .leading, spacing: 3) {
-                Text("ANTEPRIMA")
+                Text(T("settings.voice.preview-kicker"))
                     .font(.mono(10))
                     .tracking(1.5)
                     .foregroundStyle(Tokens.textFaint)
@@ -368,9 +370,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var sttSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(
-                kicker: "003", title: "Riconoscimento vocale",
-                sub: "ascolta i tuoi comandi e registra le note dettate.",
-                info: "Apple Speech è il riconoscitore di sistema (basso costo, alta qualità, richiede la dettatura macOS attiva). Whisper è un modello ggml locale da 465 MB, completamente offline. Il cambio richiede di riavviare l'helper — qualche centinaio di ms."
+                kicker: "003",
+                title: T("settings.nav.stt"),
+                sub: T("settings.sub.stt"),
+                info: T("settings.info.stt")
             )
             SttPicker(
                 engines: host.sttEngines,
@@ -385,8 +388,8 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             if draft.sttEngine == "apple" {
                 HintCard(accent: accent) {
                     HStack(spacing: 10) {
-                        Text("Apple Speech richiede la dettatura macOS.")
-                        Text("Apri Impostazioni di sistema →")
+                        Text(T("settings.stt.apple-requires"))
+                        Text(T("settings.stt.open-sys-prefs"))
                             .foregroundStyle(accent.main)
                             .underline()
                     }
@@ -463,9 +466,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var commandsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(
-                kicker: "004", title: "Comandi vocali",
-                sub: "parole che, se pronunciate, attivano un'azione. le modifiche si salvano al volo.",
-                info: "Ogni azione ha uno o più sinonimi. Le parole possono essere in qualsiasi lingua — non sono tradotte, è l'audio grezzo che conta. Parole già usate da un'altra azione verranno rifiutate per evitare ambiguità."
+                kicker: "004",
+                title: T("settings.nav.commands"),
+                sub: T("settings.sub.commands"),
+                info: T("settings.info.commands")
             )
             VStack(alignment: .leading, spacing: 0) {
                 Divider().frame(height: 1).overlay(Tokens.line)
@@ -502,9 +506,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var audioSection: some View {
         VStack(alignment: .leading, spacing: 22) {
             SectionHeader(
-                kicker: "005", title: "Preparazione testo",
-                sub: "dimensione dei chunk, percorsi di libreria e cache audio.",
-                info: "Il chunk è l'unità minima di sintesi e navigazione vocale. Chunk piccoli = risposta rapida ai comandi e salti fini, ma più frammentazione. Il cambio richiede di re-importare i documenti esistenti. La cache audio contiene i FLAC sintetizzati; cancellarla non perde lavoro, solo tempo di rigenerazione."
+                kicker: "005",
+                title: T("settings.sec.text-prep.title"),
+                sub: T("settings.sub.text-prep"),
+                info: T("settings.info.text-prep")
             )
             volumeSlider
             chunkSizeSlider
@@ -524,7 +529,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var volumeSlider: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Volume")
+                Text(T("settings.audio.volume"))
                     .font(.mono(10)).tracking(1.2)
                     .foregroundStyle(Tokens.textFaint)
                 Spacer()
@@ -578,7 +583,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var chunkSizeSlider: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Text("DIMENSIONE CHUNK")
+                Text(T("settings.text-prep.chunk-size"))
                     .font(.sans(11))
                     .tracking(0.5)
                     .foregroundStyle(Tokens.textDim)
@@ -613,9 +618,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var installationsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(
-                kicker: "006", title: "Installazioni",
-                sub: "modelli e voci sul disco. questa è l'unica sezione che scarica dalla rete.",
-                info: "Marginalia funziona offline. Solo qui, su esplicita azione tua, l'app può contattare huggingface.co e github.com per scaricare modelli mancanti. Tutti gli asset sono Apache-2.0 o MIT."
+                kicker: "006",
+                title: T("settings.nav.installations"),
+                sub: T("settings.sub.installations"),
+                info: T("settings.info.installations")
             )
             OnlineBanner(accent: accent)
 
@@ -653,8 +659,22 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             }
     }
 
+    /// Group label for the voice-catalog disclosure headers. Uses the
+    /// FULL BCP-47 for pairs that would otherwise collapse into a
+    /// duplicated heading (`en-US` and `en-GB` both → "Voci inglesi"),
+    /// mirroring the fix applied to the onboarding voice picker.
     private static func languageDisplay(_ bcp47: String) -> String {
-        let code = String(bcp47.prefix(2)).lowercased()
+        let full = bcp47.lowercased()
+        switch full {
+        case "en-us": return "Voci inglesi (US)"
+        case "en-gb": return "Voci inglesi (UK)"
+        case "pt-br": return "Voci portoghesi (BR)"
+        case "pt-pt": return "Voci portoghesi (PT)"
+        case "zh-cn": return "Voci cinesi (mandarino)"
+        case "zh-tw": return "Voci cinesi (tradizionale)"
+        default: break
+        }
+        let code = String(full.prefix(2))
         switch code {
         case "it": return "Voci italiane"
         case "en": return "Voci inglesi"
@@ -734,9 +754,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var themeSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(
-                kicker: "006", title: "Tema",
-                sub: "la palette dell'interfaccia. il cambio è immediato.",
-                info: "Cambia la tinta di accento — highlight, player pill, barre audio, hover nelle note. Lo sfondo warm-dark resta invariato: è parte dell'identità di Marginalia."
+                kicker: "007",
+                title: T("settings.sec.theme.title"),
+                sub: T("settings.sub.theme"),
+                info: T("settings.info.theme")
             )
             HStack(spacing: 12) {
                 ForEach(AppTheme.all, id: \.id) { theme in
@@ -758,7 +779,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var customHueSlider: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Tinta accento")
+                Text(T("settings.theme.accent-tint"))
                     .font(.mono(10)).tracking(1.2)
                     .foregroundStyle(Tokens.textFaint)
                 Spacer()
@@ -857,9 +878,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var interfaceLanguageSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(
-                kicker: "008", title: "Lingua interfaccia",
-                sub: "la lingua dei testi dell'app. il cambio richiede di riavviare Marginalia.",
-                info: "Diversa dalla lingua di lettura/riconoscimento della sezione Lingua: qui scegli in che lingua l'app stessa ti parla — menu, pulsanti, Settings. Le traduzioni vivono in \(InterfaceLanguage.storageKey).lproj."
+                kicker: "008",
+                title: T("settings.nav.interface"),
+                sub: T("settings.sub.interface"),
+                info: T("settings.info.interface")
             )
 
             HStack(spacing: 10) {
@@ -874,7 +896,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.clockwise.circle")
                             .foregroundStyle(accent.main)
-                        Text("Riavvia Marginalia per applicare la nuova lingua.")
+                        Text(T("settings.interface.restart"))
                     }
                 }
             }
@@ -915,9 +937,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private var diagnosticsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(
-                kicker: "007", title: "Diagnostica",
-                sub: "informazioni utili per il supporto — sola lettura.",
-                info: "Stato vivo dei provider e dei percorsi sul filesystem. Include l'ultimo ApplyReport (tempo impiegato, cosa è stato scambiato). Utile quando qualcosa non funziona — selezionabile per copia-incolla."
+                kicker: "009",
+                title: T("settings.nav.diagnostics"),
+                sub: T("settings.sub.diagnostics"),
+                info: T("settings.info.diagnostics")
             )
             DiagTable(
                 spec: draft,
@@ -931,7 +954,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     HStack(spacing: 8) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 11, weight: .medium))
-                        Text("Esporta log…")
+                        Text(T("settings.diagnostics.export-log"))
                             .font(.sans(12, weight: .medium))
                     }
                     .foregroundStyle(Tokens.textDim)
@@ -951,7 +974,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.counterclockwise")
                             .font(.system(size: 11, weight: .medium))
-                        Text("Ripristina predefiniti…")
+                        Text(T("settings.diagnostics.restore-defaults"))
                             .font(.sans(12, weight: .medium))
                     }
                     .foregroundStyle(Color.red.opacity(0.8))

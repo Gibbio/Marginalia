@@ -300,6 +300,14 @@ public struct UILanguageSelectView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
+            // Push the nav buttons to the bottom of the page so they land
+            // in the same spot as the other onboarding steps (which have
+            // ScrollView content that naturally expands to the bottom).
+            // Without this, the two radio rows are so short that the
+            // buttons float just below them — visually disconnected from
+            // where the user expects the "continua" affordance to be.
+            Spacer(minLength: 0)
+
             HStack(spacing: 12) {
                 Button(action: onProceed) {
                     Text("continua")
