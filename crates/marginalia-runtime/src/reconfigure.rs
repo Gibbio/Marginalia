@@ -94,11 +94,28 @@ impl AecRenderSlot {
     }
 
     /// Clear the current render reference. Called when playback stops.
-    #[allow(dead_code)]
     pub fn send_clear(&self) {
         use marginalia_stt_apple::aec_pipeline::RenderCommand;
         if let Some(tx) = self.inner.lock().unwrap().as_ref() {
             let _ = tx.try_send(RenderCommand::ClearReference);
+        }
+    }
+
+    /// Freeze the AEC reference (used on `pause()`). The reference buffer
+    /// stays in memory; only `render_pos` advancement and the TTS meter
+    /// peak are gated off until `send_resume()` flips them back on.
+    pub fn send_pause(&self) {
+        use marginalia_stt_apple::aec_pipeline::RenderCommand;
+        if let Some(tx) = self.inner.lock().unwrap().as_ref() {
+            let _ = tx.try_send(RenderCommand::PauseReference);
+        }
+    }
+
+    /// Resume advancing through the AEC reference (used on `resume()`).
+    pub fn send_resume(&self) {
+        use marginalia_stt_apple::aec_pipeline::RenderCommand;
+        if let Some(tx) = self.inner.lock().unwrap().as_ref() {
+            let _ = tx.try_send(RenderCommand::ResumeReference);
         }
     }
 }
@@ -314,14 +331,27 @@ fn rebuild_stt(
                 let cmd_silence = ctx.stt.commands.silence_timeout.unwrap_or(0.8);
                 let dict_silence = ctx.stt.dictation.silence_timeout.unwrap_or(1.5);
                 let dict_max = ctx.stt.dictation.max_record_seconds.unwrap_or(60.0);
+                // Sibling of the TTS cache: recorded dictations live in
+                // `<marginalia-data>/notes-audio/`, independent of the
+                // TTS cache so cleaning one doesn't nuke the user's
+                // voice memos. `tts_cache_dir.parent()` is the marginalia
+                // data root; fall back to the cache dir itself on a
+                // weird path with no parent.
+                let notes_audio_dir = ctx
+                    .tts_cache_dir
+                    .parent()
+                    .unwrap_or(&ctx.tts_cache_dir)
+                    .join("notes-audio");
                 let (rec, dict, aec_pipeline) = marginalia_stt_apple::new_apple_stt(
                     language,
                     commands,
                     cmd_silence,
                     dict_silence,
                     dict_max,
+                    notes_audio_dir,
                 )?;
                 runtime.set_command_recognizer(rec);
+                runtime.set_dictation_partial_slot(dict.dict_partial_slot());
                 runtime.set_dictation_transcriber(dict);
                 #[cfg(feature = "host-playback")]
                 ctx.aec_render_slot.install(aec_pipeline.render_sender());

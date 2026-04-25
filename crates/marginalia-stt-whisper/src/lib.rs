@@ -101,6 +101,7 @@ impl DictationTranscriber for WhisperDictationTranscriber {
                 is_final: true,
                 segments: vec![],
                 raw_text: None,
+                raw_audio_path: None,
             },
         }
     }
@@ -117,6 +118,7 @@ impl WhisperDictationTranscriber {
                 is_final: true,
                 segments: vec![],
                 raw_text: Some(String::new()),
+                raw_audio_path: None,
             });
         }
         // whisper.cpp expects f32 samples normalised to [-1.0, 1.0]
@@ -298,6 +300,7 @@ impl WhisperDictationTranscriber {
             is_final: true,
             segments,
             raw_text: Some(full_text),
+            raw_audio_path: None,
         })
     }
 }

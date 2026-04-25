@@ -245,6 +245,12 @@ pub struct SqliteRuntime {
     /// silence timeout); blocking the runtime that whole time would
     /// freeze the UI's 100 ms event poll.
     dictation_transcriber: Arc<Mutex<Box<dyn DictationTranscriber + Send>>>,
+    /// Side channel for the live partial transcript exposed by Apple
+    /// STT. Lives outside the transcriber mutex so polling it doesn't
+    /// block while `transcribe()` (which holds that mutex for the
+    /// entire dictation) is in flight. Empty when no provider is
+    /// publishing partials.
+    dictation_partial: Arc<Mutex<String>>,
     rewrite_generator: Box<dyn RewriteGenerator + Send>,
     topic_summarizer: Box<dyn TopicSummarizer + Send>,
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
@@ -361,6 +367,7 @@ impl SqliteRuntime {
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
             dictation_transcriber: Arc::new(Mutex::new(Box::new(FakeDictationTranscriber::default()))),
+            dictation_partial: Arc::new(Mutex::new(String::new())),
             rewrite_generator: Box::new(FakeRewriteGenerator::new()),
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
@@ -395,6 +402,7 @@ impl SqliteRuntime {
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
             dictation_transcriber: Arc::new(Mutex::new(Box::new(FakeDictationTranscriber::default()))),
+            dictation_partial: Arc::new(Mutex::new(String::new())),
             rewrite_generator: Box::new(FakeRewriteGenerator::new()),
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
@@ -403,9 +411,50 @@ impl SqliteRuntime {
         })
     }
 
-    /// Override the default TTS voice for this runtime.
+    /// Latest partial dictation transcript exposed by the STT provider,
+    /// empty when no dictation is in flight (or the provider doesn't
+    /// stream partials). Hosts poll this on their event tick to render
+    /// the running transcript live, without waiting for `transcribe()`
+    /// to return its silence-finalized result. Reads from a dedicated
+    /// `Arc<Mutex<String>>` (not the transcriber mutex) so polling
+    /// doesn't block while `transcribe()` is holding its own lock.
+    pub fn dictation_partial(&self) -> String {
+        self.dictation_partial
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default()
+    }
+
+    /// Hot-swap the side-channel used by `dictation_partial()`. Called
+    /// from the Apple STT factory so its reader-thread shared slot
+    /// becomes the source the host polls. Engines that don't stream
+    /// partials leave this untouched and the slot stays empty.
+    pub fn set_dictation_partial_slot(&mut self, slot: Arc<Mutex<String>>) {
+        self.dictation_partial = slot;
+    }
+
+    /// Override the default TTS voice for this runtime. Also refreshes
+    /// the active session (if any) so its cached `voice` tag matches —
+    /// without this, `replay_session_at_position` would still build
+    /// `SynthesisRequest { voice: Some(session.voice) }` with the old
+    /// voice id, the TTS cache would key on the stale voice and serve
+    /// the previously-synthesized WAV (rendered by the old voice),
+    /// ignoring the fact that the synthesizer has been swapped. The user
+    /// would "change voice" in Settings but still hear the old voice on
+    /// any chunk they had already listened to. By sync'ing
+    /// `session.voice`, the next resume rebuilds the cache key under the
+    /// new voice → cache miss → fresh synthesis with the new voice.
     pub fn set_default_voice(&mut self, voice: &str) {
         self.config.default_voice = voice.to_string();
+        if let Some(mut session) = self.session_repository.get_active_session() {
+            if session.voice.as_deref() != Some(voice) {
+                session.voice = Some(voice.to_string());
+                session.touch();
+                if let Err(e) = self.session_repository.save_session(session) {
+                    log::warn!("failed to refresh active session voice: {e}");
+                }
+            }
+        }
     }
 
     /// Subscribe to runtime events via an mpsc channel.
@@ -982,7 +1031,15 @@ impl SqliteRuntime {
     }
 
     /// Create a voice note attached to the current reading position.
-    pub fn create_note(&mut self, text: &str) -> Result<VoiceNote, RuntimeError> {
+    /// `audio_path` attaches a recorded WAV to the note so callers can
+    /// play the user's own voice back (see mac-gui's note playback).
+    /// Dictation uses `Some(path)` (fed by the AEC recorder); typed
+    /// notes and bookmarks pass `None`.
+    pub fn create_note(
+        &mut self,
+        text: &str,
+        audio_path: Option<std::path::PathBuf>,
+    ) -> Result<VoiceNote, RuntimeError> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err(RuntimeError::MissingActiveSession);
@@ -998,12 +1055,16 @@ impl SqliteRuntime {
             document_id: session.document_id.clone(),
             position: session.position.clone(),
             transcript: trimmed.to_string(),
-            transcription_provider: "manual".to_string(),
+            transcription_provider: if audio_path.is_some() {
+                "dictation".to_string()
+            } else {
+                "manual".to_string()
+            },
             language: session
                 .command_language
                 .clone()
                 .unwrap_or_else(|| "und".to_string()),
-            raw_audio_path: None,
+            raw_audio_path: audio_path,
             created_at: chrono::Utc::now(),
         };
         if let Err(e) = self.note_repository.save_note(note.clone()) {
@@ -1064,7 +1125,25 @@ impl SqliteRuntime {
             .note_repository
             .get_note(note_id)
             .ok_or_else(|| RuntimeError::Runtime(format!("note not found: {note_id}")))?;
+        let text_changed = note.transcript != trimmed;
         note.transcript = trimmed.to_string();
+        // Editing the text invalidates any attached recording: the WAV
+        // captured the original dictated words, which the playback UI
+        // would otherwise return verbatim while the displayed text
+        // says something different. Strip the reference (and delete
+        // the WAV from disk, since nothing else points at it) so
+        // playback of an edited note falls back to TTS of the new text.
+        if text_changed {
+            if let Some(path) = note.raw_audio_path.take() {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    log::debug!(
+                        "update_note: could not remove stale audio {}: {e}",
+                        path.display()
+                    );
+                }
+                note.transcription_provider = "manual".to_string();
+            }
+        }
         self.note_repository
             .save_note(note.clone())
             .map_err(|e| RuntimeError::Runtime(format!("update_note save: {e}")))?;

@@ -41,6 +41,12 @@ pub struct DictationTranscript {
     pub segments: Vec<DictationSegment>,
     /// Raw transcript before post-processing, if available.
     pub raw_text: Option<String>,
+    /// Absolute path of the persisted raw audio (WAV) when the
+    /// transcriber was recording. `None` when the provider doesn't
+    /// capture audio (e.g. streaming or fake providers) or when
+    /// recording failed — callers should fall back to TTS playback
+    /// of the transcript in that case.
+    pub raw_audio_path: Option<std::path::PathBuf>,
 }
 
 /// Result of monitoring the microphone for a speech interrupt during playback.
@@ -92,6 +98,14 @@ pub trait DictationTranscriber {
         session_id: Option<&str>,
         note_id: Option<&str>,
     ) -> DictationTranscript;
+
+    /// Latest partial transcript while a dictation is in progress. Empty
+    /// string when nothing is being dictated, or when the provider
+    /// doesn't expose partials. Hosts poll this to stream the live
+    /// transcript into the UI without waiting for the silence-final.
+    fn peek_partial(&self) -> String {
+        String::new()
+    }
 }
 
 /// Output of an STT engine factory: a matched pair of command recognizer and

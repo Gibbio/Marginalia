@@ -239,9 +239,21 @@ impl RuntimeBuilder {
         let aec_render_slot = crate::reconfigure::AecRenderSlot::new();
         #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
         if let Some(ref mut pe) = playback_engine {
-            let slot = aec_render_slot.clone();
+            let set_slot = aec_render_slot.clone();
             pe.set_play_samples_callback(Box::new(move |samples| {
-                slot.send_set_reference(samples);
+                set_slot.send_set_reference(samples);
+            }));
+            let pause_slot = aec_render_slot.clone();
+            pe.set_playback_paused_callback(Box::new(move || {
+                pause_slot.send_pause();
+            }));
+            let resume_slot = aec_render_slot.clone();
+            pe.set_playback_resumed_callback(Box::new(move || {
+                resume_slot.send_resume();
+            }));
+            let clear_slot = aec_render_slot.clone();
+            pe.set_playback_cleared_callback(Box::new(move || {
+                clear_slot.send_clear();
             }));
         }
 
@@ -255,15 +267,21 @@ impl RuntimeBuilder {
                 let cmd_silence = self.stt.commands.silence_timeout.unwrap_or(0.8);
                 let dict_silence = self.stt.dictation.silence_timeout.unwrap_or(1.5);
                 let dict_max = self.stt.dictation.max_record_seconds.unwrap_or(60.0);
+                let notes_audio_dir = tts_cache_dir
+                    .parent()
+                    .unwrap_or(&tts_cache_dir)
+                    .join("notes-audio");
                 match marginalia_stt_apple::new_apple_stt(
                     &language,
                     commands,
                     cmd_silence,
                     dict_silence,
                     dict_max,
+                    notes_audio_dir,
                 ) {
                     Ok((rec, dict, aec_pipeline)) => {
                         runtime.set_command_recognizer(rec);
+                        runtime.set_dictation_partial_slot(dict.dict_partial_slot());
                         runtime.set_dictation_transcriber(dict);
                         #[cfg(feature = "host-playback")]
                         aec_render_slot.install(aec_pipeline.render_sender());

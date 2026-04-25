@@ -108,6 +108,7 @@ impl Default for FakeDictationTranscriber {
                     end_ms: 1200,
                 }],
                 raw_text: Some("Deterministic fake transcript.".to_string()),
+                raw_audio_path: None,
             },
         }
     }

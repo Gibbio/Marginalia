@@ -134,6 +134,10 @@ impl From<VoiceNote> for NoteView {
         let anchor = n.anchor();
         let section_index = u32_lossy(n.position.section_index);
         let chunk_index = u32_lossy(n.position.chunk_index);
+        let audio_reference = n
+            .raw_audio_path
+            .map(|p| p.display().to_string())
+            .filter(|s| !s.is_empty());
         NoteView {
             note_id: n.note_id,
             document_id: n.document_id,
@@ -145,6 +149,7 @@ impl From<VoiceNote> for NoteView {
             language: n.language,
             transcription_provider: n.transcription_provider,
             created_at_iso: n.created_at.to_rfc3339(),
+            audio_reference,
         }
     }
 }

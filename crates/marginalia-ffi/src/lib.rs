@@ -341,6 +341,11 @@ pub struct NoteView {
     pub language: String,
     pub transcription_provider: String,
     pub created_at_iso: String,
+    /// Absolute path of the persisted raw dictation WAV. `None` when
+    /// no audio is attached (typed note, bookmark, or a dictation
+    /// that didn't record). Swift uses this to decide between
+    /// playing the user's own voice vs TTS-ing the transcript.
+    pub audio_reference: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1064,6 +1069,29 @@ impl FfiRuntime {
                                     &mut *rt, &mut sidecar, &mut ctx, &spec,
                                 )
                             };
+                            // Persist the new spec to marginalia.toml so
+                            // the voice (and any other updated field)
+                            // survives app restarts. Without this the
+                            // in-memory swap works for the current
+                            // session but the next launch re-reads the
+                            // old TOML and reverts the user's pick —
+                            // manifesting as "I selected im_nicola but
+                            // a female voice plays after restart".
+                            // Only save on success: a failed apply has
+                            // left ctx partially mutated (e.g. voice
+                            // build failed so synthesizer is still the
+                            // old one), so writing would persist state
+                            // that diverges from what's actually
+                            // loaded. Save errors are logged but don't
+                            // fail the reply — the in-memory apply is
+                            // still valid for the current session.
+                            if res.is_ok() {
+                                if let Err(e) = ctx.save() {
+                                    log::warn!(
+                                        "[apply] ctx.save() failed — spec won't survive restart: {e}"
+                                    );
+                                }
+                            }
                             let _ = reply.send(res);
                         }
                         SidecarCmd::SaveConfig {
@@ -1090,6 +1118,52 @@ impl FfiRuntime {
             .recv()
             .map_err(|_| FfiError::Build("sidecar thread exited before init".into()))?
             .map_err(FfiError::Build)?;
+
+        // Voice command monitor — drains the STT helper's CMD output
+        // and converts each match into a `CommandRecognized` event the
+        // Swift host already handles via `dispatchVoiceAction`. Without
+        // this thread the Apple helper's CMD lines pile up in `cmd_rx`
+        // forever, unread, and "pausa"/"avanti"/etc. never fire even
+        // though the recognizer prints them to stdout. The TUI has the
+        // same loop in `backend.rs`; this is the FFI's port of it.
+        // Lives for the entire FFIRuntime lifetime — no graceful
+        // shutdown plumbed yet, but the OS reaps the thread on exit.
+        let monitor_event_buf = event_buffer.clone();
+        let monitor = {
+            let mut rt = init.runtime.lock().unwrap();
+            rt.open_command_monitor()
+        };
+        std::thread::Builder::new()
+            .name("marginalia-cmd-monitor".into())
+            .spawn(move || {
+                let mut monitor = monitor;
+                loop {
+                    let capture = monitor.capture_next_interrupt(Some(2.0));
+                    if let Some(raw) = &capture.raw_text {
+                        if raw.starts_with("error:") {
+                            log::warn!("[cmd-monitor] {raw}");
+                            std::thread::sleep(std::time::Duration::from_secs(5));
+                            continue;
+                        }
+                    }
+                    let raw = capture.raw_text.filter(|t| !t.is_empty());
+                    let cmd = capture.recognized_command;
+                    if raw.is_some() || cmd.is_some() {
+                        monitor_event_buf.push(FfiRuntimeEvent::CommandRecognized {
+                            raw_text: raw.unwrap_or_default(),
+                            command: cmd,
+                        });
+                    } else {
+                        // No-op cycle: small sleep so a non-blocking
+                        // recognizer (Fake, or any that returns
+                        // immediately) doesn't burn a core. The Apple
+                        // path naturally paces itself via
+                        // `recv_timeout(2s)`.
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                    }
+                }
+            })
+            .ok();
 
         Ok(Self {
             runtime: init.runtime,
@@ -1338,6 +1412,28 @@ impl FfiRuntime {
         self.runtime.lock().unwrap().try_auto_advance()
     }
 
+    /// Spawn a background thread that pre-synthesizes the next chunk
+    /// into the TTS cache. Returns immediately — the thread sleeps 100 ms
+    /// so the current command's UI refresh lands first, then acquires
+    /// the runtime lock and calls `prefetch_next()`. On a cache hit this
+    /// is a fast no-op; on a miss it runs full synthesis (1–2 s) while
+    /// the user is listening to the current chunk. Subsequent "next"
+    /// then hits the cache and plays instantly.
+    ///
+    /// CLAUDE.md calls out that prefetch MUST live on its own thread —
+    /// running it on the command thread froze the UI for ~2 s. Callers
+    /// in Swift just fire this after every navigation command; no need
+    /// to await anything.
+    pub fn prefetch_next(&self) {
+        let rt = self.runtime.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if let Ok(mut r) = rt.lock() {
+                r.prefetch_next();
+            }
+        });
+    }
+
     pub fn set_volume(&self, level: f32) {
         self.runtime.lock().unwrap().set_volume(level);
     }
@@ -1409,9 +1505,14 @@ impl FfiRuntime {
                 // reading position. `create_note` emits its own note
                 // repository activity; we wrap with our event so the UI
                 // can light the live-note card in one place.
+                // Attach the AEC-recorded WAV path (Apple STT only).
+                // Other transcribers leave `raw_audio_path` as `None`,
+                // which the note playback path interprets as
+                // "fall back to TTS synthesis of the transcript".
+                let audio_path = transcript.raw_audio_path.clone();
                 let create_result = {
                     let mut rt = runtime.lock().unwrap();
-                    rt.create_note(&text)
+                    rt.create_note(&text, audio_path)
                 };
                 match create_result {
                     Ok(note) => event_buf.push(FfiRuntimeEvent::VoiceNoteTranscribed {
@@ -1457,7 +1558,7 @@ impl FfiRuntime {
     // ─────────────────────────────────────────────────────────
 
     pub fn create_note(&self, text: String) -> Result<NoteView, FfiError> {
-        let note = self.runtime.lock().unwrap().create_note(&text)?;
+        let note = self.runtime.lock().unwrap().create_note(&text, None)?;
         Ok(note.into())
     }
 
@@ -1512,6 +1613,14 @@ impl FfiRuntime {
             Ok(res) => Ok(res.audio_reference),
             Err(e) => Err(FfiError::Runtime(format!("{e:?}"))),
         }
+    }
+
+    /// Latest partial dictation transcript exposed by the active STT
+    /// provider. Empty when nothing is being dictated. See
+    /// `SqliteRuntime::dictation_partial` for the side-channel
+    /// rationale. Caller polls this on its event tick.
+    pub fn dictation_partial(&self) -> String {
+        self.runtime.lock().unwrap().dictation_partial()
     }
 
     /// Read the configured Whisper model path. Empty string = unset.

@@ -109,6 +109,14 @@ func startRecognitionTask() {
                 return
             }
 
+            // Stream the live transcript as it grows so the host UI
+            // can show what the user is dictating in real time. Only
+            // in dictation mode — command mode wants the silence-gated
+            // single shot to avoid premature trigger matches.
+            if mode == .dictation && !lastText.isEmpty {
+                print("DICT_PARTIAL \(lastText)")
+            }
+
             let timeout = (mode == .command) ? cmdSilenceTimeout : dictSilenceTimeout
             let snap = lastText
             let timer = DispatchWorkItem {

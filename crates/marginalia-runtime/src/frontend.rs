@@ -311,7 +311,7 @@ impl SqliteRuntime {
                     .get("text")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                match self.create_note(text) {
+                match self.create_note(text, None) {
                     Ok(note) => {
                         ok_response("Note saved.", json!({ "note": note_view_to_json(note) }))
                     }

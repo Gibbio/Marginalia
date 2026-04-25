@@ -7,5 +7,7 @@ description = "Apple native STT via SFSpeechRecognizer — macOS Neural Engine, 
 [dependencies]
 aec3 = "0.1"
 cpal = "0.15"
+hound = "3.5"  # WAV writer for persisting dictation audio (recorded notes)
 log = "0.4"
 marginalia-core = { path = "../marginalia-core" }
+uuid = { version = "1", features = ["v4"] }

@@ -130,6 +130,10 @@ dictionary NoteView {
   string language;
   string transcription_provider;
   string created_at_iso;
+  // Path to the persisted WAV recorded during dictation; absent for
+  // typed notes and bookmarks. The client plays this back instead of
+  // synthesizing the transcript when set.
+  string? audio_reference;
 };
 
 // Ingest results wrap the runtime's DocumentIngestionOutcome enum.
@@ -226,6 +230,13 @@ interface FfiRuntime {
   [Throws=FfiError]
   void seek_to_chunk(u32 section_index, u32 chunk_index);
   boolean auto_advance();
+  // Fire-and-forget: pre-synthesize the chunk right after the current
+  // reading position into the TTS cache on a background thread. Returns
+  // immediately. Call from the host after every navigation command so
+  // that by the time the user hits "next" the subsequent chunk is
+  // already cached and playback feels instantaneous. Matches the
+  // tui-rs `spawn_prefetch` pattern documented in CLAUDE.md.
+  void prefetch_next();
   void set_volume(f32 level);
   f32 volume();
 
@@ -236,6 +247,13 @@ interface FfiRuntime {
   // and `VoiceNoteTranscribed` events.
   [Throws=FfiError]
   void start_dictation();
+
+  // Latest partial dictation transcript ("live transcription"). Empty
+  // string when nothing is being dictated or the engine doesn't stream
+  // partials. The host polls this on its event tick to render the
+  // running transcript without waiting for the silence-finalized
+  // result. Cheap (single Mutex<String> clone).
+  string dictation_partial();
 
   // State ---------------------------------------------------------
   AppSnapshot app_snapshot();

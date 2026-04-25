@@ -11,8 +11,74 @@
 use crate::AppleHelperShared;
 use aec3::voip::VoipAec3;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use hound::{SampleFormat, WavSpec, WavWriter};
+use std::fs::File;
+use std::io::BufWriter;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+
+/// Shared handle to an active dictation recording. `Some(writer)` means the
+/// AEC thread writes each cleaned capture frame into the WAV file; `None`
+/// means recording is off. The dictation transcriber flips this on before
+/// switching the helper to DICTATION mode and off when it gets DICT_END,
+/// then returns the path to the caller so the note can carry it.
+pub type DictationRecorderSlot = Arc<Mutex<Option<DictationRecorder>>>;
+
+/// WAV writer + the path being written, bundled so `stop_recording()` can
+/// hand the absolute path back to the runtime without tracking it
+/// separately.
+pub struct DictationRecorder {
+    pub writer: WavWriter<BufWriter<File>>,
+    pub path: PathBuf,
+}
+
+/// Open a new WAV writer at `path` and install it into `slot` so the AEC
+/// thread starts appending frames. Callers supply the path explicitly so
+/// the runtime controls naming (notes/audio/<uuid>.wav usually). If the
+/// slot already has a writer, it's replaced — but the previous writer
+/// is dropped WITHOUT finalizing, which produces a truncated file. The
+/// single-call-site design (dictation transcriber) shouldn't trigger this.
+pub fn start_dictation_recording(
+    slot: &DictationRecorderSlot,
+    path: PathBuf,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+    }
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate: crate::AEC_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let writer = WavWriter::create(&path, spec)
+        .map_err(|e| format!("create wav {}: {e}", path.display()))?;
+    let mut guard = slot.lock().map_err(|_| "recorder slot poisoned".to_string())?;
+    *guard = Some(DictationRecorder { writer, path });
+    Ok(())
+}
+
+/// Close the currently-active dictation recording (if any) and return
+/// the path it was written to. Returns `None` if the slot was empty
+/// (e.g. stop called without a matching start). Finalising the writer
+/// flushes the RIFF header's size fields — without it the WAV would
+/// be unplayable.
+pub fn stop_dictation_recording(
+    slot: &DictationRecorderSlot,
+) -> Option<PathBuf> {
+    let mut guard = slot.lock().ok()?;
+    let rec = guard.take()?;
+    let path = rec.path.clone();
+    // hound::WavWriter::finalize consumes self — we moved it out of
+    // `rec` by value via the Option::take above.
+    if let Err(e) = rec.writer.finalize() {
+        log::warn!("[aec] wav finalize failed for {}: {e}", path.display());
+        return None;
+    }
+    Some(path)
+}
 
 /// Number of samples in a 10ms frame at the AEC sample rate.
 const FRAME_SAMPLES: usize = (crate::AEC_SAMPLE_RATE as usize) / 100; // 240 at 24kHz
@@ -26,6 +92,16 @@ pub enum RenderCommand {
     SetReference(Vec<f32>),
     /// Playback stopped — no more render to subtract.
     ClearReference,
+    /// Playback paused — freeze `render_pos` and report `tts_peak = 0`
+    /// in the waveform meter, but keep the reference buffer in memory
+    /// so a subsequent `ResumeReference` continues from where we left
+    /// off. Without this distinction, pause+resume would either keep
+    /// the meter oscillating (no signal sent at all) or lose echo
+    /// cancellation entirely (full clear) for the rest of the chunk.
+    PauseReference,
+    /// Resume advancing through the previously-set reference. No-op if
+    /// no reference is set or if the pipeline isn't currently paused.
+    ResumeReference,
 }
 
 /// Real-time audio level data for UI waveform visualization. Updated by the
@@ -59,6 +135,10 @@ pub struct AecPipeline {
     _stream: cpal::Stream,
     render_tx: mpsc::SyncSender<RenderCommand>,
     waveform: Arc<Mutex<WaveformData>>,
+    /// Shared slot the AEC thread reads each frame to decide whether
+    /// (and where) to append to a dictation WAV. Exposed as a handle
+    /// to the dictation transcriber via `recorder_slot()`.
+    recorder_slot: DictationRecorderSlot,
 }
 
 impl AecPipeline {
@@ -88,6 +168,8 @@ impl AecPipeline {
         let (render_tx, render_rx) = mpsc::sync_channel::<RenderCommand>(4);
         // Shared waveform data for UI visualization.
         let waveform = Arc::new(Mutex::new(WaveformData::default()));
+        // Shared recorder slot — dictation-controlled.
+        let recorder_slot: DictationRecorderSlot = Arc::new(Mutex::new(None));
 
         let stream = device
             .build_input_stream(
@@ -108,6 +190,7 @@ impl AecPipeline {
 
         // AEC processing thread.
         let waveform_writer = waveform.clone();
+        let recorder_for_thread = recorder_slot.clone();
         std::thread::spawn(move || {
             let mut aec = match VoipAec3::builder(target_rate, 1, 1).build() {
                 Ok(a) => a,
@@ -123,6 +206,10 @@ impl AecPipeline {
             // Render reference: the full WAV samples and our read position.
             let mut render_ref: Option<Vec<f32>> = None;
             let mut render_pos: usize = 0;
+            // True while playback is paused: render_pos doesn't advance
+            // and tts_peak reports 0, so the UI meter goes flat. Resume
+            // flips it back to false.
+            let mut render_paused: bool = false;
 
             while let Ok(raw_mic) = mic_rx.recv() {
                 // Check for render commands (non-blocking).
@@ -131,10 +218,18 @@ impl AecPipeline {
                         RenderCommand::SetReference(samples) => {
                             render_ref = Some(samples);
                             render_pos = 0;
+                            render_paused = false;
                         }
                         RenderCommand::ClearReference => {
                             render_ref = None;
                             render_pos = 0;
+                            render_paused = false;
+                        }
+                        RenderCommand::PauseReference => {
+                            render_paused = true;
+                        }
+                        RenderCommand::ResumeReference => {
+                            render_paused = false;
                         }
                     }
                 }
@@ -152,16 +247,22 @@ impl AecPipeline {
                     let frame: Vec<f32> = mic_accum.drain(..FRAME_SAMPLES).collect();
 
                     // Feed the corresponding render frame (in lockstep with mic).
-                    if let Some(ref samples) = render_ref {
-                        if render_pos + FRAME_SAMPLES <= samples.len() {
-                            let render_frame = &samples[render_pos..render_pos + FRAME_SAMPLES];
-                            if let Err(e) = aec.handle_render_frame(render_frame) {
-                                log::warn!("[aec] render frame error: {e}");
+                    // While paused, we keep the reference buffer in memory but
+                    // don't advance render_pos and don't submit a render frame
+                    // to AEC — the sink isn't emitting audio, so the AEC has
+                    // nothing to subtract from the mic.
+                    if !render_paused {
+                        if let Some(ref samples) = render_ref {
+                            if render_pos + FRAME_SAMPLES <= samples.len() {
+                                let render_frame = &samples[render_pos..render_pos + FRAME_SAMPLES];
+                                if let Err(e) = aec.handle_render_frame(render_frame) {
+                                    log::warn!("[aec] render frame error: {e}");
+                                }
+                                render_pos += FRAME_SAMPLES;
                             }
-                            render_pos += FRAME_SAMPLES;
+                            // If reference is exhausted, no more render frames to feed
+                            // (silence period after chunk ends). AEC passes mic through.
                         }
-                        // If reference is exhausted, no more render frames to feed
-                        // (silence period after chunk ends). AEC passes mic through.
                     }
 
                     // Process capture through AEC.
@@ -178,7 +279,11 @@ impl AecPipeline {
                         let mic_peak = frame.iter().fold(0.0f32, |a, &s| a.max(s.abs()));
                         wf.push_mic(mic_peak.min(1.0));
 
-                        let tts_peak = if let Some(ref samples) = render_ref {
+                        let tts_peak = if render_paused {
+                            // Paused → meter goes flat even though we
+                            // still have a reference loaded.
+                            0.0
+                        } else if let Some(ref samples) = render_ref {
                             let start = render_pos.saturating_sub(FRAME_SAMPLES);
                             let end = start + FRAME_SAMPLES;
                             if end <= samples.len() {
@@ -198,6 +303,25 @@ impl AecPipeline {
                         log::error!("[aec] failed to write to helper: {e}");
                         return;
                     }
+
+                    // If a dictation recording is in progress, append the
+                    // AEC-cleaned frame to its WAV. Conversion f32 → i16
+                    // with clipping: the typical range is well within
+                    // [-1, 1] but occasional mic spikes can exceed it.
+                    // Using try_lock keeps us non-blocking — we'd rather
+                    // drop a frame than stall the capture loop.
+                    if let Ok(mut slot) = recorder_for_thread.try_lock() {
+                        if let Some(rec) = slot.as_mut() {
+                            for &s in out_buf.iter() {
+                                let clipped = s.clamp(-1.0, 1.0);
+                                let sample = (clipped * i16::MAX as f32) as i16;
+                                if let Err(e) = rec.writer.write_sample(sample) {
+                                    log::warn!("[aec] wav write failed: {e}");
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
             }
             log::info!("[aec] pipeline stopped");
@@ -207,7 +331,16 @@ impl AecPipeline {
             _stream: stream,
             render_tx,
             waveform,
+            recorder_slot,
         })
+    }
+
+    /// Clone of the recorder slot — used by the dictation transcriber to
+    /// drive start/stop-recording from the runtime side (which owns the
+    /// dictation lifecycle) without needing a direct reference to the
+    /// pipeline itself.
+    pub fn recorder_slot(&self) -> DictationRecorderSlot {
+        self.recorder_slot.clone()
     }
 
     /// Set the render reference: the full WAV samples of the chunk about to

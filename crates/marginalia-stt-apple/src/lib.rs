@@ -33,7 +33,7 @@ const DICTATION_PROVIDER_NAME: &str = "apple-dictation-stt";
 /// Bump when SWIFT_HELPER_SOURCE changes so the cached binary gets recompiled.
 ///
 /// Also bump when modifying anything in `helper/stt-helper.swift`.
-const HELPER_VERSION: u32 = 9;
+const HELPER_VERSION: u32 = 10;
 
 static COMPILE_HELPER: Once = Once::new();
 
@@ -214,6 +214,7 @@ pub fn new_apple_stt(
     cmd_silence_timeout: f64,
     dict_silence_timeout: f64,
     dict_max_seconds: f64,
+    recorded_audio_dir: std::path::PathBuf,
 ) -> Result<
     (
         AppleCommandRecognizer,
@@ -268,6 +269,12 @@ pub fn new_apple_stt(
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<String>();
     let (dict_tx, dict_rx) = mpsc::channel::<String>();
+    // Live partial transcripts go into a shared slot rather than a
+    // channel — the host polls the latest value on its tick rather
+    // than draining a queue (we only ever care about the most recent
+    // partial; older intermediate states are discardable).
+    let dict_partial: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let dict_partial_writer = dict_partial.clone();
 
     // Reader thread: routes each line into the right channel based on prefix.
     std::thread::spawn(move || {
@@ -279,12 +286,24 @@ pub fn new_apple_stt(
                 if cmd_tx.send(rest.to_string()).is_err() {
                     break;
                 }
+            } else if let Some(rest) = trimmed.strip_prefix("DICT_PARTIAL ") {
+                if let Ok(mut slot) = dict_partial_writer.lock() {
+                    *slot = rest.to_string();
+                }
             } else if let Some(rest) = trimmed.strip_prefix("DICT_END ") {
+                if let Ok(mut slot) = dict_partial_writer.lock() {
+                    slot.clear();
+                }
                 if dict_tx.send(rest.to_string()).is_err() {
                     break;
                 }
-            } else if trimmed == "DICT_END" && dict_tx.send(String::new()).is_err() {
-                break;
+            } else if trimmed == "DICT_END" {
+                if let Ok(mut slot) = dict_partial_writer.lock() {
+                    slot.clear();
+                }
+                if dict_tx.send(String::new()).is_err() {
+                    break;
+                }
             }
         }
     });
@@ -309,7 +328,11 @@ pub fn new_apple_stt(
         language: language.to_string(),
         helper: shared,
         dict_rx: Mutex::new(dict_rx),
+        dict_partial,
         max_duration: Duration::from_secs_f64(dict_max_seconds),
+        recorder_slot: aec.recorder_slot(),
+        recorded_audio_dir,
+        last_audio_path: Arc::new(Mutex::new(None)),
     };
 
     Ok((recognizer, transcriber, aec))
@@ -438,10 +461,47 @@ pub struct AppleDictationTranscriber {
     language: String,
     helper: Arc<AppleHelperShared>,
     dict_rx: Mutex<mpsc::Receiver<String>>,
+    /// Latest partial transcript from the helper. Updated by the reader
+    /// thread on every `DICT_PARTIAL` line, cleared on `DICT_END`. The
+    /// host polls this on its event tick to render the running transcript
+    /// in the live-note card without waiting for the silence-final.
+    dict_partial: Arc<Mutex<String>>,
     max_duration: Duration,
+    /// Shared slot that tells the AEC thread to write each capture
+    /// frame into a WAV. We flip it on before `switch_to_dictation()`
+    /// and off when DICT_END arrives, then stash the finalized path
+    /// in `last_audio_path` so the FFI dictation thread can read it
+    /// and attach to the created note.
+    recorder_slot: aec_pipeline::DictationRecorderSlot,
+    recorded_audio_dir: std::path::PathBuf,
+    last_audio_path: Arc<Mutex<Option<std::path::PathBuf>>>,
+}
+
+impl AppleDictationTranscriber {
+    /// Returns the absolute path of the last dictation recording and
+    /// clears the stored value. Call AFTER `transcribe()` returns —
+    /// the FFI dictation thread uses it to set `raw_audio_path` on
+    /// the created note.
+    pub fn take_last_audio_path(&self) -> Option<std::path::PathBuf> {
+        self.last_audio_path.lock().ok()?.take()
+    }
+
+    /// Clone of the partial-transcript shared slot. Hands it to the
+    /// runtime so polling skips the transcriber mutex (which is
+    /// owned by the dictation thread for the entire `transcribe()`).
+    pub fn dict_partial_slot(&self) -> Arc<Mutex<String>> {
+        self.dict_partial.clone()
+    }
 }
 
 impl DictationTranscriber for AppleDictationTranscriber {
+    fn peek_partial(&self) -> String {
+        self.dict_partial
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default()
+    }
+
     fn describe_capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             provider_name: DICTATION_PROVIDER_NAME.to_string(),
@@ -461,6 +521,26 @@ impl DictationTranscriber for AppleDictationTranscriber {
         _session_id: Option<&str>,
         _note_id: Option<&str>,
     ) -> DictationTranscript {
+        // Generate a unique path for this recording. We record FIRST,
+        // transcribe SECOND — so we don't know the note id at this
+        // point; uuid is the lightweight stand-in, and the runtime
+        // attaches the path to whatever note it creates on success.
+        let audio_path = self
+            .recorded_audio_dir
+            .join(format!("{}.wav", uuid::Uuid::new_v4()));
+
+        let recording_started =
+            match aec_pipeline::start_dictation_recording(
+                &self.recorder_slot,
+                audio_path.clone(),
+            ) {
+                Ok(()) => true,
+                Err(e) => {
+                    log::warn!("[apple-stt] dictation recording failed to start: {e}");
+                    false
+                }
+            };
+
         let result = (|| -> Result<String, String> {
             // Drain any stale dictation lines that may have arrived between
             // sessions (e.g. a delayed DICT_END from a previous timeout).
@@ -477,6 +557,27 @@ impl DictationTranscriber for AppleDictationTranscriber {
                 .map_err(|_| "dictation timed out".to_string())?;
             Ok(text.trim().to_string())
         })();
+
+        // Always close the WAV (success OR error) so we don't leak the
+        // writer and the header gets finalized. On success, remember
+        // the path so the FFI thread can pick it up and attach to
+        // the created note.
+        let finalized = if recording_started {
+            aec_pipeline::stop_dictation_recording(&self.recorder_slot)
+        } else {
+            None
+        };
+        if result.is_ok() {
+            if let Some(p) = finalized.clone() {
+                if let Ok(mut slot) = self.last_audio_path.lock() {
+                    *slot = Some(p);
+                }
+            }
+        } else if let Some(p) = finalized {
+            // Transcription failed — don't hand the caller a dangling
+            // audio file. Removing it keeps the notes/audio dir tidy.
+            let _ = std::fs::remove_file(p);
+        }
 
         // Always switch back to command mode so the monitor resumes catching
         // commands, even if dictation errored out.
@@ -496,6 +597,7 @@ impl DictationTranscriber for AppleDictationTranscriber {
                     end_ms: 0,
                 }],
                 raw_text: None,
+                raw_audio_path: self.take_last_audio_path(),
             },
             Err(err) => DictationTranscript {
                 text: format!("[Apple dictation error: {err}]"),
@@ -504,6 +606,7 @@ impl DictationTranscriber for AppleDictationTranscriber {
                 is_final: true,
                 segments: vec![],
                 raw_text: None,
+                raw_audio_path: None,
             },
         }
     }
