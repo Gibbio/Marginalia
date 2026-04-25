@@ -175,8 +175,17 @@ done
 
 xcodebuild -create-xcframework "${XCARGS[@]}" -output "$XCFRAMEWORK_DIR"
 
-echo "==> Copying Marginalia.swift into Generated/"
+echo "==> Copying Marginalia.swift into Generated/ and SwiftPM source tree"
 cp "${GEN_DIR}/Marginalia.swift" "${OUT_DIR}/Marginalia.swift"
+# The SwiftPM package (`apps/mac-gui/MarginaliaUI/Package.swift`) loads the
+# bindings from `Sources/MarginaliaKit/Marginalia.swift`. Writing only to
+# `Generated/` leaves SwiftPM stuck on the previous binding even after a
+# fresh `build-rust-xcframework.sh` run — surfaces as "has no member
+# 'prefetchNext'"-style errors when the UDL grew new methods.
+SPM_BINDINGS="${REPO_ROOT}/apps/mac-gui/MarginaliaUI/Sources/MarginaliaKit/Marginalia.swift"
+if [ -d "$(dirname "$SPM_BINDINGS")" ]; then
+    cp "${GEN_DIR}/Marginalia.swift" "$SPM_BINDINGS"
+fi
 
 echo
 echo "Done. Artifacts in ${OUT_DIR}:"
