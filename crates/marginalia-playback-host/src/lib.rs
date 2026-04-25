@@ -26,6 +26,18 @@ pub struct HostPlaybackEngine {
     /// right before playback starts. Used by the AEC pipeline as the render
     /// reference signal.
     on_play_samples: Option<Box<dyn Fn(Vec<f32>) + Send>>,
+    /// Fired on `pause()` so the AEC pipeline can freeze its render
+    /// reference (don't advance render_pos, set tts_peak = 0). Separate
+    /// from "stopped" so resume() can pick up where pause left off
+    /// without a fresh `SetReference` (which would reset render_pos
+    /// to 0 and desync from the actual sink position).
+    on_playback_paused: Option<Box<dyn Fn() + Send>>,
+    /// Fired on `resume()` — flips the AEC pipeline back to advancing
+    /// render_pos through the existing reference buffer.
+    on_playback_resumed: Option<Box<dyn Fn() + Send>>,
+    /// Fired on `stop()` so AEC drops the render reference entirely.
+    /// The next chunk's `start()` will install a fresh one.
+    on_playback_cleared: Option<Box<dyn Fn() + Send>>,
     /// Linear volume 0.0 – 1.0+. Persisted across sink recreations so
     /// new chunks inherit the current level.
     volume: f32,
@@ -45,6 +57,9 @@ impl Default for HostPlaybackEngine {
             stream_handle: handle,
             sink: None,
             on_play_samples: None,
+            on_playback_paused: None,
+            on_playback_resumed: None,
+            on_playback_cleared: None,
             volume: 1.0,
             snapshot: PlaybackSnapshot {
                 state: PlaybackState::Stopped,
@@ -70,6 +85,27 @@ impl HostPlaybackEngine {
     /// reference. Pass `None` to clear.
     pub fn set_play_samples_callback(&mut self, cb: Box<dyn Fn(Vec<f32>) + Send>) {
         self.on_play_samples = Some(cb);
+    }
+
+    /// Register a callback fired when playback pauses — AEC uses this
+    /// to freeze its render reference so the TTS-level meter goes flat
+    /// while the sink is silent, without losing the buffer entirely.
+    pub fn set_playback_paused_callback(&mut self, cb: Box<dyn Fn() + Send>) {
+        self.on_playback_paused = Some(cb);
+    }
+
+    /// Register a callback fired when playback resumes after a pause.
+    /// The AEC pipeline starts advancing through the cached reference
+    /// again so echo cancellation kicks back in for the rest of the chunk.
+    pub fn set_playback_resumed_callback(&mut self, cb: Box<dyn Fn() + Send>) {
+        self.on_playback_resumed = Some(cb);
+    }
+
+    /// Register a callback fired when playback stops outright (chunk
+    /// transitions, session stop). AEC drops the reference; the next
+    /// `start()` will install a fresh one.
+    pub fn set_playback_cleared_callback(&mut self, cb: Box<dyn Fn() + Send>) {
+        self.on_playback_cleared = Some(cb);
     }
 
     /// Check if current playback has finished (for auto-advance).
@@ -204,6 +240,13 @@ impl PlaybackEngine for HostPlaybackEngine {
                 self.snapshot.state = PlaybackState::Paused;
             }
         }
+        // Tell the AEC pipeline to freeze its render reference —
+        // render_pos stops advancing and the TTS meter goes flat
+        // while the sink is silent. The reference stays loaded so
+        // resume() picks up exactly where we left off.
+        if let Some(cb) = &self.on_playback_paused {
+            cb();
+        }
         self.snapshot.last_action = "pause".to_string();
         self.snapshot()
     }
@@ -215,6 +258,9 @@ impl PlaybackEngine for HostPlaybackEngine {
                 self.snapshot.state = PlaybackState::Playing;
             }
         }
+        if let Some(cb) = &self.on_playback_resumed {
+            cb();
+        }
         self.snapshot.last_action = "resume".to_string();
         self.snapshot()
     }
@@ -222,6 +268,9 @@ impl PlaybackEngine for HostPlaybackEngine {
     fn stop(&mut self) -> PlaybackSnapshot {
         if let Some(sink) = self.sink.take() {
             sink.stop();
+        }
+        if let Some(cb) = &self.on_playback_cleared {
+            cb();
         }
         self.snapshot.state = PlaybackState::Stopped;
         self.snapshot.last_action = "stop".to_string();
