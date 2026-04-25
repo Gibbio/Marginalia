@@ -326,6 +326,24 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         return p.isEmpty ? nil : p
     }
 
+    public var ttsCacheDir: String {
+        runtime.ttsCacheDir()
+    }
+
+    /// Decode the WAV at `path`, downmix to mono f32 at 24kHz, and ship
+    /// it to the AEC pipeline as the next render reference. Bridges the
+    /// Swift-side `AVAudioPlayer` note playback into the same echo-
+    /// cancellation loop that the rodio chunk playback already uses.
+    /// Returns false if the file couldn't be decoded (Swift then falls
+    /// back to nothing — better an unsuppressed echo than a freeze).
+    @discardableResult
+    public func aecSetRenderReference(path: String) -> Bool {
+        runtime.aecSetRenderReference(path: path)
+    }
+    public func aecClearRenderReference() {
+        runtime.aecClearRenderReference()
+    }
+
     public func synthesizePreview(text: String, voice: String) async throws -> String {
         let lang = currentSpec.language.prefix(2).lowercased()
         return try await Task.detached { [runtime] in
@@ -447,6 +465,12 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     public func seekToChunk(section: Int, chunk: Int) async throws {
         try runtime.seekToChunk(sectionIndex: UInt32(max(0, section)),
                                  chunkIndex: UInt32(max(0, chunk)))
+        await refreshSessionSnapshot()
+        runtime.prefetchNext()
+    }
+    public func seekToChunkPaused(section: Int, chunk: Int) async throws {
+        try runtime.seekToChunkPaused(sectionIndex: UInt32(max(0, section)),
+                                       chunkIndex: UInt32(max(0, chunk)))
         await refreshSessionSnapshot()
         runtime.prefetchNext()
     }
@@ -692,6 +716,15 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             // can't trigger a phantom resume.
             let shouldResumePlayback = resumeAfterDictation
             resumeAfterDictation = false
+            // Consume the cancel flag UNCONDITIONALLY so it can never
+            // bleed across to a later, unrelated dictation. Without
+            // this, a previous dictation that ended in error (silence
+            // timeout / empty transcript) left the flag set, and the
+            // *next* successful dictation would silently delete the
+            // freshly-created note — manifesting as "every now and
+            // then a previous note disappears when I record a new one".
+            let wasCancelled = pendingDictationCancelled
+            pendingDictationCancelled = false
             defer {
                 if shouldResumePlayback {
                     Task { [weak self] in try? await self?.resume() }
@@ -725,10 +758,10 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 // The user pressed Cancel on the compose sheet while
                 // the dictation thread was still running. The runtime
                 // has just persisted a note from whatever audio was
-                // captured before the cancel; delete it back out and
-                // clear the cancel flag.
-                if pendingDictationCancelled {
-                    pendingDictationCancelled = false
+                // captured before the cancel; delete it back out.
+                // (The flag was already consumed at the top of the
+                // case so a later dictation can't inherit it.)
+                if wasCancelled {
                     liveNote = nil
                     if let id = noteId {
                         Task { await self.deleteNote(id: id) }
@@ -1063,11 +1096,12 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                     label: rawAsset.displayName,
                     size: Self.formatBytes(rawAsset.sizeBytes),
                     installed: rawAsset.installed,
-                    // Only ENGINES are user-removable. Voices are managed
-                    // as a library the user picks from — removing single
-                    // voice files would confuse the picker state without
-                    // a meaningful payoff (a voice is ~500 KB).
-                    removable: rawAsset.category != "voice",
+                    // All installed assets are user-removable —
+                    // including individual voices. Voices are small
+                    // (~500 KB) but a user may want to drop the ones
+                    // they never use; the picker state recovers
+                    // automatically (the row flips back to "scarica").
+                    removable: rawAsset.installed,
                     category: rawAsset.category,
                     language: rawAsset.language
                 )

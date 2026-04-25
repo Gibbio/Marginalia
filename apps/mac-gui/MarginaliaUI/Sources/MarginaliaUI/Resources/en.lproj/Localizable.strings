@@ -5,7 +5,8 @@
 "settings.nav.voice"          = "Voice";
 "settings.nav.stt"            = "Speech recognition";
 "settings.nav.commands"       = "Voice commands";
-"settings.nav.audio"          = "Audio & reading";
+"settings.nav.audio"          = "Text preparation";
+"settings.nav.theme"          = "Theme";
 "settings.nav.installations"  = "Installations";
 "settings.nav.diagnostics"    = "Diagnostics";
 "settings.nav.interface"      = "Interface language";
@@ -48,6 +49,9 @@
 "settings.lang.no-voices"         = "No voices installed for this language.";
 "settings.lang.install-cta"       = "Install voices…";
 "settings.voice.preview-kicker"   = "PREVIEW";
+"settings.voice.preview_sentence" = "Time, high in the mountains, is not the time of the lowlands.";
+"settings.voice.preview_play_a11y" = "Play voice preview";
+"settings.voice.preview_stop_a11y" = "Stop preview";
 "settings.stt.apple-requires"     = "Apple Speech requires macOS Dictation.";
 "settings.stt.open-sys-prefs"     = "Open System Settings →";
 "settings.audio.volume"           = "Volume";
@@ -61,4 +65,116 @@
 "settings.interface.sub"      = "the language of the app's own text. Restart Marginalia to apply the change.";
 "settings.interface.italian"  = "Italiano";
 "settings.interface.english"  = "English";
-"settings.interface.restart"  = "Restart Marginalia for the new language to take effect.";
+
+// Reading view — rotating hints in the margin panel footer
+"reading.hint.note_hover"     = "hover a note to see the linked chunk";
+"reading.hint.note_click"     = "click a note to jump to its chunk";
+"reading.hint.chunk_dblclick" = "double-click a chunk to read it from the start";
+"reading.hint.voice_note"     = "say \"note\" to record a voice note";
+"reading.hint.voice_control"  = "say \"pause\" or \"next\" to control playback";
+"reading.hint.add_button"     = "+ at the top to write or dictate a note";
+"reading.hint.note_edit"      = "pencil on a note to edit it";
+"reading.hint.settings"       = "⌘, to open settings";
+
+// Reading view — empty document fallback (e.g. PDF scans without OCR)
+"reading.empty.kicker"        = "NO TEXT EXTRACTED";
+"reading.empty.body"          = "This document has no readable text. It's probably a scan without OCR, or it's DRM-protected.";
+
+// Reading view — font stepper / mode toggle
+"reading.font.larger"         = "Increase text size";
+"reading.font.smaller"        = "Decrease text size";
+"reading.mode.book"           = "book";
+"reading.mode.text"           = "text";
+"reading.mode.technical"      = "technical";
+"reading.mode.help"           = "%@ mode";
+
+// Reading view — margin notes panel
+"reading.margin.kicker"       = "MARGINALIA";
+"reading.margin.notes_zero"   = "no notes in this chapter";
+"reading.margin.notes_one"    = "1 note in this chapter";
+"reading.margin.notes_other"  = "%lld notes in this chapter";
+"reading.margin.add.help"     = "Add a note to the current chunk";
+"reading.margin.add.a11y"     = "Add note";
+
+// Reading view — toolbar state kickers
+"reading.toolbar.playing"     = "PLAYING";
+"reading.toolbar.paused"      = "PAUSED";
+"reading.toolbar.ready"       = "READY";
+"reading.toolbar.synthesizing" = "SYNTHESIZING";
+
+// Reading view — live note card kicker fallbacks
+"reading.live.speaking"       = "SPEAKING";
+"reading.live.fallback"       = "NOTE";
+
+// Reading view — note card actions
+"reading.note.edit"           = "Edit note";
+"reading.note.delete"         = "Delete note";
+"reading.note.play"           = "Play note";
+"reading.note.stop"           = "Stop playback";
+
+// Reading view — note compose sheet
+"reading.compose.kicker"      = "NEW NOTE";
+"reading.compose.hint"        = "speak to dictate, or type here";
+"reading.compose.listening"   = "LISTENING";
+"reading.compose.transcribed" = "TRANSCRIBED";
+
+// Empty state shown when no document is open
+"empty.with_library.title"    = "Pick a document";
+"empty.with_library.subtitle" = "Select a title from the library on the left to start listening. Reading resumes from where you left off, if already started.";
+"empty.library.title"         = "Start reading";
+"empty.library.subtitle"      = "Your library is empty. Import your first document to begin — Marginalia chunks it, reads it aloud, and remembers where you were.";
+"empty.library.drop_hint"     = "or drag a PDF, EPUB, or .txt onto this window";
+
+// Common verbs reused across surfaces
+"common.cancel"               = "cancel";
+"common.save"                 = "save";
+"common.import"               = "import";
+
+// Info-chip pill shown next to section titles in Settings
+"info.what_is_it"             = "what's this?";
+
+// Per-language bulk actions in the Voice installations group
+"settings.install.install_all"   = "install all";
+"settings.install.uninstall_all" = "uninstall all";
+
+// LogPane footer at the bottom of the window
+"logpane.idle"                = "ready";
+"logpane.toggle"              = "log";
+"logpane.show"                = "Show log";
+"logpane.hide"                = "Hide log";
+
+// Onboarding install screen
+"onboarding.install.download"  = "download";
+"onboarding.install.all_ready" = "all set";
+
+// Sidebar — section titles, search, library actions
+"sidebar.library.title"       = "library";
+"sidebar.library.open"        = "Open";
+"sidebar.library.remove"      = "Remove from library";
+"sidebar.library.empty"       = "No documents yet. Use + to import.";
+"sidebar.library.no_results"  = "No results for \"%@\".";
+// LibRow metadata parts. Each shown only when count > 0.
+"sidebar.library.chapters_one"   = "1 chapter";
+"sidebar.library.chapters_other" = "%lld chapters";
+"sidebar.library.chunks_one"     = "1 chunk";
+"sidebar.library.chunks_other"   = "%lld chunks";
+"sidebar.library.notes_one"      = "1 note";
+"sidebar.library.notes_other"    = "%lld notes";
+
+// Sidebar — search bar
+"sidebar.search.placeholder"  = "search the library";
+"sidebar.search.clear"        = "Clear filter";
+
+// Sidebar — header import button + footer
+"sidebar.import.help"         = "Import document…";
+"sidebar.import.a11y"         = "Import document";
+"sidebar.footer.voice_empty"  = "Voice: —";
+"sidebar.footer.voice"        = "Voice: %@";
+"sidebar.settings.help"       = "Settings";
+"sidebar.settings.a11y"       = "Open settings";
+
+// Sidebar — footer play/pause toggle
+"sidebar.play.pause.help"     = "Pause";
+"sidebar.play.resume.help"    = "Resume";
+"sidebar.play.pause.a11y"     = "Pause";
+"sidebar.play.resume.a11y"    = "Resume playback";

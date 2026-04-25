@@ -233,6 +233,13 @@ struct SidecarInit {
     #[cfg(feature = "apple-stt")]
     waveform_handle:
         Option<Arc<Mutex<marginalia_runtime::builder::WaveformData>>>,
+    /// Cloned handle to the AEC render slot so the parent thread can
+    /// feed the reference signal when GUI-side playback (note WAVs via
+    /// AVAudioPlayer) starts. The slot is `Clone` and stays valid even
+    /// across STT helper respawns — `install` simply replaces its inner
+    /// sender. None on builds without apple-stt + host-playback.
+    #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+    aec_render_slot: reconfigure::AecRenderSlot,
 }
 
 enum SidecarCmd {
@@ -891,6 +898,14 @@ pub struct FfiRuntime {
     #[cfg(feature = "apple-stt")]
     waveform_handle:
         Option<Arc<Mutex<marginalia_runtime::builder::WaveformData>>>,
+    /// Forward the AEC render reference from the parent thread when the
+    /// GUI plays a note WAV via AVAudioPlayer (which bypasses the rodio
+    /// host engine and therefore the existing render callback). Cloned
+    /// from the sidecar at init; `install` happens on the sidecar but
+    /// the inner `Arc<Mutex<…>>` is shared, so calls here see the live
+    /// AEC sender as long as a helper is running.
+    #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+    aec_render_slot: reconfigure::AecRenderSlot,
     _sidecar: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -973,6 +988,15 @@ impl FfiRuntime {
         if let Some(dir) = tui.tts_cache_dir.clone() {
             runtime_cfg.tts_cache_dir = Some(resolve_rel(dir));
         }
+        // Normalize the runtime's default_language to BCP-47 so the
+        // host UI's `host.languages` (BCP-47 entries from Discovery
+        // like "it-IT", "en-US") matches what `currentSpec.language`
+        // reports. Without this, RuntimeConfig::default() set "it"
+        // and the LangPicker compared "it" to "it-IT" → no selection
+        // + the "no voices for this language" filter went empty even
+        // when Italian voices were installed.
+        runtime_cfg.default_language =
+            reconfigure::normalize_apple_language(&tui.stt.language);
         let db_path_clone = db_path.clone();
         // Captured for use inside the sidecar thread when the config
         // didn't specify a cache dir — same resolution rule as db_path.
@@ -995,18 +1019,32 @@ impl FfiRuntime {
                     .playback(playback_cfg)
                     .build();
 
+                // Captured from `output.aec_render_slot` in the Ok arm so the
+                // post-init `ReconfigureContext` can reuse the same slot
+                // (avoids the pre-existing two-slot bug where STT respawns
+                // updated a slot the playback callbacks didn't observe).
+                #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+                let build_aec_slot: reconfigure::AecRenderSlot;
                 let (mut sidecar, mut runtime_owned) = match result {
                     Ok(output) => {
                         let runtime_arc = Arc::new(Mutex::new(output.runtime));
                         #[cfg(feature = "apple-stt")]
                         let waveform_handle = output.sidecar.waveform_data.clone();
+                        #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+                        let slot = output.aec_render_slot.clone();
                         let init = SidecarInit {
                             runtime: runtime_arc.clone(),
                             #[cfg(feature = "apple-stt")]
                             waveform_handle,
+                            #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+                            aec_render_slot: slot.clone(),
                         };
                         if init_tx.send(Ok(init)).is_err() {
                             return; // parent gave up
+                        }
+                        #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+                        {
+                            build_aec_slot = slot;
                         }
                         (output.sidecar, runtime_arc)
                     }
@@ -1040,8 +1078,14 @@ impl FfiRuntime {
                     })
                     .ok();
 
+                // Reuse the build()-created slot rather than minting a new one.
+                // The playback engine's `play_samples_callback` was wired with
+                // clones of *that* slot, so STT respawns via apply_provider_spec
+                // must update the same shared inner sender — otherwise the
+                // post-respawn playback would publish render references to a
+                // dropped channel and AEC would go silent.
                 #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
-                let aec_render_slot = reconfigure::AecRenderSlot::new();
+                let aec_render_slot = build_aec_slot;
 
                 let mut ctx = ReconfigureContext {
                     mlx: mlx_cfg,
@@ -1176,6 +1220,8 @@ impl FfiRuntime {
             db_path,
             #[cfg(feature = "apple-stt")]
             waveform_handle: init.waveform_handle,
+            #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+            aec_render_slot: init.aec_render_slot,
             _sidecar: Mutex::new(Some(handle)),
         })
     }
@@ -1408,6 +1454,25 @@ impl FfiRuntime {
             .seek_to_chunk(section_index as usize, chunk_index as usize)?;
         Ok(())
     }
+
+    /// Variant used by single-click-on-note: seek to the position but
+    /// keep playback paused. The runtime's `seek_to_chunk` always auto-
+    /// plays (it routes through `replay_session_at_position` which
+    /// drives `playback_engine.start` → rodio's sink begins playing as
+    /// soon as the source is appended). For "review silently" semantics
+    /// we follow up with `pause_session` under the same lock so there
+    /// is no interleaved event window. The cached audio is still
+    /// loaded, so a subsequent `resume` is instant.
+    pub fn seek_to_chunk_paused(
+        &self,
+        section_index: u32,
+        chunk_index: u32,
+    ) -> Result<(), FfiError> {
+        let mut rt = self.runtime.lock().unwrap();
+        rt.seek_to_chunk(section_index as usize, chunk_index as usize)?;
+        rt.pause_session()?;
+        Ok(())
+    }
     pub fn auto_advance(&self) -> bool {
         self.runtime.lock().unwrap().try_auto_advance()
     }
@@ -1621,6 +1686,110 @@ impl FfiRuntime {
     /// rationale. Caller polls this on its event tick.
     pub fn dictation_partial(&self) -> String {
         self.runtime.lock().unwrap().dictation_partial()
+    }
+
+    /// Feed the AEC render reference from a WAV/FLAC file the GUI is
+    /// about to play through a pipeline that BYPASSES the rodio host
+    /// engine (currently: Swift `AVAudioPlayer` for note playback).
+    ///
+    /// Without this, the speaker echo of a note would reach the mic
+    /// uncancelled and SFSpeechRecognizer would happily trigger any
+    /// command words inside the note body — e.g. a note containing
+    /// "nota" would auto-fire the dictation flow on the next playback.
+    ///
+    /// The audio is decoded, downmixed to mono `f32`, and shipped as
+    /// the full reference buffer (matching how chunk playback feeds
+    /// AEC at `start()`). On builds without apple-stt+host-playback
+    /// this is a silent no-op. Returns `false` if the file couldn't
+    /// be opened/decoded so the caller can decide whether to suppress
+    /// commands as a fallback.
+    pub fn aec_set_render_reference(&self, _path: String) -> bool {
+        #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+        {
+            let Ok(reader) = hound::WavReader::open(&_path) else {
+                log::warn!("[aec] cannot open WAV at {_path} for render reference");
+                return false;
+            };
+            let spec = reader.spec();
+            let channels = spec.channels.max(1) as usize;
+            let samples_f32: Vec<f32> = match spec.sample_format {
+                hound::SampleFormat::Int => {
+                    let bits = spec.bits_per_sample.max(1) as i32;
+                    let scale = (1i32 << (bits - 1)) as f32;
+                    let mut iter = reader.into_samples::<i32>();
+                    let mut out: Vec<f32> = Vec::new();
+                    'outer: loop {
+                        // Take channels-worth of samples; keep first channel only.
+                        let Some(first) = iter.next() else { break 'outer };
+                        let Ok(v) = first else { break 'outer };
+                        out.push(v as f32 / scale);
+                        for _ in 1..channels {
+                            if iter.next().is_none() {
+                                break 'outer;
+                            }
+                        }
+                    }
+                    out
+                }
+                hound::SampleFormat::Float => {
+                    let mut iter = reader.into_samples::<f32>();
+                    let mut out: Vec<f32> = Vec::new();
+                    'outer: loop {
+                        let Some(first) = iter.next() else { break 'outer };
+                        let Ok(v) = first else { break 'outer };
+                        out.push(v);
+                        for _ in 1..channels {
+                            if iter.next().is_none() {
+                                break 'outer;
+                            }
+                        }
+                    }
+                    out
+                }
+            };
+            // The AEC pipeline expects 24kHz mono (matches
+            // marginalia_stt_apple::AEC_SAMPLE_RATE). Both note sources
+            // hit that natively: MLX TTS writes 24k WAV, the Apple
+            // dictation recorder also writes 24k via hound. If a future
+            // source drifts off-rate, downsample here — for now keep
+            // the path tight and warn so the mismatch surfaces.
+            const AEC_RATE: u32 = 24_000;
+            if spec.sample_rate != AEC_RATE {
+                log::warn!(
+                    "[aec] render reference sample rate {} != {}, AEC alignment may suffer",
+                    spec.sample_rate,
+                    AEC_RATE
+                );
+            }
+            self.aec_render_slot.send_set_reference(samples_f32);
+            return true;
+        }
+        #[cfg(not(all(feature = "apple-stt", feature = "host-playback")))]
+        {
+            false
+        }
+    }
+
+    /// Clear the AEC render reference. Call this when the GUI-side
+    /// player stops (user tapped stop, audio drained naturally, note
+    /// got deleted mid-playback). No-op when no reference is loaded.
+    pub fn aec_clear_render_reference(&self) {
+        #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+        {
+            self.aec_render_slot.send_clear();
+        }
+    }
+
+    /// Absolute path of the TTS audio cache directory (where the
+    /// synthesizer writes its FLAC files). Used by Settings to display
+    /// the live size and offer a "reveal in Finder" affordance.
+    pub fn tts_cache_dir(&self) -> String {
+        let rt = self.runtime.lock().unwrap();
+        rt.config()
+            .tts_cache_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default()
     }
 
     /// Read the configured Whisper model path. Empty string = unset.

@@ -399,6 +399,12 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// Jump to a specific `(section, chunk)` position in the active document.
     /// Wired to chunk-click in the reading column.
     func seekToChunk(section: Int, chunk: Int) async throws
+    /// Same as `seekToChunk` but the runtime pauses playback immediately
+    /// after re-loading the new position, so single-click on a note
+    /// repositions silently. Without this the runtime auto-plays on
+    /// every seek (its `replay_session_at_position` always calls
+    /// `playback_engine.start` which kicks rodio into Playing).
+    func seekToChunkPaused(section: Int, chunk: Int) async throws
 
     /// Fire-and-forget: start a voice-note dictation. The live note card
     /// lights up via `dictationStarted`, the final transcript arrives via
@@ -448,6 +454,21 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// Linear playback volume, 0.0–1.0. Rodio accepts >1.0 as amplifi-
     /// cation but the slider caps at 1.0 to avoid distortion by default.
     var volume: Double { get set }
+
+    /// Push the WAV at `path` into the AEC pipeline as the render
+    /// reference for audio the GUI is about to play *outside* of the
+    /// rodio host engine — currently Swift `AVAudioPlayer` for note
+    /// playback. AEC3 will then subtract that signal from the mic
+    /// capture so a note whose body contains "nota" (or any other
+    /// voice trigger) doesn't auto-fire commands when the speaker
+    /// echoes back into the microphone. Returns false on decode
+    /// failure or when AEC isn't compiled in (e.g. non-Apple STT) so
+    /// the caller can fall back to suppressing commands manually.
+    @discardableResult
+    func aecSetRenderReference(path: String) -> Bool
+    /// Clear the AEC render reference (call when the player stops or
+    /// drains). Idempotent — no-op when no reference is loaded.
+    func aecClearRenderReference()
     /// Save a "[BOOKMARK] …" note at the current position (voice: "segna").
     func bookmark() async throws
     /// Human-readable position string (voice: "dove sono"). Callers
@@ -499,6 +520,10 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// Used by the STT section to display "installato · path" with a
     /// Reveal-in-Finder button.
     var whisperModelPath: String? { get }
+
+    /// Absolute path of the TTS audio cache directory. Used by Settings
+    /// to compute the on-disk size and offer "reveal in Finder".
+    var ttsCacheDir: String { get }
 
     /// Synthesize a short preview WAV for the given text in the given voice
     /// and return the absolute path. Used by the Voice preview play button
@@ -679,6 +704,9 @@ public final class MockHost: MarginaliaHost, ObservableObject {
         pushMessage("Posizione: \(pos)")
         return pos
     }
+    @discardableResult
+    public func aecSetRenderReference(path: String) -> Bool { false }
+    public func aecClearRenderReference() {}
     public func tick() -> [MarginaliaEvent] {
         // Animate a gentle mock waveform so the Sidebar footer visibly
         // breathes. Real AEC levels arrive from the FFIHost in production.
@@ -798,6 +826,10 @@ public final class MockHost: MarginaliaHost, ObservableObject {
         "models/stt/whisper/ggml-small.bin"
     }
 
+    public var ttsCacheDir: String {
+        ".marginalia/tts-cache"
+    }
+
     public func synthesizePreview(text: String, voice: String) async throws -> String {
         // Mock: no actual synthesis available; we just simulate a delay and
         // return a path that the caller handles gracefully (plays nothing).
@@ -839,6 +871,22 @@ public final class MockHost: MarginaliaHost, ObservableObject {
             sectionTitle: s.sectionTitle, chunkIndex: chunk,
             chunkText: s.chunkText, anchor: "c\(section)-\(chunk)",
             playbackState: s.playbackState, notesCount: s.notesCount,
+            voice: s.voice
+        )
+        currentSession = s
+    }
+    public func seekToChunkPaused(section: Int, chunk: Int) async throws {
+        try await seekToChunk(section: section, chunk: chunk)
+        // Mock has no real audio engine — flip the snapshot's state to
+        // .paused so the toolbar reflects the silent-seek semantics.
+        guard var s = currentSession else { return }
+        s = SessionState(
+            sessionId: s.sessionId, documentId: s.documentId,
+            documentTitle: s.documentTitle,
+            sectionIndex: s.sectionIndex, sectionCount: s.sectionCount,
+            sectionTitle: s.sectionTitle, chunkIndex: s.chunkIndex,
+            chunkText: s.chunkText, anchor: s.anchor,
+            playbackState: .paused, notesCount: s.notesCount,
             voice: s.voice
         )
         currentSession = s

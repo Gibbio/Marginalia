@@ -525,15 +525,26 @@ impl SqliteRuntime {
         }
 
         // 2. Check on-disk cache by deterministic filename (cross-session).
+        // Synthesizer extension switched from .flac → .wav (Apple high-
+        // level audio APIs decode WAV reliably; FLAC needs the right
+        // codec install). Look for either: existing FLAC caches stay
+        // usable on the in-app rodio path, new entries are WAV.
         if let Some(ref cache_dir) = self.config.tts_cache_dir {
             use sha2::{Digest, Sha256};
             let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
-            let cached_path = cache_dir.join(format!("{hash}.flac"));
+            let wav_path = cache_dir.join(format!("{hash}.wav"));
+            let flac_path = cache_dir.join(format!("{hash}.flac"));
+            let cached_path = if wav_path.exists() { wav_path }
+                              else if flac_path.exists() { flac_path }
+                              else { wav_path };  // sentinel; .exists() below is false
             if cached_path.exists() {
+                let ext = cached_path.extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("wav");
                 let result = SynthesisResult {
                     provider_name: self.tts.describe_capabilities().provider_name,
                     voice: voice.clone(),
-                    content_type: "audio/flac".to_string(),
+                    content_type: format!("audio/{ext}"),
                     audio_reference: cached_path.display().to_string(),
                     byte_length: cached_path
                         .metadata()
@@ -565,12 +576,18 @@ impl SqliteRuntime {
         let mut result = self.tts.synthesize(request)?;
 
         // 4. Rename to deterministic path so it persists across restarts.
+        // Preserve whatever extension the synthesizer produced (.wav
+        // for MLX now, but .flac fallback in case other backends still
+        // use it).
         if let Some(ref cache_dir) = self.config.tts_cache_dir {
             use sha2::{Digest, Sha256};
             let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
-            let stable_path = cache_dir.join(format!("{hash}.flac"));
+            let ext = std::path::Path::new(&result.audio_reference)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("wav");
+            let stable_path = cache_dir.join(format!("{hash}.{ext}"));
             if let Err(e) = std::fs::rename(&result.audio_reference, &stable_path) {
-                // rename may fail cross-device; try copy + delete
                 if std::fs::copy(&result.audio_reference, &stable_path).is_ok() {
                     let _ = std::fs::remove_file(&result.audio_reference);
                 } else {

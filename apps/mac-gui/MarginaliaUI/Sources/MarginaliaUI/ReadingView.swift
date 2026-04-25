@@ -40,6 +40,22 @@ public enum ReadingMock {
     ]
 }
 
+/// Pool of one-line tips shown in the margin panel footer. Rotates
+/// every ~7s via TimelineView so the user discovers shortcuts
+/// without us cluttering the UI with persistent help labels. Top-
+/// level so it's reachable from the generic ReadingView (no static
+/// stored properties allowed in generic types).
+fileprivate let marginPanelHintKeys: [String] = [
+    "reading.hint.note_hover",
+    "reading.hint.note_click",
+    "reading.hint.chunk_dblclick",
+    "reading.hint.voice_note",
+    "reading.hint.voice_control",
+    "reading.hint.add_button",
+    "reading.hint.note_edit",
+    "reading.hint.settings",
+]
+
 // MARK: — PreferenceKeys for link-overlay geometry
 
 struct ChunkFrame: Equatable { let id: String; let rect: CGRect }
@@ -95,7 +111,6 @@ public enum ReadingPrefs {
 public struct ReadingView<Host: MarginaliaHost>: View {
     public var accent: Accent
     @ObservedObject private var host: Host
-    public var onOpenSettings: () -> Void
 
     @State private var hoverId: String? = nil
     @State private var chunkFrames: [String: CGRect] = [:]
@@ -111,6 +126,11 @@ public struct ReadingView<Host: MarginaliaHost>: View {
     /// the same note (or a delete) can `stop()` the audio mid-playback
     /// instead of having to wait for it to drain.
     @State private var notePlayer: AVAudioPlayer? = nil
+    /// Per-bucket peak amplitudes sampled from the playing note's audio
+    /// file (WAV / FLAC). Empty when no note is playing — Waveform then
+    /// falls back to its dim sine, which is fine because the bar is also
+    /// idle. Populated alongside `notePlayer` in `startPlayingNote`.
+    @State private var notePlayerLevels: [Float] = []
     /// Non-nil while the "+ aggiungi nota" sheet is open. The sheet
     /// pauses playback on present and lets the user type (or trigger
     /// voice dictation) — on save, runtime.createNote attaches the text
@@ -124,11 +144,9 @@ public struct ReadingView<Host: MarginaliaHost>: View {
     /// Per-user text-size multiplier, persisted. 1.0 = design default.
     @AppStorage(ReadingPrefs.scaleKey) private var fontScale: Double = 1.0
 
-    public init(accent: Accent, host: Host,
-                onOpenSettings: @escaping () -> Void = {}) {
+    public init(accent: Accent, host: Host) {
         self.accent = accent
         self._host = ObservedObject(initialValue: host)
-        self.onOpenSettings = onOpenSettings
     }
 
     /// All sections of the currently-loaded document, in document order.
@@ -287,6 +305,18 @@ public struct ReadingView<Host: MarginaliaHost>: View {
         }
         player.prepareToPlay()
         notePlayer = player
+        // Sample real peaks from the file so the footer waveform shows
+        // the actual envelope of THIS note (matches the SettingsView
+        // voice-preview pattern). Sized to NoteCard's bar count.
+        notePlayerLevels = ReadingView.waveformLevels(fromAudioFile: path, buckets: 32)
+        // AVAudioPlayer plays through the system output WITHOUT going
+        // through the rodio HostPlaybackEngine, so the chunk-playback's
+        // AEC render callback never fires for this audio. We feed the
+        // reference manually here — AEC3 will subtract the note signal
+        // from the mic capture so a body containing "nota" or any other
+        // voice trigger doesn't auto-fire commands when the speaker
+        // echoes back. No-op on STT engines without an AEC pipeline.
+        host.aecSetRenderReference(path: path)
         let duration = player.duration
         player.play()
         // Auto-clear when audio finishes naturally. ReadingView is a
@@ -300,7 +330,9 @@ public struct ReadingView<Host: MarginaliaHost>: View {
             await MainActor.run {
                 if currentPlayingNoteId == noteId {
                     notePlayer = nil
+                    notePlayerLevels = []
                     currentPlayingNoteId = nil
+                    host.aecClearRenderReference()
                 }
             }
         }
@@ -311,25 +343,79 @@ public struct ReadingView<Host: MarginaliaHost>: View {
     private func stopNotePlayback() {
         notePlayer?.stop()
         notePlayer = nil
+        notePlayerLevels = []
         currentPlayingNoteId = nil
+        host.aecClearRenderReference()
+    }
+
+    /// Read a WAV/FLAC at `path` and downsample its absolute amplitudes
+    /// into `buckets` peak values (0…1). Mirrors the helper in
+    /// SettingsView so NoteCard's footer waveform reflects the real
+    /// envelope of the playing note rather than a static sine.
+    fileprivate static func waveformLevels(fromAudioFile path: String, buckets: Int) -> [Float] {
+        let url = URL(fileURLWithPath: path)
+        guard let file = try? AVAudioFile(forReading: url) else { return [] }
+        let format = file.processingFormat
+        let frameCount = AVAudioFrameCount(file.length)
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
+        else { return [] }
+        do { try file.read(into: buffer) } catch { return [] }
+        guard let channels = buffer.floatChannelData else { return [] }
+        let count = Int(buffer.frameLength)
+        guard count > 0 else { return [] }
+        let samples = UnsafeBufferPointer(start: channels[0], count: count)
+        let bucketSize = max(1, count / buckets)
+        var levels: [Float] = []
+        levels.reserveCapacity(buckets)
+        for i in 0..<buckets {
+            let start = i * bucketSize
+            let end = min(count, start + bucketSize)
+            var peak: Float = 0
+            for j in start..<end {
+                let v = abs(samples[j])
+                if v > peak { peak = v }
+            }
+            levels.append(min(peak, 1.0))
+        }
+        return levels
     }
 
     /// Parse a note's anchor ("section:N/chunk:M") and seek the reader
-    /// to that position. Pauses playback first — double-clicking a note
-    /// to jump back expects the TTS to stop so the user can find their
-    /// bearings before resuming. Silently no-ops on malformed anchors.
+    /// to that position. Single-click on the note jumps the reader to
+    /// the chunk in PAUSE — the user can review silently or hit play.
+    /// Routes through `seekToChunkPaused` (FFI variant that pauses
+    /// atomically post-seek under the same runtime lock) so we never
+    /// emit the brief audio burst the regular `seekToChunk` would
+    /// (its `replay_session_at_position` always auto-plays via the
+    /// rodio sink). Silently no-ops on malformed anchors.
     private func seekToNote(_ note: MarginNote) {
-        let parts = note.chunkId.split(separator: "/")
+        guard let (section, chunk) = parseNoteAnchor(note.chunkId) else { return }
+        Task {
+            try? await host.seekToChunkPaused(section: section, chunk: chunk)
+        }
+    }
+
+    /// Double-click variant: same as `seekToNote` but immediately
+    /// resumes reading after the seek so the user can audit the
+    /// passage out loud with one gesture.
+    private func seekToNoteAndPlay(_ note: MarginNote) {
+        guard let (section, chunk) = parseNoteAnchor(note.chunkId) else { return }
+        Task {
+            try? await host.seekToChunk(section: section, chunk: chunk)
+            try? await host.resume()
+        }
+    }
+
+    /// Decode "section:N/chunk:M" → (N, M). Returns nil on any other
+    /// shape so callers can no-op cleanly.
+    private func parseNoteAnchor(_ anchor: String) -> (Int, Int)? {
+        let parts = anchor.split(separator: "/")
         guard parts.count == 2,
               let section = Int(parts[0].split(separator: ":").last ?? ""),
               let chunk = Int(parts[1].split(separator: ":").last ?? "")
-        else { return }
-        Task {
-            if host.currentSession?.playbackState == .playing {
-                try? await host.pause()
-            }
-            try? await host.seekToChunk(section: section, chunk: chunk)
-        }
+        else { return nil }
+        return (section, chunk)
     }
 
     /// Uppercased document title — the kicker line above the main text.
@@ -402,10 +488,10 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                         // a gentle explanation rather than a blank area.
                         if sections.allSatisfy({ $0.chunks.isEmpty }) {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("NESSUN TESTO ESTRATTO")
+                                Text(T("reading.empty.kicker"))
                                     .font(.mono(10)).tracking(1.5)
                                     .foregroundStyle(Tokens.textFaint)
-                                Text("Questo documento non contiene testo leggibile. Probabilmente è una scansione senza OCR, o è protetto da DRM.")
+                                Text(T("reading.empty.body"))
                                     .font(.serif(15, italic: true))
                                     .foregroundStyle(Tokens.textDim)
                                     .lineSpacing(4)
@@ -482,7 +568,7 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Aumenta testo")
+            .accessibilityLabel(T("reading.font.larger"))
 
             Rectangle()
                 .fill(Tokens.line)
@@ -507,7 +593,7 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Rimpicciolisci testo")
+            .accessibilityLabel(T("reading.font.smaller"))
         }
         // Narrow column — roughly the height of the mode toggle's buttons
         // so the two feel visually paired (one vertical, one horizontal).
@@ -541,10 +627,10 @@ public struct ReadingView<Host: MarginaliaHost>: View {
     /// so the pill stays compact and the glyphs (SF Symbols) do the talking.
     private var readingModeToggle: some View {
         HStack(spacing: 2) {
-            modeButton(.book,      icon: "book",                             label: "libro")
-            modeButton(.text,      icon: "text.alignleft",                   label: "testo")
+            modeButton(.book,      icon: "book",                             label: T("reading.mode.book"))
+            modeButton(.text,      icon: "text.alignleft",                   label: T("reading.mode.text"))
             modeButton(.technical, icon: "chevron.left.forwardslash.chevron.right",
-                                    label: "tecnico")
+                                    label: T("reading.mode.technical"))
         }
         .padding(3)
         .background(
@@ -564,10 +650,16 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                 .background(
                     Capsule().fill(selected ? accent.main : Color.clear)
                 )
+                // Without `contentShape`, SwiftUI only hit-tests on the
+                // opaque pixels of the SF Symbol — the user has to land
+                // on the glyph itself, not the surrounding capsule.
+                // Forcing a Rectangle hit area makes the whole 28×22
+                // frame tappable.
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Modalità \(label)")
-        .accessibilityLabel("Modalità \(label)")
+        .help(String(format: T("reading.mode.help"), label))
+        .accessibilityLabel(String(format: T("reading.mode.help"), label))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -759,16 +851,28 @@ public struct ReadingView<Host: MarginaliaHost>: View {
         }
     }
 
+    /// Localized "N notes in this chapter" label, picking the right
+    /// plural form. Three keys (`_zero`, `_one`, `_other`) keep callers
+    /// out of a `.stringsdict` while still reading naturally in both
+    /// IT (singular/plural) and EN.
+    private func notesCountLabel(_ count: Int) -> String {
+        switch count {
+        case 0: return T("reading.margin.notes_zero")
+        case 1: return T("reading.margin.notes_one")
+        default: return String(format: T("reading.margin.notes_other"), count)
+        }
+    }
+
     // Margin panel
     private var marginPanel: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("MARGINALIA")
+                    Text(T("reading.margin.kicker"))
                         .font(.mono(10))
                         .tracking(1.5)
                         .foregroundStyle(Tokens.textFaint)
-                    Text("\(notes.count) note in questo capitolo")
+                    Text(notesCountLabel(notes.count))
                         .font(.serif(15, italic: true))
                         .foregroundStyle(Tokens.text)
                 }
@@ -786,10 +890,11 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .strokeBorder(accent.main.opacity(0.4), lineWidth: 1)
                         )
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Aggiungi nota al chunk corrente")
-                .accessibilityLabel("Aggiungi nota")
+                .help(T("reading.margin.add.help"))
+                .accessibilityLabel(T("reading.margin.add.a11y"))
                 .disabled(host.currentSession == nil)
                 Text("⌥M")
                     .font(.mono(10))
@@ -832,7 +937,10 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                                      },
                                      onPlay: { playNote(note.id) },
                                      onSeek: { seekToNote(note) },
-                                     isPlaying: currentPlayingNoteId == note.id)
+                                     onSeekAndPlay: { seekToNoteAndPlay(note) },
+                                     isPlaying: currentPlayingNoteId == note.id,
+                                     player: currentPlayingNoteId == note.id ? notePlayer : nil,
+                                     levels: currentPlayingNoteId == note.id ? notePlayerLevels : [])
                         }
                     }
                 }
@@ -845,32 +953,28 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                     Circle().fill(accent.main).frame(width: 5, height: 5)
                 }
                 .frame(width: 24, height: 24)
-                Text("passa sopra una nota per vedere il chunk collegato")
+                rotatingHint
                     .font(.serif(13, italic: true))
                     .foregroundStyle(Tokens.textDim)
                     .lineLimit(2)
                 Spacer(minLength: 8)
-                // Gear lives here now (moved from the sidebar header), so the
-                // settings entrypoint sits in a region not already occupied
-                // by the search/ingest controls on the left column.
-                Button(action: onOpenSettings) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(Tokens.textDim)
-                        .frame(width: 28, height: 28)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(Tokens.textGhost, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .help("Impostazioni")
-                .accessibilityLabel("Apri impostazioni")
-                .keyboardShortcut(",", modifiers: [.command])
+                // Settings entrypoint moved to the sidebar footer
+                // (always visible, no document required).
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
         }
         .background(Tokens.bg)
+    }
+
+    @ViewBuilder
+    private var rotatingHint: some View {
+        TimelineView(.periodic(from: Date(), by: 7)) { ctx in
+            let idx = Int(ctx.date.timeIntervalSinceReferenceDate / 7)
+                % marginPanelHintKeys.count
+            Text(T(marginPanelHintKeys[abs(idx)]))
+                .transition(.opacity)
+                .id(idx)
+        }
     }
 
     // Link overlay (curve from chunk → note)
@@ -933,9 +1037,9 @@ struct Toolbar: View {
     /// ASCOLTO" isn't lingering when nothing is actually being read.
     private var stateKicker: String {
         switch playbackState {
-        case .playing:                     return "IN ASCOLTO"
-        case .paused:                      return "IN PAUSA"
-        case .idle, .finished, .unknown:   return "PRONTO"
+        case .playing:                     return T("reading.toolbar.playing")
+        case .paused:                      return T("reading.toolbar.paused")
+        case .idle, .finished, .unknown:   return T("reading.toolbar.ready")
         }
     }
 
@@ -953,7 +1057,7 @@ struct Toolbar: View {
                         .controlSize(.mini)
                         .tint(accent.main)
                         .alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 2 }
-                    Text("SINTETIZZANDO")
+                    Text(T("reading.toolbar.synthesizing"))
                         .font(.mono(10))
                         .tracking(1.5)
                         .foregroundStyle(accent.main)
@@ -968,10 +1072,8 @@ struct Toolbar: View {
                     .lineLimit(1)
                     .fixedSize()
             }
-            // Same size as "Impostazioni" in the Settings top-bar so the
-            // two surfaces feel like a matching pair of headers.
             Text(title)
-                .font(.serif(20, italic: true))
+                .font(.serif(16, italic: true))
                 .foregroundStyle(Tokens.text)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -979,7 +1081,11 @@ struct Toolbar: View {
             Spacer(minLength: 12)
         }
         .padding(.horizontal, 20)
-        .frame(height: 52)
+        // Matched to the Sidebar header height so the top edge of the
+        // window reads as a single horizontal strip rather than two
+        // mismatched bands. 40pt also better fits the actual content
+        // (kicker + title) without dead vertical space.
+        .frame(height: 40)
     }
 }
 
@@ -1003,9 +1109,9 @@ struct LiveNoteCard: View {
     /// progress); otherwise echoes the host-supplied status ("SALVATA", …).
     /// Falls back to "NOTA" when status is blank.
     private var kicker: String {
-        if note.body.isEmpty { return "STAI PARLANDO" }
+        if note.body.isEmpty { return T("reading.live.speaking") }
         let s = note.status.uppercased()
-        return s.isEmpty ? "NOTA" : s
+        return s.isEmpty ? T("reading.live.fallback") : s
     }
 
     var body: some View {
@@ -1097,14 +1203,27 @@ struct NoteCard: View {
     /// we synth the body text and play that back. Defaults to a no-op
     /// so preview-only callers don't need to plumb anything.
     var onPlay: () -> Void = {}
-    /// Double-click the card routes here: parent pauses playback and
-    /// seeks to the chunk the note is anchored to, so the user can
-    /// jump back to the passage they were annotating with one gesture.
+    /// Single-click on the card routes here: parent pauses playback
+    /// and seeks to the chunk the note is anchored to. The user can
+    /// then read silently or hit play.
     var onSeek: () -> Void = {}
+    /// Double-click on the card: parent seeks to the chunk AND starts
+    /// reading from there immediately. One gesture to "go check this
+    /// passage out loud".
+    var onSeekAndPlay: () -> Void = {}
     /// True when this note's audio is currently playing — drives the
     /// play/stop glyph swap. Owned by the parent (`ReadingView`) so
     /// the toggle stays in sync with the actual audio engine state.
     var isPlaying: Bool = false
+    /// Active AVAudioPlayer when this note is the one currently playing.
+    /// Used by the footer waveform to compute `playedFraction` from
+    /// `currentTime / duration` so the bar fills left-to-right while
+    /// the note plays.
+    var player: AVAudioPlayer? = nil
+    /// Per-bucket peak amplitudes of the playing note's audio file.
+    /// Empty for idle notes — Waveform falls back to its dim sine
+    /// (purely decorative) which matches the inactive look.
+    var levels: [Float] = []
 
     @State private var hovered: Bool = false
     @State private var editing: Bool = false
@@ -1160,17 +1279,19 @@ struct NoteCard: View {
                             .font(.system(size: 10))
                             .foregroundStyle(Tokens.textDim)
                             .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Modifica nota")
+                    .help(T("reading.note.edit"))
                     Button(action: onDelete) {
                         Image(systemName: "trash")
                             .font(.system(size: 10))
                             .foregroundStyle(Color.red.opacity(0.75))
                             .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Elimina nota")
+                    .help(T("reading.note.delete"))
                 }
             }
             .padding(.bottom, 6)
@@ -1203,11 +1324,11 @@ struct NoteCard: View {
                                 .strokeBorder(accent.main.opacity(0.3), lineWidth: 1)
                         )
                     HStack(spacing: 8) {
-                        Button("annulla") { editing = false }
+                        Button(T("common.cancel")) { editing = false }
                             .buttonStyle(.plain)
                             .font(.mono(10))
                             .foregroundStyle(Tokens.textFaint)
-                        Button("salva") {
+                        Button(T("common.save")) {
                             onSaveEdit(editBuffer.trimmingCharacters(in: .whitespacesAndNewlines))
                             editing = false
                         }
@@ -1236,12 +1357,9 @@ struct NoteCard: View {
                     ZStack {
                         Circle()
                             .fill(isPlaying ? accent.main : Color.clear)
-                            .frame(width: 20, height: 20)
                         Circle()
                             .strokeBorder(isPlaying ? accent.main : Tokens.textGhost, lineWidth: 1)
-                            .frame(width: 20, height: 20)
                         if isPlaying {
-                            // Stop glyph — small filled square.
                             Rectangle()
                                 .fill(Tokens.bg)
                                 .frame(width: 7, height: 7)
@@ -1252,16 +1370,45 @@ struct NoteCard: View {
                                 .offset(x: 1)
                         }
                     }
+                    .frame(width: 22, height: 22)
+                    // Hit-test on the full 22pt square instead of just
+                    // the play triangle / stop square — the user
+                    // shouldn't have to land on the icon pixels.
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(isPlaying ? "Ferma riproduzione" : "Riproduci nota")
-                .accessibilityLabel(isPlaying ? "Ferma riproduzione" : "Riproduci nota")
+                .help(isPlaying ? T("reading.note.stop") : T("reading.note.play"))
+                .accessibilityLabel(isPlaying ? T("reading.note.stop") : T("reading.note.play"))
                 if !note.duration.isEmpty {
                     Text(note.duration)
                         .font(.mono(9))
                         .foregroundStyle(Tokens.textFaint)
                 }
-                Spacer()
+                // Scrolling waveform — mirrors the SettingsView preview
+                // pattern. While `isPlaying`, polls the AVAudioPlayer's
+                // currentTime/duration at ~20Hz and feeds the ratio in
+                // as `playedFraction`, so the bar visibly fills left-to-
+                // right. When idle, the fraction is 0 and the bar sits
+                // dimmed in place.
+                TimelineView(.periodic(from: Date(), by: 0.05)) { _ in
+                    let fraction: Double = {
+                        guard isPlaying,
+                              let p = player,
+                              p.duration > 0
+                        else { return 0 }
+                        return min(1.0, p.currentTime / p.duration)
+                    }()
+                    Waveform(
+                        count: 32,
+                        playedFraction: fraction,
+                        accent: accent.main,
+                        dim: accent.main.opacity(0.3),
+                        seed: 0.42, minHeight: 2, maxBump: 12,
+                        liveLevels: levels.isEmpty ? nil : levels
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 18)
+                }
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
@@ -1274,11 +1421,13 @@ struct NoteCard: View {
             Rectangle().fill(Tokens.lineSoft).frame(height: 1)
         }
         .contentShape(Rectangle())
-        // Double-click the card: pauses + seeks to the anchored chunk.
-        // The parent wires this; we just fire the callback. Single-tap
-        // stays reserved for focus/hover so it doesn't fight the inline
-        // buttons (play, edit, trash) inside the card.
-        .onTapGesture(count: 2) { onSeek() }
+        // Single-click → seek only. Double-click → seek and start
+        // reading from there. The double-tap modifier MUST be added
+        // BEFORE the single-tap one so SwiftUI's gesture resolver
+        // gives the multi-tap priority and waits the recognition
+        // window before firing the single-tap closure.
+        .onTapGesture(count: 2) { onSeekAndPlay() }
+        .onTapGesture(count: 1) { onSeek() }
         .animation(.easeOut(duration: 0.18), value: isActive)
         .onHover { h in
             hovered = h
@@ -1337,7 +1486,7 @@ struct NoteComposeSheet<Host: MarginaliaHost>: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("NUOVA NOTA")
+                    Text(T("reading.compose.kicker"))
                         .font(.mono(10)).tracking(1.5)
                         .foregroundStyle(Tokens.textFaint)
                     if !anchorLabel.isEmpty {
@@ -1376,20 +1525,20 @@ struct NoteComposeSheet<Host: MarginaliaHost>: View {
                 }
 
             HStack(spacing: 10) {
-                Text("parla per dettare, o scrivi qui")
+                Text(T("reading.compose.hint"))
                     .font(.serif(12, italic: true))
                     .foregroundStyle(Tokens.textFaint)
 
                 Spacer()
 
-                Button("annulla") { cancel() }
+                Button(T("common.cancel")) { cancel() }
                     .buttonStyle(.plain)
                     .font(.mono(11))
                     .foregroundStyle(Tokens.textDim)
                     .keyboardShortcut(.cancelAction)
 
                 Button(action: save) {
-                    Text("salva")
+                    Text(T("common.save"))
                         .font(.sans(13, weight: .medium))
                         .foregroundStyle(canSave ? Tokens.bg : Tokens.textFaint)
                         .padding(.horizontal, 18).padding(.vertical, 7)
@@ -1433,12 +1582,12 @@ struct NoteComposeSheet<Host: MarginaliaHost>: View {
                     .fill(accent.main)
                     .frame(width: 6, height: 6)
                     .shadow(color: accent.main, radius: 4)
-                Text("STO ASCOLTANDO")
+                Text(T("reading.compose.listening"))
                     .font(.mono(9)).tracking(1.5)
                     .foregroundStyle(accent.main)
             }
         } else if dictatedNoteId != nil {
-            Text("TRASCRITTO")
+            Text(T("reading.compose.transcribed"))
                 .font(.mono(9)).tracking(1.5)
                 .foregroundStyle(Tokens.textDim)
         }

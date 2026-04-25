@@ -349,7 +349,7 @@ public struct SectionHeader: View {
             HStack(spacing: 5) {
                 Image(systemName: showingInfo ? "info.circle.fill" : "info.circle")
                     .font(.system(size: 12, weight: .regular))
-                Text("cos'è?")
+                Text(T("info.what_is_it"))
                     .font(.mono(10))
                     .tracking(0.5)
             }

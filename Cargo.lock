@@ -2088,6 +2088,7 @@ name = "marginalia-ffi"
 version = "0.1.0"
 dependencies = [
  "hf-hub",
+ "hound",
  "log",
  "marginalia-config",
  "marginalia-core",
@@ -2247,6 +2248,7 @@ version = "0.1.0"
 dependencies = [
  "espeak-rs",
  "flacenc",
+ "hound",
  "log",
  "marginalia-core",
  "mlx-rs",

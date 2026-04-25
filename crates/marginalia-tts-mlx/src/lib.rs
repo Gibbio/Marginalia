@@ -27,6 +27,10 @@ pub struct MlxSpeechSynthesizer {
     voice: mlx_rs::Array,
     output_dir: PathBuf,
     default_voice: String,
+    /// Path of the model directory — kept so `synthesize` can resolve
+    /// `voices/<name>.safetensors` on demand when the request asks for
+    /// a non-default voice (Settings preview, per-session override).
+    model_dir: PathBuf,
 }
 
 impl MlxSpeechSynthesizer {
@@ -91,6 +95,7 @@ impl MlxSpeechSynthesizer {
             voice,
             output_dir,
             default_voice: voice_name.to_string(),
+            model_dir: model_dir.to_path_buf(),
         })
     }
 }
@@ -156,12 +161,39 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
             );
         }
 
+        // Pick the voice embedding. If the request names a voice
+        // different from the one currently loaded, load it ad-hoc
+        // for THIS synthesis only (don't mutate `self.voice` — the
+        // active reading path keeps using the configured voice).
+        // This is what makes the Settings preview play the picked
+        // voice instead of always falling back to the default.
+        let req_voice = request.voice.as_deref().unwrap_or(&self.default_voice);
+        let ad_hoc_voice: Option<mlx_rs::Array> = if req_voice != self.default_voice {
+            let path = self
+                .model_dir
+                .join("voices")
+                .join(format!("{req_voice}.safetensors"));
+            match voice_tts::voice::load_voice_from_file(&path) {
+                Ok(emb) => Some(emb),
+                Err(e) => {
+                    log::warn!(
+                        "[mlx] requested voice '{req_voice}' not loadable ({e}); \
+                         falling back to default '{}'", self.default_voice
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let voice_to_use = ad_hoc_voice.as_ref().unwrap_or(&self.voice);
+
         // Generate audio for each piece with MLX compile enabled (fused Metal
         // kernels) and concatenate the PCM samples into one buffer.
         let mut all_samples: Vec<f32> = Vec::new();
         for piece in &pieces {
             mlx_rs::transforms::compile::enable_compile();
-            let audio = voice_tts::generate(&mut self.model, piece, &self.voice, 1.0)
+            let audio = voice_tts::generate(&mut self.model, piece, voice_to_use, 1.0)
                 .map_err(|e| err(format!("synthesis failed: {e}")))?;
             mlx_rs::transforms::compile::disable_compile();
 
@@ -170,12 +202,19 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
             drop(audio);
         }
 
-        // Write FLAC
+        // Write WAV — switched from FLAC because Apple's high-level
+        // audio APIs (NSSound, AVAudioPlayer, AVPlayer) decode WAV
+        // out of the box but stumble on FLAC depending on macOS
+        // version and codec install state, which broke the Settings
+        // voice preview ("AVPlayer fallback fires but no audio").
+        // rodio plays both fine, so the in-app reading path is
+        // unaffected. Cost: WAV files are 2–4× larger than FLAC for
+        // the same audio — still tens of KB per chunk, tolerable.
         let n = AUDIO_COUNTER.fetch_add(1, Ordering::Relaxed);
         let voice = request.voice.as_deref().unwrap_or(&self.default_voice);
-        let wav_path = self.output_dir.join(format!("mlx-{voice}-{n}.flac"));
-        write_flac_16(&wav_path, 24000, &all_samples)
-            .map_err(|e| err(format!("failed to write FLAC: {e}")))?;
+        let wav_path = self.output_dir.join(format!("mlx-{voice}-{n}.wav"));
+        write_wav_16(&wav_path, 24000, &all_samples)
+            .map_err(|e| err(format!("failed to write WAV: {e}")))?;
 
         // FLAC is on disk — release the MLX JIT cache AND the Metal buffer
         // pool so MLX doesn't hold onto several GB of unified memory between
@@ -328,6 +367,29 @@ fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
     Ok(clean_ipa(raw.trim()))
 }
 
+fn write_wav_16(path: &Path, sample_rate: u32, samples: &[f32]) -> std::io::Result<()> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec)
+        .map_err(|e| std::io::Error::other(format!("create wav: {e}")))?;
+    for &s in samples {
+        let clipped = s.clamp(-1.0, 1.0);
+        let pcm = (clipped * i16::MAX as f32) as i16;
+        writer
+            .write_sample(pcm)
+            .map_err(|e| std::io::Error::other(format!("write sample: {e}")))?;
+    }
+    writer
+        .finalize()
+        .map_err(|e| std::io::Error::other(format!("finalize wav: {e}")))?;
+    Ok(())
+}
+
+#[allow(dead_code)]
 fn write_flac_16(path: &Path, sample_rate: u32, samples: &[f32]) -> std::io::Result<()> {
     use flacenc::bitsink::ByteSink;
     use flacenc::component::BitRepr;

@@ -32,14 +32,14 @@ public struct LogPane: View {
                 .fill(accent.main)
                 .frame(width: 5, height: 5)
                 .shadow(color: accent.main, radius: 3)
-            Text(messages.last ?? "pronto")
+            Text(messages.last ?? T("logpane.idle"))
                 .font(.mono(11))
                 .foregroundStyle(Tokens.textDim)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: { expanded.toggle() }) {
                 HStack(spacing: 4) {
-                    Text("log")
+                    Text(T("logpane.toggle"))
                     Image(systemName: expanded ? "chevron.down" : "chevron.up")
                         .font(.system(size: 9, weight: .semibold))
                 }
@@ -52,7 +52,7 @@ public struct LogPane: View {
                 )
             }
             .buttonStyle(.plain)
-            .help(expanded ? "Nascondi log" : "Mostra log")
+            .help(expanded ? T("logpane.hide") : T("logpane.show"))
         }
         .padding(.horizontal, 14).padding(.vertical, 6)
     }

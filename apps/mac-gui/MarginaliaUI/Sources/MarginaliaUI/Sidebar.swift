@@ -23,6 +23,11 @@ public struct Sidebar: View {
     /// Optional: triggered by the sidebar row's context menu "Rimuovi".
     /// Default no-op so preview / mock don't need to wire it.
     public var onDeleteDocument: (String) -> Void = { _ in }
+    /// Open the Settings page. Lives in the sidebar footer (next to
+    /// the voice meters) so the user can reach Settings from any
+    /// context — including when no document is open and the right
+    /// margin panel isn't rendered.
+    public var onOpenSettings: () -> Void = {}
 
     /// Free-text filter for the library list. Case-insensitive, matches on
     /// title and any subtitle text. Bound to the sidebar's search field;
@@ -44,7 +49,8 @@ public struct Sidebar: View {
                 onTogglePlay: @escaping () -> Void = {},
                 onAddDocument: @escaping () -> Void = {},
                 onOpenDocument: @escaping (String) -> Void = { _ in },
-                onDeleteDocument: @escaping (String) -> Void = { _ in }) {
+                onDeleteDocument: @escaping (String) -> Void = { _ in },
+                onOpenSettings: @escaping () -> Void = {}) {
         self.accent = accent
         self.library = library
         self.micLevels = micLevels
@@ -56,6 +62,7 @@ public struct Sidebar: View {
         self.onAddDocument = onAddDocument
         self.onOpenDocument = onOpenDocument
         self.onDeleteDocument = onDeleteDocument
+        self.onOpenSettings = onOpenSettings
     }
 
     /// Filtered library — if `libraryFilter` is empty, return everything.
@@ -88,14 +95,14 @@ public struct Sidebar: View {
             searchBarRow
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    SideSection(title: "libreria", accent: accent) {
+                    SideSection(title: T("sidebar.library.title"), accent: accent) {
                         ForEach(filteredLibrary) { entry in
                             Button(action: { onOpenDocument(entry.id) }) {
                                 LibRow(entry: entry, accent: accent)
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
-                                Button("Apri") { onOpenDocument(entry.id) }
+                                Button(T("sidebar.library.open")) { onOpenDocument(entry.id) }
                                 Divider()
                                 // Confirmation is handled by the caller
                                 // (`MarginaliaWindow`) — at this layer we
@@ -103,19 +110,19 @@ public struct Sidebar: View {
                                 Button(role: .destructive) {
                                     onDeleteDocument(entry.id)
                                 } label: {
-                                    Text("Rimuovi dalla libreria")
+                                    Text(T("sidebar.library.remove"))
                                 }
                             }
                         }
                         if library.isEmpty {
-                            Text("Nessun documento. Usa + per importare.")
+                            Text(T("sidebar.library.empty"))
                                 .font(.serif(12, italic: true))
                                 .foregroundStyle(Tokens.textFaint)
                                 .padding(.horizontal, 18).padding(.vertical, 10)
                         } else if filteredLibrary.isEmpty {
                             // Search produced nothing — tell the user why
                             // there's silence instead of showing a blank list.
-                            Text("Nessun risultato per \"\(libraryFilter)\".")
+                            Text(String(format: T("sidebar.library.no_results"), libraryFilter))
                                 .font(.serif(12, italic: true))
                                 .foregroundStyle(Tokens.textFaint)
                                 .padding(.horizontal, 18).padding(.vertical, 10)
@@ -131,13 +138,14 @@ public struct Sidebar: View {
         .background(Tokens.bg2)
     }
 
-    /// Header: just the wordmark. Gear moved to the margin panel footer,
-    /// "+" moved next to the search bar — both consolidated with their
-    /// semantically-related controls.
+    /// Header: wordmark only. Gear lives in the footer (always
+    /// visible), "+" is next to the search bar. Compact 40pt to
+    /// match the trimmed Toolbar in `ReadingView` so the top edge
+    /// reads as a single horizontal band.
     private var header: some View {
         HStack {
             Text("Marginalia")
-                .font(.serif(18, italic: true))
+                .font(.serif(16, italic: true))
                 .foregroundStyle(Tokens.text)
             Spacer()
         }
@@ -145,7 +153,7 @@ public struct Sidebar: View {
         // floating at x≈20…80. The 82-pt leading padding clears them.
         .padding(.leading, 82)
         .padding(.trailing, 18)
-        .frame(height: 52)
+        .frame(height: 40)
     }
 
     /// Search input + "+" import button sit in the same row.
@@ -161,10 +169,11 @@ public struct Sidebar: View {
                         RoundedRectangle(cornerRadius: 8)
                             .strokeBorder(Tokens.textGhost, lineWidth: 1)
                     )
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Importa documento…")
-            .accessibilityLabel("Importa documento")
+            .help(T("sidebar.import.help"))
+            .accessibilityLabel(T("sidebar.import.a11y"))
         }
         .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
     }
@@ -178,7 +187,7 @@ public struct Sidebar: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textFaint)
-            TextField("cerca nella libreria", text: $libraryFilter)
+            TextField(T("sidebar.search.placeholder"), text: $libraryFilter)
                 .textFieldStyle(.plain)
                 .font(.sans(12))
                 .foregroundStyle(Tokens.text)
@@ -199,9 +208,11 @@ public struct Sidebar: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(Tokens.textFaint)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Pulisci filtro")
+                .help(T("sidebar.search.clear"))
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
@@ -220,7 +231,9 @@ public struct Sidebar: View {
             HStack(spacing: 10) {
                 footerPlayButton
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(voiceName.isEmpty ? "Voce: —" : "Voce: \(voiceName)")
+                    Text(voiceName.isEmpty
+                         ? T("sidebar.footer.voice_empty")
+                         : String(format: T("sidebar.footer.voice"), voiceName))
                         .font(.serif(13, italic: true))
                         .foregroundStyle(Tokens.text)
                     if !languageCode.isEmpty {
@@ -230,6 +243,25 @@ public struct Sidebar: View {
                     }
                 }
                 Spacer()
+                // Settings entrypoint that's always visible — the
+                // margin panel only renders when a document is open,
+                // and the toolbar is now minimal, so the sidebar
+                // footer is the one place every user state can reach.
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(Tokens.textDim)
+                        .frame(width: 28, height: 28)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(Tokens.textGhost, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(T("sidebar.settings.help"))
+                .accessibilityLabel(T("sidebar.settings.a11y"))
+                .keyboardShortcut(",", modifiers: [.command])
             }
 
             // Live AEC meters — TTS render (top, accent) and mic capture
@@ -287,8 +319,12 @@ public struct Sidebar: View {
         }
         .buttonStyle(.plain)
         .disabled(noSession)
-        .accessibilityLabel(state == .playing ? "Pausa" : "Riprendi lettura")
-        .help(state == .playing ? "Pausa" : "Riprendi")
+        .accessibilityLabel(state == .playing
+                            ? T("sidebar.play.pause.a11y")
+                            : T("sidebar.play.resume.a11y"))
+        .help(state == .playing
+              ? T("sidebar.play.pause.help")
+              : T("sidebar.play.resume.help"))
     }
 
     @ViewBuilder
@@ -374,16 +410,37 @@ struct LibRow: View {
     var entry: LibraryEntry
     var accent: Accent
 
-    /// Compact, real metadata line: "N cap · M chunk · K note". The three
-    /// parts each drop out when they'd be 0 so a fresh-ingested doc
+    /// Compact, real metadata line: "N capitoli · M chunk · K note". The
+    /// three parts each drop out when they'd be 0 so a fresh-ingested doc
     /// doesn't say "0 note" next to 214 chunks. No percentage anymore —
     /// `progressPct` wasn't wired to real data and read as mock.
     private var metadataLine: String {
         var parts: [String] = []
-        if entry.chapterCount > 0 { parts.append("\(entry.chapterCount) cap") }
-        if entry.chunkCount > 0   { parts.append("\(entry.chunkCount) chunk") }
-        if entry.notes > 0        { parts.append("\(entry.notes) note") }
+        if entry.chapterCount > 0 {
+            parts.append(LibRow.pluralPart(
+                count: entry.chapterCount,
+                oneKey: "sidebar.library.chapters_one",
+                otherKey: "sidebar.library.chapters_other"))
+        }
+        if entry.chunkCount > 0 {
+            parts.append(LibRow.pluralPart(
+                count: entry.chunkCount,
+                oneKey: "sidebar.library.chunks_one",
+                otherKey: "sidebar.library.chunks_other"))
+        }
+        if entry.notes > 0 {
+            parts.append(LibRow.pluralPart(
+                count: entry.notes,
+                oneKey: "sidebar.library.notes_one",
+                otherKey: "sidebar.library.notes_other"))
+        }
         return parts.joined(separator: " · ")
+    }
+
+    /// Pick `_one` for 1, `_other` (with `%lld` substitution) otherwise.
+    /// Keeps grammar correct in IT/EN without a `.stringsdict` file.
+    private static func pluralPart(count: Int, oneKey: String, otherKey: String) -> String {
+        count == 1 ? T(oneKey) : String(format: T(otherKey), count)
     }
 
     var body: some View {

@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 
 /// Settings page — mirrors `settings-view.jsx` one-for-one.
 ///
@@ -22,6 +25,17 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     @State private var errorMessage: String?
     @State private var section: String = "voice"
     @State private var previewing: Bool = false
+    /// AVAudioPlayer kept alive while a preview is playing so the
+    /// player isn't deallocated mid-playback (which silently kills
+    /// audio output). Rebuilt for each preview tap.
+    @State private var previewPlayer: AVAudioPlayer? = nil
+    /// True while preview audio is actively coming out of the speakers.
+    /// Drives the play↔stop glyph toggle.
+    @State private var isPreviewPlaying: Bool = false
+    /// Per-bucket peak amplitudes (0…1) sampled from the just-
+    /// synthesized WAV. Empty until the first preview completes;
+    /// then drives the Waveform widget next to the play button.
+    @State private var previewWaveformLevels: [Float] = []
     /// True during a programmatic scroll triggered by the user clicking
     /// a sub-nav entry. We suppress the preference-driven section update
     /// while this is set, otherwise mid-animation offsets snap `section`
@@ -37,7 +51,6 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     // Interface language override — apply() also sets AppleLanguages so the
     // next launch picks up the chosen .lproj bundle.
     @AppStorage(InterfaceLanguage.storageKey) private var interfaceLang: String = "it"
-    @State private var languageChangeHint: Bool = false
     @AppStorage(AppTheme.storageKey) private var themeId: String = AppTheme.default.id
     /// Persisted hue for the "Personalizzata" theme. Only read when the
     /// active themeId is `AppTheme.customId`, but the storage is always
@@ -92,7 +105,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 11, weight: .semibold))
-                        Text("torna alla lettura")
+                        Text(T("settings.top.back"))
                     }
                     .font(.sans(12))
                     .foregroundStyle(Tokens.textDim)
@@ -101,8 +114,8 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 }
                 .buttonStyle(.plain)
                 Rectangle().fill(Tokens.line).frame(width: 1, height: 16)
-                Text("Impostazioni")
-                    .font(.serif(20, italic: true))
+                Text(T("settings.top.title"))
+                    .font(.serif(16, italic: true))
                     .foregroundStyle(Tokens.text)
             }
             Spacer()
@@ -112,7 +125,8 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                         .font(.mono(10))
                         .foregroundStyle(.red.opacity(0.8))
                 } else if dirty {
-                    Text("modifiche in sospeso\(willSpawn ? " · riavvia motore" : "")")
+                    Text(T("settings.top.pending")
+                         + (willSpawn ? " · " + T("settings.top.respawn") : ""))
                         .font(.mono(10))
                         .tracking(0.5)
                         .foregroundStyle(accent.main)
@@ -126,7 +140,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             }
         }
         .padding(.horizontal, 24)
-        .frame(height: 52)
+        .frame(height: 40)
     }
 
     private func applyTapped() {
@@ -276,9 +290,13 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 HintCard(accent: accent) {
                     HStack(spacing: 4) {
                         Text(T("settings.lang.no-voices"))
-                        Text(T("settings.lang.install-cta"))
-                            .foregroundStyle(accent.main)
-                            .underline()
+                        Button(action: { section = "installations" }) {
+                            Text(T("settings.lang.install-cta"))
+                                .foregroundStyle(accent.main)
+                                .underline()
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.top, 14)
@@ -313,25 +331,81 @@ public struct SettingsView<Host: MarginaliaHost>: View {
 
     private var voicePreview: some View {
         HStack(spacing: 16) {
-            Button(action: previewVoice) {
-                PlayButton(accent: accent.main, glow: accent.glow)
-                    .opacity(previewing ? 0.5 : 1.0)
+            Button(action: togglePreview) {
+                ZStack {
+                    Circle()
+                        .fill(accent.main)
+                        .shadow(color: accent.glow, radius: 8)
+                    if isPreviewPlaying {
+                        // Stop glyph (filled square).
+                        Rectangle()
+                            .fill(Tokens.bg)
+                            .frame(width: 12, height: 12)
+                    } else if previewing {
+                        // Synth in flight — small spinner.
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .controlSize(.small)
+                            .tint(Tokens.bg)
+                    } else {
+                        Path { p in
+                            p.move(to: CGPoint(x: 14, y: 11))
+                            p.addLine(to: CGPoint(x: 14, y: 29))
+                            p.addLine(to: CGPoint(x: 28, y: 20))
+                            p.closeSubpath()
+                        }
+                        .fill(Tokens.bg)
+                        .frame(width: 40, height: 40)
+                    }
+                }
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(previewing)
-            .accessibilityLabel("Ascolta anteprima voce")
+            .accessibilityLabel(isPreviewPlaying
+                                ? T("settings.voice.preview_stop_a11y")
+                                : T("settings.voice.preview_play_a11y"))
             VStack(alignment: .leading, spacing: 3) {
                 Text(T("settings.voice.preview-kicker"))
                     .font(.mono(10))
                     .tracking(1.5)
                     .foregroundStyle(Tokens.textFaint)
-                Text("\u{201C}Il tempo, nell'alta montagna, non è il tempo della pianura.\u{201D}")
+                // Same sentence we ship to the synthesizer — quoted so
+                // the user reads what they'll hear. Single source of
+                // truth: change `settings.voice.preview_sentence` in
+                // both lprojs and both the audio and the on-screen
+                // caption update together.
+                Text("\u{201C}\(T("settings.voice.preview_sentence"))\u{201D}")
                     .font(.serif(15, italic: true))
                     .foregroundStyle(Tokens.text)
                     .lineSpacing(3)
             }
             Spacer()
-            Waveform(count: 30, accent: accent.main, dim: Tokens.textFaint)
+            // Real waveform sampled from the just-synthesized WAV.
+            // Wrapped in a TimelineView that polls the AVAudioPlayer's
+            // `currentTime` at ~20Hz and converts it to `playedFraction`
+            // — bars before that fraction render in accent, after it
+            // in dim → the bar visibly "fills" left-to-right while the
+            // audio plays. Empty `liveLevels` (before any preview ran)
+            // collapses to a flat strip per the shared widget.
+            TimelineView(.periodic(from: Date(), by: 0.05)) { _ in
+                let fraction: Double = {
+                    guard isPreviewPlaying,
+                          let p = previewPlayer,
+                          p.duration > 0
+                    else { return 0 }
+                    return min(1.0, p.currentTime / p.duration)
+                }()
+                Waveform(
+                    count: 36,
+                    playedFraction: fraction,
+                    accent: accent.main,
+                    dim: accent.main.opacity(0.35),
+                    seed: 0.6, minHeight: 3, maxBump: 18,
+                    liveLevels: previewWaveformLevels
+                )
+                .frame(width: 160, height: 28)
+            }
         }
         .padding(14).padding(.horizontal, 2)
         .background(
@@ -344,26 +418,144 @@ public struct SettingsView<Host: MarginaliaHost>: View {
         )
     }
 
+    /// Tap handler for the preview play/stop button. If audio is
+    /// currently playing → stop and clear state. Otherwise kick off
+    /// `previewVoice()` (synth + play).
+    private func togglePreview() {
+        if isPreviewPlaying {
+            previewPlayer?.stop()
+            previewPlayer = nil
+            isPreviewPlaying = false
+            host.pushMessage("Anteprima voce: stop")
+            return
+        }
+        if !previewing {
+            previewVoice()
+        }
+    }
+
     private func previewVoice() {
         previewing = true
-        let sample = "Il tempo, nell'alta montagna, non è il tempo della pianura."
+        // Sentence is sourced from the user's interface language, not
+        // from the voice's language: the picker has voices for every
+        // installed locale and we want the same prompt to read the same
+        // way across them. The phonemizer (espeak-ng, per-clause) can
+        // pronounce any Latin-script text with any voice — a French
+        // voice reading Italian sounds accented but stays intelligible.
+        let sample = T("settings.voice.preview_sentence")
+        host.pushMessage("Anteprima voce: \(draft.voice)…")
         Task {
             defer { Task { @MainActor in previewing = false } }
             do {
                 let path = try await host.synthesizePreview(text: sample, voice: draft.voice)
-                guard !path.isEmpty else { return }
-                await MainActor.run { Self.playAudio(at: path) }
+                if path.isEmpty {
+                    await MainActor.run {
+                        host.pushMessage("Anteprima voce: path vuoto")
+                        errorMessage = "Sintesi non riuscita."
+                    }
+                    return
+                }
+                guard FileManager.default.fileExists(atPath: path) else {
+                    await MainActor.run {
+                        host.pushMessage("Anteprima voce: file non trovato (\(path))")
+                        errorMessage = "File audio non trovato."
+                    }
+                    return
+                }
+                // Pre-compute the real per-bucket waveform off the main
+                // thread — reading the WAV is a few KB, but decoding +
+                // bucketing should still not block UI updates.
+                let levels = Self.waveformLevels(fromAudioFile: path, buckets: 36)
+                await MainActor.run {
+                    previewWaveformLevels = levels
+                    let url = URL(fileURLWithPath: path)
+                    previewPlayer?.stop()
+                    previewPlayer = nil
+                    let hint: String? = (url.pathExtension.lowercased() == "flac")
+                        ? "org.xiph.flac" : nil
+                    guard let player = try? AVAudioPlayer(contentsOf: url, fileTypeHint: hint),
+                          player.prepareToPlay(),
+                          player.play()
+                    else {
+                        host.pushMessage("Anteprima voce: AVAudioPlayer non ha avviato il file")
+                        errorMessage = "Riproduzione non avviata."
+                        return
+                    }
+                    previewPlayer = player
+                    isPreviewPlaying = true
+                    let duration = player.duration
+                    host.pushMessage(String(
+                        format: "Anteprima voce: riproduco %@ (%.1fs)",
+                        (path as NSString).lastPathComponent, duration
+                    ))
+                    // Auto-flip the toggle back to "play" when the
+                    // audio finishes naturally. User stop short-
+                    // circuits via togglePreview() which clears
+                    // `isPreviewPlaying` first → this Task no-ops.
+                    Task {
+                        try? await Task.sleep(for: .seconds(max(duration, 0.5) + 0.3))
+                        await MainActor.run {
+                            if previewPlayer != nil {
+                                previewPlayer = nil
+                                isPreviewPlaying = false
+                            }
+                        }
+                    }
+                }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Anteprima fallita: \(error)"
+                    host.pushMessage("Anteprima voce: errore \(error.localizedDescription)")
+                    errorMessage = "Anteprima fallita: \(error.localizedDescription)"
                 }
             }
         }
     }
 
+    /// Read a WAV/FLAC at `path` and downsample its absolute amplitudes
+    /// into `buckets` peak values (0…1). Used to draw a real waveform
+    /// for the Settings voice preview.
+    private static func waveformLevels(fromAudioFile path: String, buckets: Int) -> [Float] {
+        let url = URL(fileURLWithPath: path)
+        guard let file = try? AVAudioFile(forReading: url) else { return [] }
+        let format = file.processingFormat
+        let frameCount = AVAudioFrameCount(file.length)
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
+        else { return [] }
+        do { try file.read(into: buffer) } catch { return [] }
+        guard let channels = buffer.floatChannelData else { return [] }
+        let count = Int(buffer.frameLength)
+        guard count > 0 else { return [] }
+        let samples = UnsafeBufferPointer(start: channels[0], count: count)
+        let bucketSize = max(1, count / buckets)
+        var levels: [Float] = []
+        levels.reserveCapacity(buckets)
+        for i in 0..<buckets {
+            let start = i * bucketSize
+            let end = min(count, start + bucketSize)
+            var peak: Float = 0
+            for j in start..<end {
+                let v = abs(samples[j])
+                if v > peak { peak = v }
+            }
+            levels.append(min(peak, 1.0))
+        }
+        return levels
+    }
+
     private static func playAudio(at path: String) {
         #if canImport(AppKit)
         PreviewSoundCache.play(path: path)
+        #endif
+    }
+
+    /// Reset the in-place audio player when the user navigates away
+    /// from Settings, so a long preview doesn't keep playing in the
+    /// background. Currently only PreviewSoundCache is used; future
+    /// hooks could explicitly stop the active player here.
+    private func stopPreview() {
+        #if canImport(AppKit)
+        PreviewSoundCache.stopAll()
         #endif
     }
 
@@ -486,6 +678,19 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Save-on-edit: every chip add/remove updates `draftCommands`,
+        // and we mirror the change straight into `host.voiceCommands`
+        // (which the Swift voice-command resolver reads on the hot
+        // path) + persist to TOML. The Apple helper itself stays dumb
+        // (transcribes everything as `CMD <text>`); the host-side
+        // resolver against the freshly-updated triggers is what makes
+        // the new alias work the next time the user speaks it. No
+        // engine restart needed for the alias to take effect.
+        .onChange(of: draftCommands) { _, newValue in
+            if newValue != host.voiceCommands {
+                host.saveVoiceCommands(newValue)
+            }
+        }
     }
 
     /// Look-up used by CommandRow to reject a trigger that's already in
@@ -515,12 +720,43 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             chunkSizeSlider
             PathRow(label: "Libreria",
                     value: ".marginalia/beta.sqlite3",
-                    tag: "SQLite", action: nil, accent: accent)
+                    tag: "SQLite", action: nil, accent: accent,
+                    onBrowse: { revealInFinder(host.ttsCacheDir) },
+                    onRevealInFinder: { revealInFinder(host.ttsCacheDir) })
             PathRow(label: "Cache audio",
-                    value: ".marginalia/tts-cache",
+                    value: host.ttsCacheDir,
                     tag: "FLAC · 1 per chunk · \(cacheDirSize())",
-                    action: "svuota", accent: accent)
+                    action: "svuota", accent: accent,
+                    onBrowse: { revealInFinder(host.ttsCacheDir) },
+                    onRevealInFinder: { revealInFinder(host.ttsCacheDir) })
         }
+    }
+
+    /// Open the given absolute path in Finder. If the path is a
+    /// directory we pop it open; if it's a file we select it. Falls
+    /// back to a no-op on non-AppKit builds (currently mac-only).
+    private func revealInFinder(_ path: String) {
+        #if canImport(AppKit)
+        guard !path.isEmpty else { return }
+        let url = URL(fileURLWithPath: path)
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDir) {
+            if isDir.boolValue {
+                NSWorkspace.shared.open(url)
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        } else {
+            // Path doesn't exist yet (e.g. cache dir not created
+            // because nothing has been synthesized) — try the parent.
+            let parent = url.deletingLastPathComponent()
+            if FileManager.default.fileExists(atPath: parent.path) {
+                NSWorkspace.shared.open(parent)
+            } else {
+                host.pushMessage("Percorso non esistente: \(path)")
+            }
+        }
+        #endif
     }
 
     /// Playback volume slider, 0.0–1.0 (linear). Two-way bound to
@@ -561,12 +797,17 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     /// "142 MB" or "0 byte". Walks the dir synchronously — cheap for the
     /// expected order of magnitude (a few thousand FLAC files max).
     private func cacheDirSize() -> String {
-        let path = ".marginalia/tts-cache"
+        // Use the absolute path the runtime reports (was a relative
+        // stub before — sandboxed `.app` working directory is `/`,
+        // so the relative path resolved to a non-existent location
+        // and the size always read 0).
+        let path = host.ttsCacheDir
+        guard !path.isEmpty else { return "—" }
         let url = URL(fileURLWithPath: path)
         guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]
-        ) else { return "—" }
+        ) else { return "0 byte" }
         var total: Int = 0
         for case let file as URL in enumerator {
             guard let values = try? file.resourceValues(
@@ -694,20 +935,21 @@ public struct SettingsView<Host: MarginaliaHost>: View {
         _ group: (language: String, display: String, assets: [InstallableAsset])
     ) -> some View {
         let missing = group.assets.filter { !$0.installed }
+        let installed = group.assets.filter { $0.installed }
         DisclosureGroup {
             installRowStack(group.assets)
                 .padding(.top, 6)
         } label: {
-            HStack {
+            HStack(spacing: 8) {
                 Text(group.display)
                     .font(.serif(14, italic: true))
                     .foregroundStyle(Tokens.text)
-                Text("(\(group.assets.filter { $0.installed }.count)/\(group.assets.count))")
+                Text("(\(installed.count)/\(group.assets.count))")
                     .font(.mono(10))
                     .foregroundStyle(Tokens.textFaint)
                 Spacer()
                 if !missing.isEmpty {
-                    Button("installa tutte") {
+                    Button(T("settings.install.install_all")) {
                         for a in missing { host.installAsset(a.id) }
                     }
                     .buttonStyle(.plain)
@@ -718,6 +960,25 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                         .fill(accent.main.opacity(0.08)))
                     .overlay(RoundedRectangle(cornerRadius: 5)
                         .strokeBorder(accent.main.opacity(0.3), lineWidth: 1))
+                }
+                // Symmetric counterpart of "installa tutte" — only
+                // shown when at least one voice in the group is on
+                // disk, so single-voice groups don't get a redundant
+                // bulk button. Border + colour are dimmed (textFaint /
+                // line) so it reads as a secondary destructive action,
+                // not an attention-grabber.
+                if !installed.isEmpty {
+                    Button(T("settings.install.uninstall_all")) {
+                        for a in installed { host.uninstallAsset(a.id) }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.mono(11))
+                    .foregroundStyle(Tokens.textDim)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.white.opacity(0.04)))
+                    .overlay(RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Tokens.line, lineWidth: 1))
                 }
             }
         }
@@ -759,11 +1020,16 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 sub: T("settings.sub.theme"),
                 info: T("settings.info.theme")
             )
-            HStack(spacing: 12) {
+            // Two columns wrap nicely under the Settings content
+            // width — three was too tight and the third card got
+            // clipped on narrow windows.
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ], spacing: 12) {
                 ForEach(AppTheme.all, id: \.id) { theme in
                     themeCard(theme)
                 }
-                Spacer()
             }
             if themeId == AppTheme.customId {
                 customHueSlider
@@ -788,14 +1054,20 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     .foregroundStyle(Tokens.textDim)
                     .monospacedDigit()
             }
-            Slider(value: $customHue, in: 0...360) { _ in
-                // Bump the themeId notification so MarginaliaWindow
-                // re-runs `AppTheme.accent(for:)` and we repaint.
-                let cur = themeId
-                themeId = ""
-                themeId = cur
-            }
-            .tint(Accent(hue: customHue).main)
+            Slider(value: $customHue, in: 0...360)
+                .tint(Accent(hue: customHue).main)
+                // Live update: when the user drags, every value step
+                // pushes the new hue into the parent's `accent`
+                // binding so the whole UI repaints in real time.
+                // Previously we tried bumping `themeId` only on
+                // editing-end, which (a) didn't fire during drag and
+                // (b) reset the AppStorage round-trip even for
+                // identity → no visible change.
+                .onChange(of: customHue) { _, newHue in
+                    if themeId == AppTheme.customId {
+                        accent = Accent(hue: newHue)
+                    }
+                }
         }
         .padding(12)
         .background(
@@ -858,7 +1130,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 }
             }
             .padding(14)
-            .frame(width: 280, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(active ? Color.white.opacity(0.04) : Color.white.opacity(0.015))
@@ -890,16 +1162,9 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 }
                 Spacer()
             }
-
-            if languageChangeHint {
-                HintCard(accent: accent) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.clockwise.circle")
-                            .foregroundStyle(accent.main)
-                        Text(T("settings.interface.restart"))
-                    }
-                }
-            }
+            // No restart hint: `T(...)` reads the override at every call
+            // and SwiftUI re-renders on the @AppStorage change, so the
+            // whole UI flips language live.
         }
     }
 
@@ -929,9 +1194,6 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     private func selectInterfaceLang(_ code: InterfaceLanguage.Code) {
         guard interfaceLang != code.rawValue else { return }
         InterfaceLanguage.apply(code)
-        withAnimation(.easeOut(duration: 0.2)) {
-            languageChangeHint = true
-        }
     }
 
     private var diagnosticsSection: some View {
@@ -1083,7 +1345,7 @@ private struct ApplyButton: View {
                             }
                         }
                 }
-                Text(applying ? "Applicazione…" : "Applica")
+                Text(applying ? T("settings.top.applying") : T("settings.top.apply"))
             }
             .font(.sans(12, weight: .medium))
             .foregroundStyle(dirty ? Tokens.bg : Tokens.textFaint)
@@ -1120,15 +1382,21 @@ struct SectionOffsetsKey: PreferenceKey {
 private struct SettingsNavEntry {
     let key: String
     let label: String
-    static let all: [SettingsNavEntry] = [
-        .init(key: "language", label: "Lingua"),
-        .init(key: "voice", label: "Voce"),
-        .init(key: "stt", label: "Riconoscimento vocale"),
-        .init(key: "commands", label: "Comandi vocali"),
-        .init(key: "audio", label: "Preparazione testo"),
-        .init(key: "theme", label: "Tema"),
-        .init(key: "installations", label: "Installazioni"),
-        .init(key: "interface", label: "Lingua interfaccia"),
-        .init(key: "diagnostics", label: "Diagnostica"),
-    ]
+    /// Computed (not `static let`) so the labels resolve through `T(...)`
+    /// at every access — keeps the sidebar in sync with the in-session
+    /// interface-language override without a relaunch. The lookup is
+    /// cheap (a UserDefaults read + bundle string fetch).
+    static var all: [SettingsNavEntry] {
+        [
+            .init(key: "language",      label: T("settings.nav.language")),
+            .init(key: "voice",         label: T("settings.nav.voice")),
+            .init(key: "stt",           label: T("settings.nav.stt")),
+            .init(key: "commands",      label: T("settings.nav.commands")),
+            .init(key: "audio",         label: T("settings.nav.audio")),
+            .init(key: "theme",         label: T("settings.nav.theme")),
+            .init(key: "installations", label: T("settings.nav.installations")),
+            .init(key: "interface",     label: T("settings.nav.interface")),
+            .init(key: "diagnostics",   label: T("settings.nav.diagnostics")),
+        ]
+    }
 }

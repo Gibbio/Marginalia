@@ -42,11 +42,15 @@ public enum InterfaceLanguage {
         return b
     }
 
-    /// Full runtime language switch is a cross-platform headache; on macOS
-    /// the standard workflow is "set AppleLanguages, restart". Call this
-    /// from the Settings picker and show a hint telling the user to relaunch.
+    /// Switch the app's UI language. Writes the override key only —
+    /// every `T(...)` call reads it at lookup time, and SwiftUI re-
+    /// renders thanks to `@AppStorage` watching the same key. No
+    /// relaunch needed. We deliberately *don't* touch `AppleLanguages`
+    /// here: that would force a restart for system-bundle (`Bundle.main`)
+    /// strings, but we exclusively go through the package bundle via
+    /// the `localizedBundle(forOverride:)` path, so the system locale
+    /// stays untouched.
     public static func apply(_ code: Code) {
         UserDefaults.standard.set(code.rawValue, forKey: storageKey)
-        UserDefaults.standard.set([code.rawValue], forKey: "AppleLanguages")
     }
 }

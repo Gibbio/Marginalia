@@ -43,7 +43,10 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                     onTogglePlay: togglePlay,
                     onAddDocument: handleImport,
                     onOpenDocument: handleOpenDocument,
-                    onDeleteDocument: handleDeleteDocument
+                    onDeleteDocument: handleDeleteDocument,
+                    onOpenSettings: {
+                        mode = (mode == .settings) ? .reading : .settings
+                    }
                 )
                 Divider().frame(width: 1).overlay(Tokens.line)
                 Group {
@@ -56,13 +59,7 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                         // document yet — confusing on first run and after
                         // `stop_session`.
                         if host.currentSession != nil {
-                            ReadingView(
-                                accent: accent,
-                                host: host,
-                                onOpenSettings: {
-                                    mode = (mode == .settings) ? .reading : .settings
-                                }
-                            )
+                            ReadingView(accent: accent, host: host)
                             // Coordinate space is now defined *inside* ReadingView's
                             // mainArea (on the ZStack that holds both the chunk text
                             // and the link overlay) so the two share a frame origin.

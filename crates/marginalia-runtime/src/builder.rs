@@ -56,6 +56,14 @@ pub struct BuildOutput {
     pub stt_debug: bool,
     /// Voice command configuration for the app's command loop.
     pub voice_commands: VoiceCommandsSection,
+    /// Stable handle to the AEC render reference sender. Cloned by the
+    /// playback engine's `play_samples_callback` AND surfaced upward so
+    /// the GUI can feed render references for audio it plays outside of
+    /// the host engine (e.g. Swift `AVAudioPlayer` for note WAVs). The
+    /// same slot is also placed inside `ReconfigureContext`, so STT
+    /// respawns update the inner sender that everyone observes.
+    #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+    pub aec_render_slot: crate::reconfigure::AecRenderSlot,
 }
 
 /// Fluent builder for constructing a fully-wired `SqliteRuntime`.
@@ -407,6 +415,8 @@ impl RuntimeBuilder {
             playback_label: playback_label.to_string(),
             stt_debug: self.stt.debug,
             voice_commands: self.voice_commands,
+            #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
+            aec_render_slot,
         })
     }
 }

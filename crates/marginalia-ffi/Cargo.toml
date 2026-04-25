@@ -27,6 +27,7 @@ url-import = ["marginalia-runtime/url-import"]
 
 [dependencies]
 hf-hub = "0.5"  # for the `Progress` trait used by the install downloader
+hound = "3.5"   # decode WAV note files when feeding the AEC render reference
 log = "0.4"
 serde_json = "1"  # reading voices.manifest.json at catalog build time
 # Zip for B9 backup/restore (export/import marginalia.toml + sqlite db +

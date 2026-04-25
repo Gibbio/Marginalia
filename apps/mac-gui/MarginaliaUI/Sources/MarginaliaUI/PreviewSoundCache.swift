@@ -38,6 +38,22 @@ public final class PreviewSoundCache {
     /// formats NSSound can't decode on this macOS version — in practice
     /// FLAC, which the TTS backend emits for synthesized previews and
     /// note playback. Silent no-op only if both paths fail.
+    /// AVPlayer-based fallback for files AVAudioPlayer can't decode.
+    /// Held inside the singleton so the player isn't deallocated mid-
+    /// playback (would silently kill audio).
+    private var avPlayers: [AVPlayer] = []
+
+    public func add(_ player: AVPlayer) {
+        avPlayers.append(player)
+        let token = ObjectIdentifier(player)
+        Task.detached { [weak self] in
+            try? await Task.sleep(for: .seconds(60))
+            await MainActor.run {
+                self?.avPlayers.removeAll { ObjectIdentifier($0) == token }
+            }
+        }
+    }
+
     public static func play(path: String) {
         if let sound = NSSound(contentsOfFile: path, byReference: false) {
             shared.add(sound)

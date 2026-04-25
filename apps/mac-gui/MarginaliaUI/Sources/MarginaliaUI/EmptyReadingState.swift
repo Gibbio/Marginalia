@@ -34,7 +34,9 @@ public struct EmptyReadingState: View {
             VStack(spacing: 26) {
                 Spacer()
                 VStack(spacing: 10) {
-                    Text(hasLibrary ? "Scegli un documento" : "Inizia a leggere")
+                    Text(hasLibrary
+                         ? T("empty.with_library.title")
+                         : T("empty.library.title"))
                         .font(.serif(36, italic: true))
                         .kerning(-0.4)
                         .foregroundStyle(Tokens.text)
@@ -51,7 +53,7 @@ public struct EmptyReadingState: View {
                         HStack(spacing: 8) {
                             Image(systemName: "plus")
                                 .font(.system(size: 11, weight: .semibold))
-                            Text("importa")
+                            Text(T("common.import"))
                                 .font(.sans(13, weight: .medium))
                         }
                         .foregroundStyle(Tokens.bg)
@@ -61,7 +63,7 @@ public struct EmptyReadingState: View {
                     .buttonStyle(.plain)
                     .keyboardShortcut("o", modifiers: [.command])
 
-                    Text("oppure trascina un PDF, EPUB o .txt in questa finestra")
+                    Text(T("empty.library.drop_hint"))
                         .font(.serif(12, italic: true))
                         .foregroundStyle(Tokens.textFaint)
                 }
@@ -74,10 +76,8 @@ public struct EmptyReadingState: View {
     }
 
     private var subtitle: String {
-        if hasLibrary {
-            return "Seleziona un titolo dalla libreria a sinistra per iniziare ad ascoltare. La lettura riprende dal punto in cui eri, se già avviata."
-        } else {
-            return "La libreria è vuota. Importa il primo documento per iniziare — Marginalia lo chunk, legge ad alta voce, e ricorda dove eri."
-        }
+        hasLibrary
+            ? T("empty.with_library.subtitle")
+            : T("empty.library.subtitle")
     }
 }

@@ -7,7 +7,8 @@
 "settings.nav.voice"          = "Voce";
 "settings.nav.stt"            = "Riconoscimento vocale";
 "settings.nav.commands"       = "Comandi vocali";
-"settings.nav.audio"          = "Audio & lettura";
+"settings.nav.audio"          = "Preparazione testo";
+"settings.nav.theme"          = "Tema";
 "settings.nav.installations"  = "Installazioni";
 "settings.nav.diagnostics"    = "Diagnostica";
 "settings.nav.interface"      = "Lingua interfaccia";
@@ -50,6 +51,9 @@
 "settings.lang.no-voices"         = "Nessuna voce installata per questa lingua.";
 "settings.lang.install-cta"       = "Installa voci…";
 "settings.voice.preview-kicker"   = "ANTEPRIMA";
+"settings.voice.preview_sentence" = "Il tempo, nell'alta montagna, non è il tempo della pianura.";
+"settings.voice.preview_play_a11y" = "Ascolta anteprima voce";
+"settings.voice.preview_stop_a11y" = "Ferma anteprima";
 "settings.stt.apple-requires"     = "Apple Speech richiede la dettatura macOS.";
 "settings.stt.open-sys-prefs"     = "Apri Impostazioni di sistema →";
 "settings.audio.volume"           = "Volume";
@@ -63,4 +67,117 @@
 "settings.interface.sub"      = "la lingua dei testi dell'app. il cambio richiede di riavviare Marginalia.";
 "settings.interface.italian"  = "Italiano";
 "settings.interface.english"  = "English";
-"settings.interface.restart"  = "Riavvia Marginalia per applicare la nuova lingua.";
+
+// Reading view — rotating hints in the margin panel footer
+"reading.hint.note_hover"     = "passa sopra una nota per vedere il chunk collegato";
+"reading.hint.note_click"     = "click su una nota per saltare al suo chunk";
+"reading.hint.chunk_dblclick" = "doppio click su un chunk per ascoltarlo dall'inizio";
+"reading.hint.voice_note"     = "di' \"nota\" per registrare una nota vocale";
+"reading.hint.voice_control"  = "di' \"pausa\" o \"avanti\" per controllare la lettura";
+"reading.hint.add_button"     = "+ in alto per scrivere o dettare una nota";
+"reading.hint.note_edit"      = "matita su una nota per modificarla";
+"reading.hint.settings"       = "⌘, per aprire le impostazioni";
+
+// Reading view — empty document fallback (e.g. PDF scans without OCR)
+"reading.empty.kicker"        = "NESSUN TESTO ESTRATTO";
+"reading.empty.body"          = "Questo documento non contiene testo leggibile. Probabilmente è una scansione senza OCR, o è protetto da DRM.";
+
+// Reading view — font stepper / mode toggle
+"reading.font.larger"         = "Aumenta testo";
+"reading.font.smaller"        = "Rimpicciolisci testo";
+"reading.mode.book"           = "libro";
+"reading.mode.text"           = "testo";
+"reading.mode.technical"      = "tecnico";
+"reading.mode.help"           = "Modalità %@";
+
+// Reading view — margin notes panel
+"reading.margin.kicker"       = "MARGINALIA";
+"reading.margin.notes_zero"   = "nessuna nota in questo capitolo";
+"reading.margin.notes_one"    = "1 nota in questo capitolo";
+"reading.margin.notes_other"  = "%lld note in questo capitolo";
+"reading.margin.add.help"     = "Aggiungi nota al chunk corrente";
+"reading.margin.add.a11y"     = "Aggiungi nota";
+
+// Reading view — toolbar state kickers
+"reading.toolbar.playing"     = "IN ASCOLTO";
+"reading.toolbar.paused"      = "IN PAUSA";
+"reading.toolbar.ready"       = "PRONTO";
+"reading.toolbar.synthesizing" = "SINTETIZZANDO";
+
+// Reading view — live note card kicker fallbacks
+"reading.live.speaking"       = "STAI PARLANDO";
+"reading.live.fallback"       = "NOTA";
+
+// Reading view — note card actions
+"reading.note.edit"           = "Modifica nota";
+"reading.note.delete"         = "Elimina nota";
+"reading.note.play"           = "Riproduci nota";
+"reading.note.stop"           = "Ferma riproduzione";
+
+// Reading view — note compose sheet
+"reading.compose.kicker"      = "NUOVA NOTA";
+"reading.compose.hint"        = "parla per dettare, o scrivi qui";
+"reading.compose.listening"   = "STO ASCOLTANDO";
+"reading.compose.transcribed" = "TRASCRITTO";
+
+// Empty state shown when no document is open
+"empty.with_library.title"    = "Scegli un documento";
+"empty.with_library.subtitle" = "Seleziona un titolo dalla libreria a sinistra per iniziare ad ascoltare. La lettura riprende dal punto in cui eri, se già avviata.";
+"empty.library.title"         = "Inizia a leggere";
+"empty.library.subtitle"      = "La libreria è vuota. Importa il primo documento per iniziare — Marginalia lo chunk, legge ad alta voce, e ricorda dove eri.";
+"empty.library.drop_hint"     = "oppure trascina un PDF, EPUB o .txt in questa finestra";
+
+// Common verbs reused across surfaces
+"common.cancel"               = "annulla";
+"common.save"                 = "salva";
+"common.import"               = "importa";
+
+// Info-chip pill shown next to section titles in Settings
+"info.what_is_it"             = "cos'è?";
+
+// Per-language bulk actions in the Voice installations group
+"settings.install.install_all"   = "installa tutte";
+"settings.install.uninstall_all" = "disinstalla tutte";
+
+// LogPane footer at the bottom of the window
+"logpane.idle"                = "pronto";
+"logpane.toggle"              = "log";
+"logpane.show"                = "Mostra log";
+"logpane.hide"                = "Nascondi log";
+
+// Onboarding install screen
+"onboarding.install.download"  = "scarica";
+"onboarding.install.all_ready" = "tutto pronto";
+
+// Sidebar — section titles, search, library actions
+"sidebar.library.title"       = "libreria";
+"sidebar.library.open"        = "Apri";
+"sidebar.library.remove"      = "Rimuovi dalla libreria";
+"sidebar.library.empty"       = "Nessun documento. Usa + per importare.";
+"sidebar.library.no_results"  = "Nessun risultato per \"%@\".";
+// LibRow metadata parts. Each shown only when count > 0 — `_one` /
+// `_other` mirror the plural rule selected at the call site.
+"sidebar.library.chapters_one"   = "1 capitolo";
+"sidebar.library.chapters_other" = "%lld capitoli";
+"sidebar.library.chunks_one"     = "1 chunk";
+"sidebar.library.chunks_other"   = "%lld chunk";
+"sidebar.library.notes_one"      = "1 nota";
+"sidebar.library.notes_other"    = "%lld note";
+
+// Sidebar — search bar
+"sidebar.search.placeholder"  = "cerca nella libreria";
+"sidebar.search.clear"        = "Pulisci filtro";
+
+// Sidebar — header import button + footer
+"sidebar.import.help"         = "Importa documento…";
+"sidebar.import.a11y"         = "Importa documento";
+"sidebar.footer.voice_empty"  = "Voce: —";
+"sidebar.footer.voice"        = "Voce: %@";
+"sidebar.settings.help"       = "Impostazioni";
+"sidebar.settings.a11y"       = "Apri impostazioni";
+
+// Sidebar — footer play/pause toggle
+"sidebar.play.pause.help"     = "Pausa";
+"sidebar.play.resume.help"    = "Riprendi";
+"sidebar.play.pause.a11y"     = "Pausa";
+"sidebar.play.resume.a11y"    = "Riprendi lettura";

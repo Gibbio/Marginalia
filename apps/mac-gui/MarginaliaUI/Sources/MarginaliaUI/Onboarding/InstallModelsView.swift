@@ -81,7 +81,7 @@ public struct InstallModelsView: View {
 
             HStack(spacing: 12) {
                 Button(action: installAllMissing) {
-                    Text(hasMissing ? "scarica" : "tutto pronto")
+                    Text(hasMissing ? T("onboarding.install.download") : T("onboarding.install.all_ready"))
                         .font(.sans(14, weight: .medium))
                         .foregroundStyle(hasMissing ? Tokens.bg : Tokens.textDim)
                         .padding(.horizontal, 22).padding(.vertical, 9)

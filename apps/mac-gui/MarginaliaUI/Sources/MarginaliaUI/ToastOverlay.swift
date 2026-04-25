@@ -61,6 +61,7 @@ public struct ToastOverlay: View {
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Tokens.textFaint)
                             .padding(4)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }

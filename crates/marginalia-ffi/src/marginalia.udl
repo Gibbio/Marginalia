@@ -229,6 +229,10 @@ interface FfiRuntime {
   void repeat_chunk();
   [Throws=FfiError]
   void seek_to_chunk(u32 section_index, u32 chunk_index);
+  // Same as seek_to_chunk but pauses immediately after — used by the
+  // single-click-on-note path so the user can review the chunk silently.
+  [Throws=FfiError]
+  void seek_to_chunk_paused(u32 section_index, u32 chunk_index);
   boolean auto_advance();
   // Fire-and-forget: pre-synthesize the chunk right after the current
   // reading position into the TTS cache on a background thread. Returns
@@ -288,6 +292,15 @@ interface FfiRuntime {
   // Absolute path to the Whisper ggml model file, or empty string if
   // `[stt.whisper] model_path` is unset.
   string whisper_model_path();
+  string tts_cache_dir();
+
+  // Feed the AEC render reference for audio the GUI plays through a
+  // pipeline outside the rodio host engine (Swift `AVAudioPlayer` for
+  // note playback). Returns false if the file couldn't be decoded so
+  // the caller can fall back. Pass the WAV path. No-op on builds
+  // without apple-stt + host-playback.
+  boolean aec_set_render_reference(string path);
+  void aec_clear_render_reference();
 
   // Installable asset catalog ------------------------------------
   sequence<InstallableAsset> list_installable_assets();
