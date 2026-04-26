@@ -426,6 +426,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             previewPlayer?.stop()
             previewPlayer = nil
             isPreviewPlaying = false
+            host.aecClearRenderReference()
             host.pushMessage("Anteprima voce: stop")
             return
         }
@@ -481,6 +482,11 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                         errorMessage = "Riproduzione non avviata."
                         return
                     }
+                    // Feed the AEC render reference so SFSpeechRecognizer
+                    // doesn't pick up the preview as a voice command —
+                    // mirrors the note playback path. No-op when AEC
+                    // isn't running (non-Apple STT).
+                    host.aecSetRenderReference(path: path)
                     previewPlayer = player
                     isPreviewPlaying = true
                     let duration = player.duration
@@ -498,6 +504,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                             if previewPlayer != nil {
                                 previewPlayer = nil
                                 isPreviewPlaying = false
+                                host.aecClearRenderReference()
                             }
                         }
                     }
@@ -557,6 +564,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
         #if canImport(AppKit)
         PreviewSoundCache.stopAll()
         #endif
+        previewPlayer?.stop()
+        previewPlayer = nil
+        isPreviewPlaying = false
+        host.aecClearRenderReference()
     }
 
     private var sttSection: some View {
