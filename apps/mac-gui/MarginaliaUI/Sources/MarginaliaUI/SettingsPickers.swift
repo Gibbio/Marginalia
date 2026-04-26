@@ -219,18 +219,32 @@ public struct SttPicker: View {
 
 public struct CommandRow: View {
     @Binding public var cmd: VoiceCommand
+    /// Accent of the parent surface — used to tint the user-added
+    /// (custom) chips so they read as the user's contribution and stay
+    /// visually distinct from the per-language defaults next to them.
+    public var accent: Accent
+    /// Interface-language code (`"it"`, `"en"`) used to look up which
+    /// triggers are defaults for this row. Passed in (rather than read
+    /// from `@AppStorage`) so the SettingsView's edit handlers can use
+    /// the same value for validation.
+    public var interfaceLang: String
     /// Given a candidate trigger, returns the label of another command
     /// that already owns it (nil = free to use). Injected by the parent
     /// so we can validate across the full voice-commands set without the
-    /// row having to own the whole list.
+    /// row having to own the whole list. Defaults of OTHER commands are
+    /// included in the conflict set by the caller.
     public var isTakenByOther: (String) -> String?
 
     @State private var draft: String = ""
     @State private var validationMsg: String? = nil
 
     public init(cmd: Binding<VoiceCommand>,
+                accent: Accent,
+                interfaceLang: String,
                 isTakenByOther: @escaping (String) -> String? = { _ in nil }) {
         self._cmd = cmd
+        self.accent = accent
+        self.interfaceLang = interfaceLang
         self.isTakenByOther = isTakenByOther
     }
 
@@ -249,12 +263,19 @@ public struct CommandRow: View {
             .padding(.top, 6)
 
             VStack(alignment: .leading, spacing: 4) {
-                // Flexible chip flow with the add-trigger input tail.
+                // Per-language defaults first (locked, dim) → user-added
+                // customs after (accent-tinted, with × to remove). The
+                // add-trigger tail input always appends to customs.
                 FlowLayout(spacing: 6) {
-                    ForEach(Array(cmd.triggers.enumerated()), id: \.offset) { idx, trigger in
-                        Chip(text: trigger) {
-                            cmd.triggers.remove(at: idx)
-                        }
+                    ForEach(defaults, id: \.self) { trigger in
+                        Chip(text: trigger, style: .locked)
+                            .help(T("settings.commands.chip.default-tooltip"))
+                    }
+                    ForEach(Array(customs.enumerated()), id: \.offset) { _, trigger in
+                        Chip(text: trigger,
+                             style: .removable(accent: accent,
+                                               onRemove: { removeCustom(trigger) }))
+                            .help(T("settings.commands.chip.custom-tooltip"))
                     }
                     addTriggerInput
                 }
@@ -275,8 +296,22 @@ public struct CommandRow: View {
         .padding(.vertical, 14)
     }
 
+    /// Defaults the picker should display as locked chips, derived
+    /// each render from the `(language, action)` table.
+    private var defaults: [String] {
+        VoiceCommandDefaults.triggers(for: interfaceLang, action: cmd.action)
+    }
+
+    /// Triggers stored in `cmd.triggers` minus the current-language
+    /// defaults — i.e. anything the user added on top of the blessed
+    /// set. Lowercased compare to match the resolver's normalization.
+    private var customs: [String] {
+        let defaultSet = Set(defaults.map { $0.lowercased() })
+        return cmd.triggers.filter { !defaultSet.contains($0.lowercased()) }
+    }
+
     private var addTriggerInput: some View {
-        TextField("+ aggiungi", text: $draft)
+        TextField(T("settings.commands.chip.add-placeholder"), text: $draft)
             .textFieldStyle(.plain)
             .font(.serif(14, italic: true))
             .foregroundStyle(Tokens.text)
@@ -296,16 +331,29 @@ public struct CommandRow: View {
         let v = draft.trimmingCharacters(in: .whitespaces).lowercased()
         guard !v.isEmpty else { draft = ""; return }
 
-        // Already owned by this command — silent no-op.
-        if cmd.triggers.contains(v) {
+        // Adding a word that's already a default for THIS command is a
+        // no-op — the user will see it sitting in the locked group.
+        if defaults.contains(where: { $0.lowercased() == v }) {
             draft = ""
             return
         }
 
-        // Owned by another command — explain who.
+        // Already in the customs of this command — silent no-op.
+        if cmd.triggers.contains(where: { $0.lowercased() == v }) {
+            draft = ""
+            return
+        }
+
+        // Owned by another command — explain who. The parent's lookup
+        // also covers other commands' DEFAULTS, so this catches both
+        // "you're trying to add a custom that another command's
+        // user-added trigger already owns" and "…that another
+        // command's default already owns".
         if let other = isTakenByOther(v) {
             withAnimation(.easeOut(duration: 0.15)) {
-                validationMsg = "\u{201C}\(v)\u{201D} è già usato in \u{201C}\(other)\u{201D}"
+                validationMsg = String(
+                    format: T("settings.commands.chip.conflict"), v, other
+                )
             }
             return
         }
@@ -313,6 +361,11 @@ public struct CommandRow: View {
         cmd.triggers.append(v)
         draft = ""
         validationMsg = nil
+    }
+
+    private func removeCustom(_ trigger: String) {
+        let lc = trigger.lowercased()
+        cmd.triggers.removeAll { $0.lowercased() == lc }
     }
 }
 

@@ -233,36 +233,94 @@ public struct AccentCheckbox: View {
 
 // MARK: — Chip (removable) used by the voice-commands editor
 
+/// Style of a `Chip` — the voice-commands editor renders per-language
+/// defaults in `.locked` (dim, no `×`) and user-added customs in
+/// `.removable` with an accent-tinted fill so the two are visually
+/// separable at a glance.
+public enum ChipStyle {
+    /// Per-language default. No remove affordance — defaults are
+    /// "blessed" and not user-editable. Muted styling so they recede
+    /// behind any custom triggers added by the user.
+    case locked
+    /// User-added custom trigger. Accent-tinted fill + edge so it
+    /// reads as the user's own contribution; an `×` button removes it.
+    case removable(accent: Accent, onRemove: () -> Void)
+}
+
 public struct Chip: View {
     public var text: String
-    public var onRemove: () -> Void
-    public init(text: String, onRemove: @escaping () -> Void) {
-        self.text = text; self.onRemove = onRemove
+    public var style: ChipStyle
+
+    public init(text: String, style: ChipStyle) {
+        self.text = text
+        self.style = style
     }
+
+    /// Convenience — the historical signature, kept so ad-hoc callers
+    /// don't have to pass an Accent. Always renders as a removable
+    /// chip with a neutral edge (the voice-commands editor uses the
+    /// explicit `style:` form to get the accent variant).
+    public init(text: String, onRemove: @escaping () -> Void) {
+        self.text = text
+        self.style = .removable(accent: Accent(hue: 30), onRemove: onRemove)
+    }
+
     public var body: some View {
         HStack(spacing: 6) {
             Text("\u{201C}\(text)\u{201D}")
                 .font(.serif(14, italic: true))
-                .foregroundStyle(Tokens.text)
-            Button(action: onRemove) {
-                Text("×")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Tokens.textFaint)
-                    .frame(width: 14, height: 14)
+                .foregroundStyle(textColor)
+            if case let .removable(_, onRemove) = style {
+                Button(action: onRemove) {
+                    Text("×")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Tokens.textFaint)
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.leading, 10)
-        .padding(.trailing, 5)
+        .padding(.trailing, isRemovable ? 5 : 10)
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(hex: 0xEFE5CF, opacity: 0.05))
+                .fill(fillColor)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(Tokens.line, lineWidth: 1)
+                .strokeBorder(strokeColor, lineWidth: 1)
         )
+    }
+
+    private var isRemovable: Bool {
+        if case .removable = style { return true }
+        return false
+    }
+
+    private var textColor: Color {
+        switch style {
+        case .locked: return Tokens.textDim
+        case .removable: return Tokens.text
+        }
+    }
+
+    private var fillColor: Color {
+        switch style {
+        case .locked:
+            return Color(hex: 0xEFE5CF, opacity: 0.04)
+        case let .removable(accent, _):
+            return accent.main.opacity(0.14)
+        }
+    }
+
+    private var strokeColor: Color {
+        switch style {
+        case .locked:
+            return Tokens.line
+        case let .removable(accent, _):
+            return accent.main.opacity(0.45)
+        }
     }
 }
 

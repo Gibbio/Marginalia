@@ -38,7 +38,13 @@
 "settings.info.language"      = "The chosen language filters the TTS voices shown below and sets the default recognition locale. The interface language is changed at the bottom of this page.";
 "settings.info.voice"         = "Each voice is a small neural embedding (≈500 KB) downloaded locally. The picker shows only voices installed for the current language; uninstalled ones are greyed out.";
 "settings.info.stt"           = "Apple Speech is the system recognizer (low cost, high quality, requires macOS Dictation to be enabled). Whisper is a local ggml model (~465 MB), fully offline. Switching restarts the helper — a few hundred milliseconds.";
-"settings.info.commands"      = "Each action has one or more synonyms. Words can be in any language — they aren't translated, the raw audio is what matters. Words already used by another action will be rejected to avoid ambiguity.";
+"settings.info.commands"      = "Each action has default triggers per interface language (shown as neutral, locked chips) and custom triggers you add yourself (colored, removable chips). Customs stay when you switch interface language; defaults adapt. Words already in use by another action — even just as a default — will be rejected to avoid ambiguity.";
+
+// Voice-commands editor — chip styling + add-trigger UX
+"settings.commands.chip.add-placeholder"  = "+ add";
+"settings.commands.chip.default-tooltip"  = "Default trigger for the current interface language. Not removable.";
+"settings.commands.chip.custom-tooltip"   = "Custom trigger — added by you. Persists across interface language changes.";
+"settings.commands.chip.conflict"         = "\u{201C}%1$@\u{201D} is already used in \u{201C}%2$@\u{201D}";
 "settings.info.text-prep"     = "A chunk is the atomic unit of synthesis and voice navigation. Smaller chunks = snappier command response and finer jumps, but more fragmentation. Changes require re-importing existing documents. The audio cache holds the synthesized chunk files; clearing it loses no work, only regeneration time. The notes cache holds the recorded dictation audio: clearing it permanently deletes the linked annotations as well.";
 "settings.info.installations" = "Marginalia runs offline. Only in this section, and only when you explicitly act, may the app reach huggingface.co and github.com to download missing models. All assets are Apache-2.0 or MIT.";
 "settings.info.theme"         = "Changes the accent tint — highlights, player pill, audio bars, note hover. The warm-dark background stays — it's part of Marginalia's identity.";

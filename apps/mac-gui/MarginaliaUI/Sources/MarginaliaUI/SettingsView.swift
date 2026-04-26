@@ -737,6 +737,8 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 ForEach($draftCommands) { $cmd in
                     CommandRow(
                         cmd: $cmd,
+                        accent: accent,
+                        interfaceLang: interfaceLang,
                         isTakenByOther: { candidate in
                             triggerConflict(candidate: candidate, excluding: cmd.action)
                         }
@@ -766,11 +768,21 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     /// use by a different command. Returns the user-facing label (e.g.
     /// "Metti in pausa") of the conflicting command, or nil if the word
     /// is free.
+    /// Checks both stored triggers (customs + carry-over from a prior
+    /// language switch) and the current language's defaults for every
+    /// other command — so a user can't accidentally type "pause" into
+    /// the resume row when "pause" is the pause command's default.
     private func triggerConflict(candidate raw: String, excluding own: String) -> String? {
         let needle = raw.trimmingCharacters(in: .whitespaces).lowercased()
         guard !needle.isEmpty else { return nil }
         for cmd in draftCommands where cmd.action != own {
             if cmd.triggers.contains(where: { $0.lowercased() == needle }) {
+                return cmd.label
+            }
+            let defaults = VoiceCommandDefaults.triggers(
+                for: interfaceLang, action: cmd.action
+            )
+            if defaults.contains(where: { $0.lowercased() == needle }) {
                 return cmd.label
             }
         }

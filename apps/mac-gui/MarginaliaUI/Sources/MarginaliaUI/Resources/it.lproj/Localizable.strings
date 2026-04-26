@@ -40,7 +40,13 @@
 "settings.info.language"      = "La lingua scelta filtra le voci del TTS mostrate qui sotto e imposta il locale di default del riconoscimento vocale. La lingua dell'interfaccia si cambia in fondo a questa pagina.";
 "settings.info.voice"         = "Ogni voce è un piccolo modello neurale (≈500 KB) scaricato in locale. Il picker mostra solo le voci installate per la lingua corrente; quelle non installate sono grigie.";
 "settings.info.stt"           = "Apple Speech è il riconoscitore di sistema (basso costo, alta qualità, richiede la dettatura macOS attiva). Whisper è un modello ggml locale da 465 MB, completamente offline. Il cambio richiede di riavviare l'helper — qualche centinaio di ms.";
-"settings.info.commands"      = "Ogni azione ha uno o più sinonimi. Le parole possono essere in qualsiasi lingua — non sono tradotte, è l'audio grezzo che conta. Parole già usate da un'altra azione verranno rifiutate per evitare ambiguità.";
+"settings.info.commands"      = "Ogni azione ha trigger di default per lingua dell'interfaccia (visualizzati come chip neutri, non rimovibili) e custom aggiunti da te (chip colorati, rimovibili). I custom restano quando cambi lingua dell'interfaccia, mentre i default si adattano. Parole già usate da un'altra azione — anche solo come default — vengono rifiutate per evitare ambiguità.";
+
+// Voice-commands editor — chip styling + add-trigger UX
+"settings.commands.chip.add-placeholder"  = "+ aggiungi";
+"settings.commands.chip.default-tooltip"  = "Trigger di default per la lingua dell'interfaccia. Non rimovibile.";
+"settings.commands.chip.custom-tooltip"   = "Trigger custom — aggiunto da te. Persiste anche cambiando lingua interfaccia.";
+"settings.commands.chip.conflict"         = "\u{201C}%1$@\u{201D} è già usato in \u{201C}%2$@\u{201D}";
 "settings.info.text-prep"     = "Il chunk è l'unità minima di sintesi e navigazione vocale. Chunk piccoli = risposta rapida ai comandi e salti fini, ma più frammentazione. Il cambio richiede di re-importare i documenti esistenti. La cache audio contiene i file sintetizzati per chunk; cancellarla non perde lavoro, solo tempo di rigenerazione. La cache note contiene gli audio delle note dettate: svuotarla cancella in modo definitivo anche le annotazioni associate.";
 "settings.info.installations" = "Marginalia funziona offline. Solo qui, su esplicita azione tua, l'app può contattare huggingface.co e github.com per scaricare modelli mancanti. Tutti gli asset sono Apache-2.0 o MIT.";
 "settings.info.theme"         = "Cambia la tinta di accento — highlight, player pill, barre audio, hover nelle note. Lo sfondo warm-dark resta invariato: è parte dell'identità di Marginalia.";
