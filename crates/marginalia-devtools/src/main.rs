@@ -623,7 +623,10 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::SqliteNote { db_path, text } => {
             let mut runtime = SqliteRuntime::open(&db_path)?;
-            let note = runtime.create_note(&text)?;
+            // `create_note` now takes an optional WAV path for the
+            // dictation-recorder flow; the devtools CLI never has a
+            // recorded audio file, so always `None`.
+            let note = runtime.create_note(&text, None)?;
 
             println!("runtime=sqlite");
             println!("db_path={}", db_path.display());

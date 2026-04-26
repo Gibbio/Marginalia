@@ -232,6 +232,12 @@ mod tests {
         fn search_documents(&self, _query: &SearchQuery) -> Vec<SearchResult> {
             Vec::new()
         }
+
+        fn delete_document(&mut self, document_id: &str) -> Result<bool, StorageError> {
+            let before = self.documents.len();
+            self.documents.retain(|d| d.document_id != document_id);
+            Ok(self.documents.len() < before)
+        }
     }
 
     struct StubSessionRepository {
@@ -275,6 +281,16 @@ mod tests {
 
         fn search_notes(&self, _query: &SearchQuery) -> Vec<SearchResult> {
             Vec::new()
+        }
+
+        fn delete_note(&mut self, note_id: &str) -> Result<bool, StorageError> {
+            let before = self.notes.len();
+            self.notes.retain(|n| n.note_id != note_id);
+            Ok(self.notes.len() < before)
+        }
+
+        fn get_note(&self, note_id: &str) -> Option<VoiceNote> {
+            self.notes.iter().find(|n| n.note_id == note_id).cloned()
         }
     }
 

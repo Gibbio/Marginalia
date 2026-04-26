@@ -1620,7 +1620,7 @@ mod tests {
         runtime
             .start_session(&outcome.document.document_id)
             .unwrap();
-        let note = runtime.create_note("remember this").unwrap();
+        let note = runtime.create_note("remember this", None).unwrap();
         let snapshot = runtime.session_snapshot().unwrap().unwrap();
 
         assert_eq!(note.document_id, outcome.document.document_id);
@@ -1718,7 +1718,7 @@ mod tests {
         runtime.previous_chunk().unwrap();
 
         // 4. Create a note
-        let note = runtime.create_note("test note").unwrap();
+        let note = runtime.create_note("test note", None).unwrap();
         assert_eq!(note.transcript, "test note");
 
         // 5. Pause + resume

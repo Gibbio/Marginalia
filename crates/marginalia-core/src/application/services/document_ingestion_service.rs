@@ -236,6 +236,12 @@ mod tests {
         fn search_documents(&self, _query: &SearchQuery) -> Vec<SearchResult> {
             Vec::new()
         }
+
+        fn delete_document(&mut self, document_id: &str) -> Result<bool, StorageError> {
+            let before = self.documents.len();
+            self.documents.retain(|d| d.document_id != document_id);
+            Ok(self.documents.len() < before)
+        }
     }
 
     #[derive(Default)]
