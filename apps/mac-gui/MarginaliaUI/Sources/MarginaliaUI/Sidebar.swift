@@ -113,25 +113,31 @@ public struct Sidebar: View {
                                        onReload: { onReloadDocument(entry.id) })
                             }
                             .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(T("sidebar.library.open")) { onOpenDocument(entry.id) }
-                                Button(T("sidebar.library.edit")) {
-                                    onOpenSourceInEditor(entry.id)
-                                }
-                                .disabled(entry.sourcePath.isEmpty)
-                                Button(T("sidebar.library.reload")) {
-                                    onReloadDocument(entry.id)
-                                }
-                                .disabled(!entry.needsReload)
-                                Divider()
-                                // Confirmation is handled by the caller
-                                // (`MarginaliaWindow`) — at this layer we
-                                // just fire the intent.
-                                Button(role: .destructive) {
-                                    onDeleteDocument(entry.id)
-                                } label: {
-                                    Text(T("sidebar.library.remove"))
-                                }
+                            // Marginalia-styled context menu (replaces the
+                            // native NSMenu .contextMenu — same items, same
+                            // semantics, but serif typography + accent
+                            // wash on hover that matches the rest of the
+                            // app). Implementation in
+                            // `MarginaliaContextMenu.swift`.
+                            .marginaliaContextMenu(accent: accent) {
+                                [
+                                    .init(label: T("sidebar.library.open"),
+                                          icon: "book",
+                                          action: { onOpenDocument(entry.id) }),
+                                    .init(label: T("sidebar.library.edit"),
+                                          icon: "square.and.pencil",
+                                          isEnabled: !entry.sourcePath.isEmpty,
+                                          action: { onOpenSourceInEditor(entry.id) }),
+                                    .init(label: T("sidebar.library.reload"),
+                                          icon: "arrow.triangle.2.circlepath",
+                                          isEnabled: entry.needsReload,
+                                          action: { onReloadDocument(entry.id) }),
+                                    .divider,
+                                    .init(label: T("sidebar.library.remove"),
+                                          icon: "trash",
+                                          isDestructive: true,
+                                          action: { onDeleteDocument(entry.id) }),
+                                ]
                             }
                         }
                         if library.isEmpty {
