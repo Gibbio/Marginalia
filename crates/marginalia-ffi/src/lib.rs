@@ -611,6 +611,11 @@ fn load_voices_from_manifest() -> Vec<AssetSpec> {
 /// 1st char = language family, 2nd char = gender. Unknown prefixes return
 /// `None` so a manifest with future characters (e.g. an unannounced
 /// language) is silently skipped instead of mislabelled.
+///
+/// Tags must match the bundled `voices.manifest.json` exactly so the
+/// FFI-fetched HF cache and the bundled fallback agree on the lang
+/// string for the same voice id (the runtime's `voice_to_lang` map
+/// gets keyed by both interchangeably).
 fn kokoro_lang_from_id(voice_id: &str) -> Option<&'static str> {
     let c = voice_id.chars().next()?;
     Some(match c {
@@ -618,7 +623,7 @@ fn kokoro_lang_from_id(voice_id: &str) -> Option<&'static str> {
         'b' => "en-GB",
         'e' => "es-ES",
         'f' => "fr-FR",
-        'h' => "hi",
+        'h' => "hi-IN",
         'i' => "it-IT",
         'j' => "ja-JP",
         'p' => "pt-BR",
