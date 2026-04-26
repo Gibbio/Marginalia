@@ -607,15 +607,31 @@ impl DictationTranscriber for AppleDictationTranscriber {
                 raw_text: None,
                 raw_audio_path: self.take_last_audio_path(),
             },
-            Err(err) => DictationTranscript {
-                text: format!("[Apple dictation error: {err}]"),
-                provider_name: DICTATION_PROVIDER_NAME.to_string(),
-                language: self.language.clone(),
-                is_final: true,
-                segments: vec![],
-                raw_text: None,
-                raw_audio_path: None,
-            },
+            Err(err) => {
+                // Emit an EMPTY `text` so the FFI dictation thread takes
+                // its `if text.is_empty()` branch and surfaces the failure
+                // as a `VoiceNoteTranscribed { error_message }` event
+                // WITHOUT calling `create_note`. Previously we packed
+                // the diagnostic into `text` (`"[Apple dictation error:
+                // {err}]"`); since that string is non-empty, the FFI
+                // would persist it as a regular note — the user saw a
+                // phantom note appear ~60s after a silent dictation
+                // (timeout) or after they typed and saved a text-only
+                // note while a stale dictation was still in flight.
+                // The error detail still reaches the runtime via
+                // `raw_text` so logs / future error-surface paths can
+                // pick it up; the user-visible text stays empty.
+                log::warn!("[apple-stt] dictation failed: {err}");
+                DictationTranscript {
+                    text: String::new(),
+                    provider_name: DICTATION_PROVIDER_NAME.to_string(),
+                    language: self.language.clone(),
+                    is_final: true,
+                    segments: vec![],
+                    raw_text: Some(format!("[Apple dictation error: {err}]")),
+                    raw_audio_path: None,
+                }
+            }
         }
     }
 }

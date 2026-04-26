@@ -1599,6 +1599,15 @@ struct NoteComposeSheet<Host: MarginaliaHost>: View {
         let id = dictatedNoteId
         onClose()
         host.clearLiveNote()
+        // Suppress any dictation that's still in flight (e.g. user opened
+        // the sheet, started speaking, then changed their mind and typed
+        // text instead). Without this, the late-arriving transcript
+        // would create a SECOND, phantom note alongside the typed one —
+        // and on a silent dictation it'd land 60s later as the timeout
+        // error string. Same flag the cancel() path uses.
+        if id == nil {
+            host.cancelPendingDictation()
+        }
         Task {
             if let id {
                 try? await host.updateNote(id: id, text: final)
