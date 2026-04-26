@@ -63,13 +63,21 @@ pub struct HostPlaybackEngine {
 
 impl Default for HostPlaybackEngine {
     fn default() -> Self {
+        let thread = std::thread::current();
+        log::info!(
+            "[playback] HostPlaybackEngine::default on thread {:?} (id={:?})",
+            thread.name().unwrap_or("<unnamed>"),
+            thread.id()
+        );
         let (device_sink, player) = match DeviceSinkBuilder::open_default_sink() {
             Ok(sink) => {
+                log::info!("[playback] opened default device sink");
                 // Construct the player on the same thread as the device
                 // sink so rodio's audio callback recognises it. Shipping
                 // it across threads later (via SendPlayer) is fine —
                 // append/clear/pause only touch MPSC channels.
                 let p = Player::connect_new(sink.mixer());
+                log::info!("[playback] connected new Player to mixer");
                 // Idle until the first chunk arrives.
                 p.pause();
                 (Some(SendDeviceSink(sink)), Some(SendPlayer(p)))
@@ -175,6 +183,13 @@ impl PlaybackEngine for HostPlaybackEngine {
         position: &ReadingPosition,
         synthesis: Option<SynthesisResult>,
     ) -> PlaybackSnapshot {
+        let thread = std::thread::current();
+        log::info!(
+            "[playback] start() thread={:?} doc={} anchor={}",
+            thread.id(),
+            document.document_id,
+            position.anchor()
+        );
         self.stop();
         self.snapshot.document_id = Some(document.document_id.clone());
         self.snapshot.anchor = Some(position.anchor());
@@ -244,15 +259,30 @@ impl PlaybackEngine for HostPlaybackEngine {
             }
         }
 
-        // Drain anything the previous chunk left queued (clear() also
-        // pauses the player), then resume + append + set volume. The
-        // persistent player must stay alive — recreating it here would
-        // break audio output when start() runs from a thread other
-        // than the one that created the cpal stream.
-        player.0.clear();
+        // Skip whatever's currently queued (non-blocking — it just
+        // tells the audio thread to drop the next source on its next
+        // 5ms tick), then unpause and append. We deliberately avoid
+        // `clear()` here because clear() calls `sleep_until_end()`
+        // which blocks until the audio callback actually drains the
+        // current source — if the audio thread is wedged for any
+        // reason, that deadlocks the runtime mutex holder.
+        log::info!(
+            "[playback] start: pre-skip empty={} paused={} vol={}",
+            player.0.empty(),
+            player.0.is_paused(),
+            self.volume
+        );
+        if !player.0.empty() {
+            player.0.skip_one();
+        }
         player.0.play();
         player.0.set_volume(self.volume);
         player.0.append(source);
+        log::info!(
+            "[playback] start: after append empty={} paused={}",
+            player.0.empty(),
+            player.0.is_paused()
+        );
         self.snapshot.state = PlaybackState::Playing;
         self.snapshot.last_action = "start".to_string();
         self.snapshot.audio_reference = Some(synthesis.audio_reference);
@@ -294,9 +324,19 @@ impl PlaybackEngine for HostPlaybackEngine {
     fn stop(&mut self) -> PlaybackSnapshot {
         // Drain the queue but keep the persistent player alive — tearing
         // it down would force a fresh `Player::connect_new` on the next
-        // start(), which only works on the cpal-stream thread.
+        // start(), which only works on the cpal-stream thread. We use
+        // `skip_one` (non-blocking) instead of `clear` (which sleeps
+        // until the audio thread acks the skip).
+        log::info!(
+            "[playback] stop: thread={:?} prev_state={:?}",
+            std::thread::current().id(),
+            self.snapshot.state
+        );
         if let Some(player) = &self.player {
-            player.0.clear();
+            if !player.0.empty() {
+                player.0.skip_one();
+            }
+            player.0.pause();
         }
         if let Some(cb) = &self.on_playback_cleared {
             cb();
