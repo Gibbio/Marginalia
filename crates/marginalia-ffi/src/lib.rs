@@ -277,6 +277,20 @@ pub struct DocumentListItem {
     pub title: String,
     pub chapter_count: u32,
     pub chunk_count: u32,
+    /// Filesystem path of the source file at ingestion time. Used by
+    /// the GUI's "Apri file in editor…" action — `NSWorkspace.shared.open`
+    /// with a `URL(fileURLWithPath:)` from this string.
+    pub source_path: String,
+    /// SHA-256 of the source file's bytes at ingestion time. `None` for
+    /// rows imported before migration `003_document_fingerprint`; the
+    /// next reload backfills it.
+    pub content_sha256: Option<String>,
+    /// `true` iff the file currently on disk has a different SHA than
+    /// the row's `content_sha256`. Computed by the runtime off-mutex
+    /// during `list_documents`. `false` on IO errors (file missing,
+    /// permission denied) or pre-migration rows. Drives the reload
+    /// indicator in the sidebar.
+    pub needs_reload: bool,
 }
 
 pub struct IngestResult {
@@ -1639,6 +1653,24 @@ impl FfiRuntime {
     pub fn delete_document(&self, document_id: String) -> Result<(), FfiError> {
         self.runtime.lock().unwrap().delete_document(&document_id)?;
         Ok(())
+    }
+
+    /// Re-ingest a document's source file from disk. Used when the user
+    /// edits the source externally (the GUI flags the row's
+    /// `needs_reload` via `list_documents`). Path-stable id scheme means
+    /// notes / sessions / TTS cache stay attached to the same id.
+    /// Returns the same shape as `ingest_file` so the GUI handler can
+    /// reuse its existing post-import flow.
+    pub fn reload_document(&self, document_id: String) -> Result<IngestResult, FfiError> {
+        log::info!(
+            "[ffi] reload_document doc={document_id} thread={:?}",
+            std::thread::current().id()
+        );
+        let mut rt = self.runtime.lock().unwrap();
+        match rt.reload_document(&document_id) {
+            Ok(outcome) => Ok(ingest_outcome_to_result(outcome)),
+            Err(e) => Err(FfiError::Ingestion(format!("{e:?}"))),
+        }
     }
 
     pub fn ingest_url(&self, url: String) -> Result<IngestResult, FfiError> {

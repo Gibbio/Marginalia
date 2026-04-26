@@ -23,6 +23,13 @@ public struct Sidebar: View {
     /// Optional: triggered by the sidebar row's context menu "Rimuovi".
     /// Default no-op so preview / mock don't need to wire it.
     public var onDeleteDocument: (String) -> Void = { _ in }
+    /// Triggered by the row's "Apri file in editor…" context-menu entry.
+    /// The host opens the source file via `NSWorkspace.shared.open`.
+    public var onOpenSourceInEditor: (String) -> Void = { _ in }
+    /// Triggered by the row's "Ricarica da disco" context-menu entry.
+    /// Confirmation + actual reload happen in the caller
+    /// (`MarginaliaWindow`); this layer only fires the intent.
+    public var onReloadDocument: (String) -> Void = { _ in }
     /// Open the Settings page. Lives in the sidebar footer (next to
     /// the voice meters) so the user can reach Settings from any
     /// context — including when no document is open and the right
@@ -50,6 +57,8 @@ public struct Sidebar: View {
                 onAddDocument: @escaping () -> Void = {},
                 onOpenDocument: @escaping (String) -> Void = { _ in },
                 onDeleteDocument: @escaping (String) -> Void = { _ in },
+                onOpenSourceInEditor: @escaping (String) -> Void = { _ in },
+                onReloadDocument: @escaping (String) -> Void = { _ in },
                 onOpenSettings: @escaping () -> Void = {}) {
         self.accent = accent
         self.library = library
@@ -62,6 +71,8 @@ public struct Sidebar: View {
         self.onAddDocument = onAddDocument
         self.onOpenDocument = onOpenDocument
         self.onDeleteDocument = onDeleteDocument
+        self.onOpenSourceInEditor = onOpenSourceInEditor
+        self.onReloadDocument = onReloadDocument
         self.onOpenSettings = onOpenSettings
     }
 
@@ -103,6 +114,14 @@ public struct Sidebar: View {
                             .buttonStyle(.plain)
                             .contextMenu {
                                 Button(T("sidebar.library.open")) { onOpenDocument(entry.id) }
+                                Button(T("sidebar.library.edit")) {
+                                    onOpenSourceInEditor(entry.id)
+                                }
+                                .disabled(entry.sourcePath.isEmpty)
+                                Button(T("sidebar.library.reload")) {
+                                    onReloadDocument(entry.id)
+                                }
+                                .disabled(!entry.needsReload)
                                 Divider()
                                 // Confirmation is handled by the caller
                                 // (`MarginaliaWindow`) — at this layer we
@@ -449,11 +468,22 @@ struct LibRow: View {
                 .font(.serif(15, italic: entry.active))
                 .foregroundStyle(entry.active ? Tokens.text : Tokens.textDim)
                 .lineLimit(1)
-            if !metadataLine.isEmpty {
-                Text(metadataLine)
-                    .font(.mono(9))
-                    .tracking(0.3)
-                    .foregroundStyle(Tokens.textFaint)
+            HStack(spacing: 6) {
+                if !metadataLine.isEmpty {
+                    Text(metadataLine)
+                        .font(.mono(9))
+                        .tracking(0.3)
+                        .foregroundStyle(Tokens.textFaint)
+                }
+                if entry.needsReload {
+                    // Pure indicator — not a tap target. The reload
+                    // action is in the row's context menu so we don't
+                    // re-ingest on accidental clicks.
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Tokens.textFaint)
+                        .help(T("sidebar.library.modified-on-disk"))
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

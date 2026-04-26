@@ -152,9 +152,12 @@
 // Sidebar — section titles, search, library actions
 "sidebar.library.title"       = "libreria";
 "sidebar.library.open"        = "Apri";
+"sidebar.library.edit"        = "Apri file in editor…";
+"sidebar.library.reload"      = "Ricarica da disco";
 "sidebar.library.remove"      = "Rimuovi dalla libreria";
 "sidebar.library.empty"       = "Nessun documento. Usa + per importare.";
 "sidebar.library.no_results"  = "Nessun risultato per \"%@\".";
+"sidebar.library.modified-on-disk" = "Modificato dall'ultima importazione";
 // LibRow metadata parts. Each shown only when count > 0 — `_one` /
 // `_other` mirror the plural rule selected at the call site.
 "sidebar.library.chapters_one"   = "1 capitolo";

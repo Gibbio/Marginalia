@@ -133,6 +133,9 @@ mod tests {
                 source_anchor: Some("section:0".to_string()),
             }],
             imported_at: chrono::Utc::now(),
+            content_sha256: None,
+            content_size_bytes: None,
+            content_mtime_ms: None,
         };
         let position = ReadingPosition::default();
 

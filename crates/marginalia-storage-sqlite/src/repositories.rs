@@ -46,13 +46,19 @@ impl DocumentRepository for SQLiteDocumentRepository {
 
         tx.execute(
             "
-            INSERT INTO documents(document_id, title, source_path, imported_at, outline_json)
-            VALUES(?, ?, ?, ?, ?)
+            INSERT INTO documents(
+                document_id, title, source_path, imported_at, outline_json,
+                content_sha256, content_size_bytes, content_mtime_unix_ms
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(document_id) DO UPDATE SET
                 title = excluded.title,
                 source_path = excluded.source_path,
                 imported_at = excluded.imported_at,
-                outline_json = excluded.outline_json
+                outline_json = excluded.outline_json,
+                content_sha256 = excluded.content_sha256,
+                content_size_bytes = excluded.content_size_bytes,
+                content_mtime_unix_ms = excluded.content_mtime_unix_ms
             ",
             params![
                 document.document_id,
@@ -60,6 +66,9 @@ impl DocumentRepository for SQLiteDocumentRepository {
                 document.source_path.to_string_lossy().to_string(),
                 document.imported_at.to_rfc3339(),
                 document_to_json(&document).map_err(json_err)?,
+                document.content_sha256,
+                document.content_size_bytes.map(|n| n as i64),
+                document.content_mtime_ms,
             ],
         )
         .map_err(storage_err)?;
@@ -131,7 +140,8 @@ impl DocumentRepository for SQLiteDocumentRepository {
         let row = connection
             .query_row(
                 "
-                SELECT document_id, title, source_path, imported_at
+                SELECT document_id, title, source_path, imported_at,
+                       content_sha256, content_size_bytes, content_mtime_unix_ms
                 FROM documents
                 WHERE document_id = ?
                 ",
@@ -142,6 +152,9 @@ impl DocumentRepository for SQLiteDocumentRepository {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        row.get::<_, Option<i64>>(6)?,
                     ))
                 },
             )
@@ -212,6 +225,9 @@ impl DocumentRepository for SQLiteDocumentRepository {
             source_path: PathBuf::from(row.2),
             imported_at,
             sections,
+            content_sha256: row.4,
+            content_size_bytes: row.5.map(|n| n as u64),
+            content_mtime_ms: row.6,
         })
     }
 
@@ -326,14 +342,19 @@ impl DocumentRepository for SQLiteDocumentRepository {
             .expect("sqlite connection lock poisoned");
         // Cascade manually — the schema does NOT have ON DELETE CASCADE
         // on chunks/sections/notes, so do it in a single transaction.
+        // Pre-existing bug: the previous code targeted `chunks` and
+        // `sections` (no such tables in the baseline schema, which uses
+        // `document_chunks` / `document_sections`); the cascade silently
+        // errored before reaching the documents row, leaving orphan
+        // chunks behind. Fixed here as part of the reload work.
         let tx = connection.unchecked_transaction().map_err(storage_err)?;
         tx.execute(
-            "DELETE FROM chunks WHERE document_id = ?",
+            "DELETE FROM document_chunks WHERE document_id = ?",
             params![document_id],
         )
         .map_err(storage_err)?;
         tx.execute(
-            "DELETE FROM sections WHERE document_id = ?",
+            "DELETE FROM document_sections WHERE document_id = ?",
             params![document_id],
         )
         .map_err(storage_err)?;
@@ -355,6 +376,57 @@ impl DocumentRepository for SQLiteDocumentRepository {
             .map_err(storage_err)?;
         tx.commit().map_err(storage_err)?;
         Ok(rows > 0)
+    }
+}
+
+impl SQLiteDocumentRepository {
+    /// Atomically rename a document_id across every table that references
+    /// it. Used by `reload_document` to migrate pre-migration rows from
+    /// the old (content-hashed) id scheme to the path-stable scheme so
+    /// notes / sessions stay attached to the live row. No-op when the
+    /// id is unchanged. Errors out if a row already exists at `new_id`
+    /// (the caller would orphan data otherwise).
+    pub fn rename_document_id(
+        &mut self,
+        old_id: &str,
+        new_id: &str,
+    ) -> Result<(), StorageError> {
+        if old_id == new_id {
+            return Ok(());
+        }
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite connection lock poisoned");
+        // Defensive: refuse to clobber an existing row at `new_id`.
+        let target_exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id = ?)",
+                params![new_id],
+                |row| row.get::<_, i64>(0).map(|n| n != 0),
+            )
+            .map_err(storage_err)?;
+        if target_exists {
+            return Err(StorageError(format!(
+                "rename_document_id: target id {new_id} already exists"
+            )));
+        }
+        let tx = connection.unchecked_transaction().map_err(storage_err)?;
+        for table in [
+            "documents",
+            "document_chunks",
+            "document_sections",
+            "notes",
+            "sessions",
+        ] {
+            tx.execute(
+                &format!("UPDATE {table} SET document_id = ? WHERE document_id = ?"),
+                params![new_id, old_id],
+            )
+            .map_err(storage_err)?;
+        }
+        tx.commit().map_err(storage_err)?;
+        Ok(())
     }
 }
 
@@ -1028,6 +1100,9 @@ mod tests {
                 source_anchor: Some("section:0".to_string()),
             }],
             imported_at: chrono::Utc::now(),
+            content_sha256: None,
+            content_size_bytes: None,
+            content_mtime_ms: None,
         }
     }
 

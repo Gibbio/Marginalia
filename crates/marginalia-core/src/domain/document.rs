@@ -90,6 +90,17 @@ pub struct Document {
     pub sections: Vec<DocumentSection>,
     /// Timestamp when the document was imported.
     pub imported_at: DateTime<Utc>,
+    /// SHA-256 hex digest of the source file's bytes at ingestion time.
+    /// `None` for rows imported before the fingerprint columns existed
+    /// (migration 003); populated on the next ingestion of that path.
+    /// Drives "modificato dall'ultima importazione" detection.
+    pub content_sha256: Option<String>,
+    /// Source file size in bytes at ingestion time. Used as a cheap
+    /// pre-check before recomputing the SHA on the on-open scan.
+    pub content_size_bytes: Option<u64>,
+    /// Source file mtime (Unix epoch ms) at ingestion time. Same role
+    /// as `content_size_bytes` — fast path before the SHA recompute.
+    pub content_mtime_ms: Option<i64>,
 }
 
 impl Document {
@@ -188,24 +199,20 @@ pub fn build_document_from_import(
         });
     }
 
-    let document_hash_input = format!(
-        "{}::{}",
-        imported.source_path.to_string_lossy(),
-        ImportedDocument {
-            title: Some(title.clone()),
-            source_path: imported.source_path.clone(),
-            sections: sections
-                .iter()
-                .map(|section| ImportedSection {
-                    title: section.title.clone(),
-                    paragraphs: vec![section.text()],
-                    source_anchor: section.source_anchor.clone(),
-                })
-                .collect(),
-        }
-        .canonical_text()
+    // Path-stable identity: the id is derived from the canonical absolute
+    // path of the source file. Re-ingesting the same file (after the user
+    // edited it externally) yields the same `document_id`, so notes /
+    // sessions / TTS-cache attached to it survive the re-ingestion via the
+    // existing `ON CONFLICT DO UPDATE` upsert. Trade-off: notes anchored
+    // to `(section, chunk)` indices may shift onto slightly different text
+    // if content was inserted/deleted upstream of them — acceptable since
+    // the user explicitly triggered the reload.
+    let canonical = std::fs::canonicalize(&imported.source_path)
+        .unwrap_or_else(|_| imported.source_path.clone());
+    let document_id = format!(
+        "{:x}",
+        Sha256::digest(canonical.to_string_lossy().as_bytes())
     );
-    let document_id = format!("{:x}", Sha256::digest(document_hash_input.as_bytes()));
 
     Document {
         document_id: document_id[..12].to_string(),
@@ -213,6 +220,13 @@ pub fn build_document_from_import(
         source_path: imported.source_path,
         sections,
         imported_at: Utc::now(),
+        // Populated by `DocumentIngestionService::ingest_path` after this
+        // function returns — it has access to the raw file bytes and can
+        // run `file_fingerprint`. Leaving them None here keeps the domain
+        // constructor pure (no IO).
+        content_sha256: None,
+        content_size_bytes: None,
+        content_mtime_ms: None,
     }
 }
 
@@ -490,6 +504,9 @@ mod tests {
                 },
             ],
             imported_at: Utc::now(),
+            content_sha256: None,
+            content_size_bytes: None,
+            content_mtime_ms: None,
         };
 
         assert_eq!(document.chapter_count(), 2);
@@ -551,5 +568,60 @@ mod tests {
             document.sections[0].chunks[0].text,
             "Alpha beta gamma. Delta epsilon zeta."
         );
+    }
+
+    /// `document_id` is path-stable: two imports of the same path with
+    /// different content yield the same id, so re-ingest after an edit
+    /// upserts onto the existing row (preserving notes / sessions /
+    /// TTS-cache attached to it). See plan
+    /// `~/.claude/plans/jiggly-tinkering-platypus.md`.
+    #[test]
+    fn document_id_is_path_stable_across_content_changes() {
+        let path = PathBuf::from("/tmp/marginalia-test-stable.md");
+        let v1 = build_document_from_import(
+            ImportedDocument {
+                title: Some("V1".to_string()),
+                source_path: path.clone(),
+                sections: vec![ImportedSection {
+                    title: "Intro".to_string(),
+                    paragraphs: vec!["Alpha".to_string()],
+                    source_anchor: None,
+                }],
+            },
+            DEFAULT_CHUNK_TARGET_CHARS,
+        );
+        let v2 = build_document_from_import(
+            ImportedDocument {
+                title: Some("V2".to_string()),
+                source_path: path,
+                sections: vec![ImportedSection {
+                    title: "Intro".to_string(),
+                    paragraphs: vec!["Beta gamma delta".to_string()],
+                    source_anchor: None,
+                }],
+            },
+            DEFAULT_CHUNK_TARGET_CHARS,
+        );
+        assert_eq!(v1.document_id, v2.document_id);
+    }
+
+    /// Different paths must yield different ids (the whole point of
+    /// path-stable hashing).
+    #[test]
+    fn document_id_differs_for_different_paths() {
+        let common = ImportedDocument {
+            title: Some("Doc".to_string()),
+            source_path: PathBuf::from("/tmp/marginalia-test-a.md"),
+            sections: vec![ImportedSection {
+                title: "Intro".to_string(),
+                paragraphs: vec!["Same body".to_string()],
+                source_anchor: None,
+            }],
+        };
+        let mut other = common.clone();
+        other.source_path = PathBuf::from("/tmp/marginalia-test-b.md");
+        let a = build_document_from_import(common, DEFAULT_CHUNK_TARGET_CHARS);
+        let b = build_document_from_import(other, DEFAULT_CHUNK_TARGET_CHARS);
+        assert_ne!(a.document_id, b.document_id);
     }
 }

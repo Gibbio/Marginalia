@@ -46,6 +46,9 @@ impl From<CoreDocItem> for DocumentListItem {
             title: d.title,
             chapter_count: u32_lossy(d.chapter_count),
             chunk_count: u32_lossy(d.chunk_count),
+            source_path: d.source_path,
+            content_sha256: d.content_sha256,
+            needs_reload: d.needs_reload,
         }
     }
 }

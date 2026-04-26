@@ -200,14 +200,25 @@ public struct LibraryEntry: Identifiable, Hashable, Sendable {
     public let chunkCount: Int
     public let notes: Int
     public let active: Bool
+    /// Filesystem path of the source file at ingestion time. Empty
+    /// string when the host doesn't know it (mock fixtures, legacy
+    /// rows). Drives the "Apri file in editor…" context-menu entry.
+    public let sourcePath: String
+    /// True iff the file currently on disk has a different SHA than the
+    /// one stored at ingestion time. Drives the reload glyph in the
+    /// sidebar row and enables the "Ricarica da disco" context-menu
+    /// entry. Computed by the runtime; the mock keeps it false.
+    public let needsReload: Bool
 
     public init(id: String, title: String, subtitle: String,
                 progressPct: Int, chapterCount: Int = 0, chunkCount: Int = 0,
-                notes: Int, active: Bool) {
+                notes: Int, active: Bool,
+                sourcePath: String = "", needsReload: Bool = false) {
         self.id = id; self.title = title; self.subtitle = subtitle
         self.progressPct = progressPct
         self.chapterCount = chapterCount; self.chunkCount = chunkCount
         self.notes = notes; self.active = active
+        self.sourcePath = sourcePath; self.needsReload = needsReload
     }
 }
 
@@ -432,6 +443,17 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// sessions in storage. If the doc is the active one, the host stops
     /// the session first so the reader doesn't render a ghost chunk.
     func deleteDocument(id: String) async
+
+    /// Open the source file in the OS default editor for that file
+    /// type (`NSWorkspace.shared.open`). Sync, side-effect only — the
+    /// OS handles failure surfacing (no-handler dialog). Mock host can
+    /// log and skip.
+    func openSourceInEditor(id: String)
+    /// Re-ingest a document's source file from disk. Used after the
+    /// user edits the file externally (badge `needsReload` is set).
+    /// Path-stable id keeps notes/sessions attached. Refresh of
+    /// `library` happens inside the host after the call resolves.
+    func reloadDocument(id: String) async throws
 
     /// Delete a note by id. Idempotent — unknown ids no-op. After deletion
     /// the host should refresh `notes`.
@@ -788,6 +810,27 @@ public final class MockHost: MarginaliaHost, ObservableObject {
             currentDocument = nil
             notes = []
         }
+    }
+
+    public func openSourceInEditor(id: String) {
+        // Mock: no actual file to open. Surface as a status message
+        // so the SwiftUI preview shows the action fired.
+        pushMessage("Mock: openSourceInEditor(\(id))")
+    }
+
+    public func reloadDocument(id: String) async throws {
+        // Mock: just clear the needsReload flag if we had one.
+        if let idx = library.firstIndex(where: { $0.id == id }) {
+            let old = library[idx]
+            library[idx] = LibraryEntry(
+                id: old.id, title: old.title, subtitle: old.subtitle,
+                progressPct: old.progressPct,
+                chapterCount: old.chapterCount, chunkCount: old.chunkCount,
+                notes: old.notes, active: old.active,
+                sourcePath: old.sourcePath, needsReload: false
+            )
+        }
+        pushMessage("Mock: reloadDocument(\(id))")
     }
 
     public func deleteNote(id: String) async {

@@ -260,6 +260,46 @@ pub struct SqliteRuntime {
     event_sink: RuntimeEventSink,
 }
 
+/// Re-derive a document's id from its source path, mirroring
+/// `marginalia_core::domain::build_document_from_import` so legacy
+/// (content-hashed) rows can be migrated to the path-stable scheme on
+/// reload. Falling back to the raw path on canonicalization failure
+/// matches the domain behaviour.
+fn path_stable_document_id(source_path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = std::fs::canonicalize(source_path).unwrap_or_else(|_| source_path.to_path_buf());
+    let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
+    format!("{:x}", digest)[..12].to_string()
+}
+
+/// Returns `true` iff the file at `source_path` exists and its current
+/// SHA-256 differs from `stored_sha`. Used by `list_documents` to flag
+/// rows whose source file was edited externally since last ingestion.
+/// On any IO error (file missing, permission denied) → `false`: the
+/// "Apri file in editor…" action will surface the OS error if the user
+/// really tries to open the file. The `_size` and `_mtime` parameters
+/// are reserved for a future fast-path (skip the SHA recompute when
+/// stat-only metadata matches); the v1 always recomputes.
+fn compute_needs_reload(
+    source_path: &Path,
+    stored_sha: Option<&str>,
+    _size: Option<u64>,
+    _mtime: Option<i64>,
+) -> bool {
+    let stored = match stored_sha {
+        Some(s) if !s.is_empty() => s,
+        // Pre-migration row (sha unknown). Treat as "not flagged" — we
+        // don't want to nag every legacy row at first launch; the user
+        // can still trigger a manual reload from the context menu, and
+        // the next ingest backfills the sha.
+        _ => return false,
+    };
+    match marginalia_core::application::file_fingerprint(source_path) {
+        Ok(fp) => fp.sha256_hex != stored,
+        Err(_) => false,
+    }
+}
+
 fn build_document_view<D, S>(
     document_repository: &D,
     session_repository: &S,
@@ -931,15 +971,33 @@ impl SqliteRuntime {
     }
 
     /// List all imported documents as summary items.
+    ///
+    /// `needs_reload` is computed by re-fingerprinting each row's source
+    /// file off the storage mutex (the path/hash snapshot is taken under
+    /// the lock, then released before the IO loop). On a library of N
+    /// docs this is N stat+sha calls — small enough for libraries up to
+    /// the low thousands; if it ever becomes a hotspot we'd add a
+    /// "mtime+size matches → trust the stored sha" fast path.
     pub fn list_documents(&self) -> Vec<DocumentListItem> {
-        self.document_repository
-            .list_documents()
-            .into_iter()
-            .map(|document| DocumentListItem {
-                chapter_count: document.chapter_count(),
-                chunk_count: document.total_chunk_count(),
-                document_id: document.document_id,
-                title: document.title,
+        let docs = self.document_repository.list_documents();
+        docs.into_iter()
+            .map(|document| {
+                let source_path = document.source_path.to_string_lossy().to_string();
+                let needs_reload = compute_needs_reload(
+                    &document.source_path,
+                    document.content_sha256.as_deref(),
+                    document.content_size_bytes,
+                    document.content_mtime_ms,
+                );
+                DocumentListItem {
+                    chapter_count: document.chapter_count(),
+                    chunk_count: document.total_chunk_count(),
+                    document_id: document.document_id,
+                    title: document.title,
+                    source_path,
+                    content_sha256: document.content_sha256,
+                    needs_reload,
+                }
             })
             .collect()
     }
@@ -1164,9 +1222,12 @@ impl SqliteRuntime {
     }
 
     /// Remove a document from the library. Cascades to chunks, sections,
-    /// notes and sessions via the storage repository. If the document
-    /// being removed is the active session's document, stop the session
-    /// first so the UI doesn't end up rendering a ghost chunk.
+    /// notes and sessions via the storage repository, and sweeps any
+    /// per-chunk WAV/FLAC files that the TTS cache produced for this doc
+    /// (those would otherwise leak forever — the cache filenames are
+    /// hashed and not browseable). If the document being removed is the
+    /// active session's document, stop the session first so the UI
+    /// doesn't end up rendering a ghost chunk.
     pub fn delete_document(&mut self, document_id: &str) -> Result<bool, RuntimeError> {
         // Stop session if it's for this doc.
         if let Some(s) = self.session_repository.get_active_session() {
@@ -1174,9 +1235,115 @@ impl SqliteRuntime {
                 let _ = self.stop_session();
             }
         }
+        // Sweep the TTS cache BEFORE the SQL cascade — once chunks are
+        // gone we can't enumerate them to compute the cache filenames.
+        self.evict_tts_cache_for_document(document_id);
         self.document_repository
             .delete_document(document_id)
             .map_err(|e| RuntimeError::Runtime(format!("delete_document: {e}")))
+    }
+
+    /// Re-ingest a document from its source file on disk. Used when the
+    /// user edits the source externally (the GUI flags the row as
+    /// "modificato dall'ultima importazione" via
+    /// `DocumentListItem::needs_reload`). With the path-stable id scheme
+    /// the existing row is upserted in place — notes / sessions / future
+    /// AI elaborations stay attached. For pre-migration rows whose id
+    /// was content-hashed we first rename the row id to the new
+    /// path-hashed id so the upsert lands on the same lineage.
+    pub fn reload_document(
+        &mut self,
+        document_id: &str,
+    ) -> Result<DocumentIngestionOutcome, RuntimeError> {
+        let document = self
+            .document_repository
+            .get_document(document_id)
+            .ok_or_else(|| RuntimeError::MissingDocument {
+                document_id: document_id.to_string(),
+            })?;
+        let source_path = document.source_path.clone();
+        let new_id = path_stable_document_id(&source_path);
+        if new_id != document_id {
+            // Legacy row: migrate the id across all tables before the
+            // re-ingest, so notes / sessions stay attached.
+            self.document_repository
+                .rename_document_id(document_id, &new_id)
+                .map_err(|e| RuntimeError::Runtime(format!("rename_document_id: {e}")))?;
+        }
+        // Sweep the TTS cache for the (possibly renamed) id BEFORE the
+        // re-ingest. Cache key is `{id}:{section}:{chunk}:{voice}` →
+        // unchanged keys after a content edit would replay stale audio.
+        self.evict_tts_cache_for_document(&new_id);
+        let result = self.ingest_path(&source_path).map_err(|e| {
+            RuntimeError::Runtime(format!("reload_document: ingest failed: {e}"))
+        })?;
+        Ok(result)
+    }
+
+    /// Sweep `<tts_cache_dir>/{sha}.wav|.flac` for every cache key
+    /// `{document_id}:{section}:{chunk}:{voice}` derivable from the
+    /// current chunks list and known voices. Bounded by chunks×voices.
+    /// Best-effort — IO errors are logged and skipped (the orphan files
+    /// are storage waste, not correctness).
+    fn evict_tts_cache_for_document(&self, document_id: &str) {
+        use sha2::{Digest, Sha256};
+        let Some(cache_dir) = self.config.tts_cache_dir.as_ref() else {
+            return;
+        };
+        let Some(document) = self.document_repository.get_document(document_id) else {
+            return;
+        };
+        let voices = self.cache_voices_for_document(document_id);
+        if voices.is_empty() {
+            return;
+        }
+        let mut removed = 0usize;
+        for section in &document.sections {
+            for chunk in &section.chunks {
+                for voice in &voices {
+                    let key = format!(
+                        "{}:{}:{}:{}",
+                        document_id, section.index, chunk.index, voice
+                    );
+                    let hash = format!("{:x}", Sha256::digest(key.as_bytes()));
+                    for ext in ["wav", "flac"] {
+                        let path = cache_dir.join(format!("{hash}.{ext}"));
+                        if path.exists() && std::fs::remove_file(&path).is_ok() {
+                            removed += 1;
+                        }
+                    }
+                }
+            }
+        }
+        if removed > 0 {
+            log::info!(
+                "[runtime] evicted {removed} TTS cache files for document {document_id}"
+            );
+        }
+    }
+
+    /// Voices to consider when sweeping the TTS cache for a document.
+    /// Two sources:
+    ///   - the configured `default_voice` (covers most users)
+    ///   - the voice on the active session, if it's for this doc
+    ///     (covers the user who just switched voice and is reloading
+    ///     this doc)
+    /// Multi-voice users who read the same doc with N different voices
+    /// over time may leave a few stale cache entries for the voices we
+    /// don't enumerate; they're storage waste, not correctness — the new
+    /// reload only re-synthesizes for the active voice anyway.
+    fn cache_voices_for_document(&self, document_id: &str) -> Vec<String> {
+        let mut out = vec![self.config.default_voice.clone()];
+        if let Some(s) = self.session_repository.get_active_session() {
+            if s.document_id == document_id {
+                if let Some(v) = s.voice {
+                    if !out.iter().any(|existing| existing == &v) {
+                        out.push(v);
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Overwrite the transcript of an existing note. Looks up the note,

@@ -371,6 +371,9 @@ mod tests {
                 source_anchor: Some("section:0".to_string()),
             }],
             imported_at: Utc::now(),
+            content_sha256: None,
+            content_size_bytes: None,
+            content_mtime_ms: None,
         }
     }
 

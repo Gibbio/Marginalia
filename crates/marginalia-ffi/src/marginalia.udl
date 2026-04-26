@@ -58,6 +58,15 @@ dictionary DocumentListItem {
   string title;
   u32 chapter_count;
   u32 chunk_count;
+  // Filesystem path of the source file at ingestion time. The GUI uses
+  // this for the "Apri file in editor…" action.
+  string source_path;
+  // SHA-256 of the source file at ingestion time. Null on rows imported
+  // before migration 003 (next reload backfills it).
+  string? content_sha256;
+  // True iff the file currently on disk has a different SHA than
+  // `content_sha256`. False on IO errors. Drives the reload glyph.
+  boolean needs_reload;
 };
 
 // Result of ingest_file / ingest_url.
@@ -201,6 +210,10 @@ interface FfiRuntime {
   IngestResult ingest_url(string url);
   [Throws=FfiError]
   void delete_document(string document_id);
+  // Re-ingest a document's source file from disk. Path-stable id scheme
+  // means notes / sessions / TTS cache stay attached to the same id.
+  [Throws=FfiError]
+  IngestResult reload_document(string document_id);
 
   // Session lifecycle -------------------------------------------
   [Throws=FfiError]

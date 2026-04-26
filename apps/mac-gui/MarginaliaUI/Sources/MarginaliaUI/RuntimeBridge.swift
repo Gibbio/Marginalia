@@ -240,12 +240,16 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
     // MARK: — Reader-side methods (Workstream K)
 
     public func refreshLibrary() async {
-        let docs = runtime.listDocuments()
-        // Counts per doc: chapters + chunks come free in the FFI list
-        // item; notes require a per-doc query (listNotes). That's N small
-        // sqlite reads on refresh — fine for libraries up to a few
-        // hundred entries. If it ever becomes a hotspot we extend
-        // DocumentListItem with a note_count field on the Rust side.
+        // Detached so the SHA-recompute loop inside `listDocuments`
+        // (one stat + one sha read per row, off the runtime mutex on
+        // the Rust side) doesn't ever block the main thread.
+        let ffi = self.runtime
+        let docs: [MarginaliaKit.DocumentListItem] =
+            await Task.detached { ffi.listDocuments() }.value
+        // Counts per doc: chapters + chunks + source_path + needs_reload
+        // come free in the FFI list item; notes require a per-doc
+        // query (listNotes). N small sqlite reads on refresh — fine
+        // for libraries up to a few hundred entries.
         let activeId = self.currentSession?.documentId
         let entries = docs.map { d -> LibraryEntry in
             let noteCount = runtime.listNotes(documentId: d.id).count
@@ -256,10 +260,44 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 chapterCount: Int(d.chapterCount),
                 chunkCount: Int(d.chunkCount),
                 notes: noteCount,
-                active: d.id == activeId
+                active: d.id == activeId,
+                sourcePath: d.sourcePath,
+                needsReload: d.needsReload
             )
         }
         await MainActor.run { self.library = entries }
+    }
+
+    public func openSourceInEditor(id: String) {
+        guard let entry = library.first(where: { $0.id == id }),
+              !entry.sourcePath.isEmpty else {
+            pushMessage("Errore: percorso del file non disponibile.")
+            return
+        }
+        // NSWorkspace.shared.open returns a Bool — false means the
+        // launch failed (no handler registered, file missing, etc.).
+        // Surface the failure but don't bubble — the user can pick
+        // a different action.
+        let url = URL(fileURLWithPath: entry.sourcePath)
+        if !NSWorkspace.shared.open(url) {
+            pushMessage("Errore: nessuna app registrata per aprire \(entry.sourcePath).")
+        }
+    }
+
+    public func reloadDocument(id: String) async throws {
+        // Re-ingest runs on a detached task so the SHA recompute +
+        // chunk re-write don't block the UI. After completion we
+        // refresh both the library (clears the reload glyph) and
+        // the document view (chunks may have shifted).
+        let ffi = self.runtime
+        _ = try await Task.detached {
+            try ffi.reloadDocument(documentId: id)
+        }.value
+        await refreshLibrary()
+        if currentSession?.documentId == id {
+            await refreshDocumentView(id: id)
+            await refreshNotes(documentId: id)
+        }
     }
 
     public func openDocument(id: String) async throws {

@@ -104,7 +104,27 @@ where
         source_path: &Path,
     ) -> Result<DocumentIngestionOutcome, IngestionError> {
         let imported = self.importer.import_path(source_path)?;
-        self.ingest_imported(imported)
+        // Compute the file fingerprint BEFORE we hand the imported doc to
+        // `ingest_imported` — `import_path` already opened the file once,
+        // doing it again here is a second `read` of (typically) <1 MB of
+        // text. This is the only path with a real source file on disk;
+        // `ingest_imported` is also reachable from URL imports where there
+        // is no local file to hash, so we can't move the call inside it.
+        let fingerprint = crate::application::file_fingerprint(source_path).ok();
+        let mut outcome = self.ingest_imported(imported)?;
+        if let Some(fp) = fingerprint {
+            outcome.document.content_sha256 = Some(fp.sha256_hex);
+            outcome.document.content_size_bytes = Some(fp.size_bytes);
+            outcome.document.content_mtime_ms = Some(fp.mtime_ms);
+            // Persist the just-set fingerprint columns. The first save
+            // inside `ingest_imported` had None for these (the function
+            // is shared with URL import, which has no local file). The
+            // second save is the same upsert path — a few extra ms, no
+            // duplicate row, idempotent on (path-stable) document_id.
+            self.document_repository
+                .save_document(outcome.document.clone())?;
+        }
+        Ok(outcome)
     }
 
     /// Persist an already-parsed `ImportedDocument` and publish the ingestion

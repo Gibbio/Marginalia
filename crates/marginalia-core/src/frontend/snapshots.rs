@@ -6,6 +6,18 @@ pub struct DocumentListItem {
     pub chunk_count: usize,
     pub document_id: String,
     pub title: String,
+    /// Filesystem path of the source file at ingestion time. Always
+    /// present (the runtime persists it on every doc); the GUI uses it
+    /// for the "open in OS editor" action.
+    pub source_path: String,
+    /// SHA-256 of the source file at ingestion time. `None` for rows
+    /// imported before migration 003 — the next reload populates it.
+    pub content_sha256: Option<String>,
+    /// `true` iff the file currently on disk has a different SHA than
+    /// `content_sha256`. Computed by the runtime off-mutex during
+    /// `list_documents`. `false` on IO errors (file missing, permission
+    /// denied) — we don't nag about unreachable files.
+    pub needs_reload: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

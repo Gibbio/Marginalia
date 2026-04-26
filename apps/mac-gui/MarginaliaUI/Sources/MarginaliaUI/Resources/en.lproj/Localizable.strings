@@ -150,9 +150,12 @@
 // Sidebar — section titles, search, library actions
 "sidebar.library.title"       = "library";
 "sidebar.library.open"        = "Open";
+"sidebar.library.edit"        = "Open file in editor…";
+"sidebar.library.reload"      = "Reload from disk";
 "sidebar.library.remove"      = "Remove from library";
 "sidebar.library.empty"       = "No documents yet. Use + to import.";
 "sidebar.library.no_results"  = "No results for \"%@\".";
+"sidebar.library.modified-on-disk" = "Modified since last import";
 // LibRow metadata parts. Each shown only when count > 0.
 "sidebar.library.chapters_one"   = "1 chapter";
 "sidebar.library.chapters_other" = "%lld chapters";

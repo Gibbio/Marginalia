@@ -11,6 +11,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "002_active_session_flag",
         include_str!("../migrations/002_active_session_flag.sql"),
     ),
+    (
+        "003_document_fingerprint",
+        include_str!("../migrations/003_document_fingerprint.sql"),
+    ),
 ];
 
 #[derive(Debug, Clone)]
@@ -101,6 +105,6 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
     }
 }

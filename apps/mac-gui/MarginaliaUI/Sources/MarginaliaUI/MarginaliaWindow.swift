@@ -44,6 +44,8 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                     onAddDocument: handleImport,
                     onOpenDocument: handleOpenDocument,
                     onDeleteDocument: handleDeleteDocument,
+                    onOpenSourceInEditor: { id in host.openSourceInEditor(id: id) },
+                    onReloadDocument: handleReloadDocument,
                     onOpenSettings: {
                         mode = (mode == .settings) ? .reading : .settings
                     }
@@ -242,6 +244,34 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
         }
         #else
         Task { await host.deleteDocument(id: id) }
+        #endif
+    }
+
+    /// Intercept the sidebar's reload intent with a confirmation alert.
+    /// With the path-stable id scheme notes + sessions stay attached;
+    /// chunks may shift indices if the file was edited upstream of
+    /// existing notes — surface that subtlety so the user knows what
+    /// they're clicking.
+    private func handleReloadDocument(_ id: String) {
+        #if canImport(AppKit)
+        let title = host.library.first(where: { $0.id == id })?.title ?? "questo documento"
+        let alert = NSAlert()
+        alert.messageText = "Re-importare \"\(title)\"?"
+        alert.informativeText = "Il file sul disco è cambiato. Note e sessione restano agganciate; le note ancorate a un chunk specifico potrebbero finire su testo leggermente diverso se hai inserito o tolto contenuto sopra di esse."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Ricarica")
+        alert.addButton(withTitle: "Annulla")
+        if alert.runModal() == .alertFirstButtonReturn {
+            Task {
+                do { try await host.reloadDocument(id: id) }
+                catch { host.pushMessage("Errore ricarica: \(error.localizedDescription)") }
+            }
+        }
+        #else
+        Task {
+            do { try await host.reloadDocument(id: id) }
+            catch { host.pushMessage("Errore ricarica: \(error.localizedDescription)") }
+        }
         #endif
     }
 
