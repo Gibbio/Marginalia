@@ -362,7 +362,16 @@ fn clean_ipa(ipa: &str) -> String {
 }
 
 fn espeak_ipa(text: &str, language: &str) -> Result<String, String> {
-    let clauses = espeak_rs::text_to_phonemes(text, language, None, false, false)
+    // espeak-ng wants the ISO 639-1 voice id ("it", "en"), not BCP-47
+    // ("it-IT", "en-US"). The runtime stores BCP-47 in `default_language`
+    // because the GUI's voice picker does, so we strip the locale suffix
+    // here. Empty / unknown → forward as-is and let espeak-ng error out.
+    let voice = language
+        .split(['-', '_'])
+        .next()
+        .unwrap_or(language)
+        .to_ascii_lowercase();
+    let clauses = espeak_rs::text_to_phonemes(text, &voice, None, false, false)
         .map_err(|e| format!("espeak-rs phonemization failed: {e}"))?;
     let raw = clauses.join(" ");
     Ok(clean_ipa(raw.trim()))
