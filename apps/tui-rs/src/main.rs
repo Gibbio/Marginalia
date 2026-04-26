@@ -21,8 +21,6 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::io::stdout;
 use std::path::Path;
-use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -76,64 +74,34 @@ fn wait_for_app(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     logger: &AppLogger,
 ) -> Result<App, String> {
-    let (tx, rx) = mpsc::channel();
-    let worker_logger = logger.clone();
-    thread::spawn(move || {
-        let _ = tx.send(StartupEvent::Stage(
-            "Starting Marginalia engine...".to_string(),
-        ));
-        let backend = match BackendClient::spawn() {
-            Ok(backend) => backend,
-            Err(message) => {
-                let _ = tx.send(StartupEvent::Failed(message));
-                return;
-            }
-        };
-
-        let _ = tx.send(StartupEvent::Stage(format!(
-            "Loading {} snapshots...",
-            backend.mode_label()
-        )));
-        let voice_commands = config::load().voice_commands;
-        let mut app = match App::new(backend, worker_logger.clone(), voice_commands) {
-            Ok(app) => app,
-            Err(message) => {
-                let _ = tx.send(StartupEvent::Failed(message));
-                return;
-            }
-        };
-
-        let _ = tx.send(StartupEvent::Stage(
-            "Checking configured providers...".to_string(),
-        ));
-        app.run_startup_checks();
-
-        let _ = tx.send(StartupEvent::Ready(app));
-    });
-
-    let mut stage = "Starting Marginalia engine...".to_string();
+    // Build everything on the main thread. We used to do this in a worker
+    // thread + channel + spinner loop, but the resulting `App` is `!Send`
+    // on macOS — `BetaBackendClient.sidecar` owns a cpal::Stream via the
+    // AEC pipeline, and cpal's macOS platform type is `!Send + !Sync`.
+    // Sending it across thread boundaries is a hard error from the type
+    // system, so we draw the loading screen between stages instead and
+    // accept a brief frozen UI during the synchronous startup.
     let started_at = Instant::now();
-    loop {
+    let mut draw = |stage: &str| -> Result<(), String> {
+        logger.info(format!("startup-stage {stage}"));
         terminal
-            .draw(|frame| render_loading(frame, &stage, started_at.elapsed()))
+            .draw(|frame| render_loading(frame, stage, started_at.elapsed()))
             .map_err(|err| log_error(logger, format!("Unable to draw loading frame: {err}")))?;
+        Ok(())
+    };
 
-        match rx.recv_timeout(Duration::from_millis(80)) {
-            Ok(StartupEvent::Stage(next_stage)) => {
-                logger.info(format!("startup-stage {next_stage}"));
-                stage = next_stage;
-            }
-            Ok(StartupEvent::Ready(app)) => return Ok(app),
-            Ok(StartupEvent::Failed(message)) => return Err(log_error(logger, message)),
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(log_error(
-                    logger,
-                    "Backend startup thread disconnected unexpectedly.".to_string(),
-                ))
-            }
-        }
-    }
+    draw("Starting Marginalia engine...")?;
+    let backend = BackendClient::spawn().map_err(|m| log_error(logger, m))?;
+
+    draw(&format!("Loading {} snapshots...", backend.mode_label()))?;
+    let voice_commands = config::load().voice_commands;
+    let mut app = App::new(backend, logger.clone(), voice_commands)
+        .map_err(|m| log_error(logger, m))?;
+
+    draw("Checking configured providers...")?;
+    app.run_startup_checks();
+
+    Ok(app)
 }
 
 fn run_tui(
@@ -258,13 +226,6 @@ fn render_loading(frame: &mut Frame, stage: &str, elapsed: Duration) {
         )),
     ]);
     frame.render_widget(loading, content[1]);
-}
-
-#[allow(clippy::large_enum_variant)]
-enum StartupEvent {
-    Stage(String),
-    Ready(App),
-    Failed(String),
 }
 
 fn render(frame: &mut Frame, app: &mut App) {

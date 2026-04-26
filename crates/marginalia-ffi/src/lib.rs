@@ -1110,7 +1110,7 @@ impl FfiRuntime {
                             let res = {
                                 let mut rt = runtime_owned.lock().unwrap();
                                 reconfigure::apply_provider_spec(
-                                    &mut *rt, &mut sidecar, &mut ctx, &spec,
+                                    &mut rt, &mut sidecar, &mut ctx, &spec,
                                 )
                             };
                             // Persist the new spec to marginalia.toml so

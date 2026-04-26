@@ -122,15 +122,11 @@ fn import_markdown(source_path: PathBuf, raw_text: &str) -> ImportedDocument {
                 active_block = None;
                 block_text.clear();
             }
-            Event::Text(text) | Event::Code(text) => {
-                if active_block.is_some() {
-                    block_text.push_str(text.as_ref());
-                }
+            Event::Text(text) | Event::Code(text) if active_block.is_some() => {
+                block_text.push_str(text.as_ref());
             }
-            Event::SoftBreak | Event::HardBreak => {
-                if active_block.is_some() {
-                    block_text.push(' ');
-                }
+            Event::SoftBreak | Event::HardBreak if active_block.is_some() => {
+                block_text.push(' ');
             }
             _ => {}
         }

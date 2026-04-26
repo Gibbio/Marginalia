@@ -715,7 +715,7 @@ impl SqliteRuntime {
                     let current_prefix = self
                         .config
                         .default_language
-                        .split(|c: char| c == '-' || c == '_')
+                        .split(['-', '_'])
                         .next()
                         .unwrap_or("")
                         .to_lowercase();
@@ -1179,7 +1179,7 @@ impl SqliteRuntime {
             },
         };
         let mut notes = self.note_repository.list_notes_for_document(&target);
-        notes.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        notes.sort_by_key(|n| std::cmp::Reverse(n.created_at));
         notes
     }
 
@@ -1680,7 +1680,7 @@ mod tests {
         assert_eq!(session.document_id, outcome.document.document_id);
         assert_eq!(
             session.position.chunk_index,
-            pos_before.chunk_index as usize
+            pos_before.chunk_index
         );
 
         let _ = fs::remove_file(path);

@@ -30,7 +30,7 @@ impl DocumentRepository for InMemoryDocumentRepository {
 
     fn list_documents(&self) -> Vec<Document> {
         let mut documents = self.documents.values().cloned().collect::<Vec<_>>();
-        documents.sort_by(|left, right| right.imported_at.cmp(&left.imported_at));
+        documents.sort_by_key(|d| std::cmp::Reverse(d.imported_at));
         documents
     }
 
@@ -99,7 +99,7 @@ impl SessionRepository for InMemorySessionRepository {
             .filter(|session| session.is_active)
             .cloned()
             .collect::<Vec<_>>();
-        sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
         sessions.into_iter().next()
     }
 
@@ -122,8 +122,7 @@ impl InMemoryNoteRepository {
 impl NoteRepository for InMemoryNoteRepository {
     fn save_note(&mut self, note: VoiceNote) -> Result<(), StorageError> {
         self.notes.push(note);
-        self.notes
-            .sort_by(|left, right| left.created_at.cmp(&right.created_at));
+        self.notes.sort_by_key(|n| n.created_at);
         Ok(())
     }
 
