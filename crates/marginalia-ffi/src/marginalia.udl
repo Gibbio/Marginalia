@@ -148,7 +148,7 @@ dictionary NoteView {
 interface FfiRuntimeEvent {
   ChunkAdvanced(string document_id, u32 section_index, u32 chunk_index);
   SynthesisStarted(string document_id, u32 section_index, u32 chunk_index);
-  SynthesisReady(string document_id, u32 section_index, u32 chunk_index, boolean cache_hit);
+  SynthesisReady(string document_id, u32 section_index, u32 chunk_index, boolean cache_hit, u64 elapsed_ms);
   PlaybackFinished(string document_id, u32 section_index, u32 chunk_index);
   CommandRecognized(string raw_text, string? command);
   SessionRestored(string session_id, string document_id, u32 section_index, u32 chunk_index);
@@ -309,6 +309,13 @@ interface FfiRuntime {
   [Throws=FfiError]
   void uninstall_asset(string asset_id);
   sequence<InstallProgress> install_progress();
+  // Refresh the voice catalog from huggingface.co (live HF API listing
+  // of `prince-canuma/Kokoro-82M/voices/`). Returns the number of voices
+  // persisted to `<config_dir>/voices.cache.json`. Call only on user
+  // action (onboarding installModels, Settings refresh button); not
+  // invoked at app startup.
+  [Throws=FfiError]
+  u32 fetch_remote_voice_catalog();
 
   // Backup / restore (B9) — zip containing marginalia.toml + sqlite db
   // + voices manifest. Import writes files back but does NOT hot-reload

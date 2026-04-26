@@ -25,6 +25,12 @@ pub enum RuntimeEvent {
         section_index: usize,
         chunk_index: usize,
         cache_hit: bool,
+        /// Wall-clock duration of the TTS work itself, measured Rust-side.
+        /// Computing it in the GUI from event timestamps is unreliable
+        /// because `SynthesisStarted` and `SynthesisReady` are buffered
+        /// together and drained in the same UI tick → elapsed ≈ 0.
+        /// On a cache hit the synthesizer never ran, so this is 0.
+        elapsed_ms: u64,
     },
     SessionRestored {
         session_id: String,

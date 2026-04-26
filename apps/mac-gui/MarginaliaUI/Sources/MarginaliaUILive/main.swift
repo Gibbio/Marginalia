@@ -133,7 +133,19 @@ struct MarginaliaLiveApp: App {
                 onProceed: { onboardingStep = .voice },
                 onSkip: { onboardingStep = .voice }
             )
-            .onAppear { Task { await host.refreshInstallations() } }
+            .onAppear {
+                Task {
+                    // Pull the live Kokoro voice catalog from huggingface.co
+                    // BEFORE listing installations — so the user sees every
+                    // language/voice currently published, not just whatever
+                    // shipped in `voices.manifest.json` at build time. On
+                    // network failure the call falls back to the bundled
+                    // manifest silently (status surfaces via
+                    // `catalogRefreshStatus` for users who want it).
+                    await host.refreshRemoteVoiceCatalog()
+                    await host.refreshInstallations()
+                }
+            }
             .onChange(of: host.inflightDownloads) { oldValue, newValue in
                 playPreviewForNewlyInstalledVoice(old: oldValue, new: newValue, host: host)
             }

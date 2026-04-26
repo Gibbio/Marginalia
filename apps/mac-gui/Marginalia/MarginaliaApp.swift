@@ -151,7 +151,15 @@ struct MarginaliaApp: App {
                     onboardingStep = .none
                 }
             )
-            .onAppear { Task { await host.refreshInstallations() } }
+            .onAppear {
+                Task {
+                    // See MarginaliaUILive/main.swift for rationale: pull the
+                    // live Kokoro catalog from HF first, then list assets.
+                    // Network call has a short timeout + bundled fallback.
+                    await host.refreshRemoteVoiceCatalog()
+                    await host.refreshInstallations()
+                }
+            }
             .onChange(of: host.inflightDownloads) { oldValue, newValue in
                 // Auto-preview: the moment a voice finishes installing,
                 // play a short demo so the user *hears* the app work

@@ -24,7 +24,7 @@
 //! Apple helper subprocess is killed. This is the clean shutdown path.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -33,6 +33,7 @@ use marginalia_runtime::reconfigure::{self, ReconfigureContext};
 use marginalia_runtime::{Discovery, RuntimeBuilder, SqliteRuntime};
 
 mod conversions;
+mod logger;
 
 uniffi::include_scaffolding!("marginalia");
 
@@ -371,6 +372,9 @@ pub enum FfiRuntimeEvent {
         section_index: u32,
         chunk_index: u32,
         cache_hit: bool,
+        /// Wall-clock duration of the TTS work, measured Rust-side.
+        /// 0 on cache hits.
+        elapsed_ms: u64,
     },
     PlaybackFinished {
         document_id: String,
@@ -499,29 +503,28 @@ fn resolve_voices_manifest_path() -> PathBuf {
     PathBuf::from("models/tts/mlx/voices.manifest.json")
 }
 
-/// Parse `voices.manifest.json` into `AssetSpec`s. Each voice row becomes
-/// a `voice` category spec with the id prefixed `voice:` (matches the
-/// onboarding + settings id convention) and the Kokoro HF source.
-fn load_voices_from_manifest() -> Vec<AssetSpec> {
-    let path = resolve_voices_manifest_path();
-    let Ok(bytes) = std::fs::read(&path) else {
-        log::warn!(
-            "[catalog] voices manifest not readable at {}, using fallback list",
-            path.display()
-        );
-        return fallback_voices();
-    };
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        log::warn!(
-            "[catalog] voices manifest at {} is not valid JSON, using fallback",
-            path.display()
-        );
-        return fallback_voices();
-    };
-    let Some(arr) = v.get("voices").and_then(|x| x.as_array()) else {
-        return fallback_voices();
-    };
-    arr.iter()
+/// User-writable location where the latest fetch from huggingface.co is
+/// persisted (`<config_dir>/voices.cache.json`). Set by `FfiRuntime::new`;
+/// before then, and on first launch before any successful fetch, the
+/// catalog falls back to the bundled manifest. Same JSON schema as the
+/// bundled manifest so the parser is shared.
+static CATALOG_CACHE_PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+fn set_catalog_cache_path(path: PathBuf) {
+    let _ = CATALOG_CACHE_PATH.set(path);
+}
+
+/// Decode a `voices.manifest.json`-shaped file into specs. Used both for
+/// the bundled manifest and the user cache (same schema). Returns `None`
+/// on any IO/parse failure so the caller can fall through to the next
+/// tier without distinguishing missing-file from corrupt-file at the
+/// call site.
+fn parse_voice_manifest(path: &Path) -> Option<Vec<AssetSpec>> {
+    let bytes = std::fs::read(path).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let arr = v.get("voices")?.as_array()?;
+    let specs: Vec<AssetSpec> = arr
+        .iter()
         .filter_map(|item| {
             let id = item.get("id")?.as_str()?.to_string();
             let display = item.get("display")?.as_str()?.to_string();
@@ -550,7 +553,238 @@ fn load_voices_from_manifest() -> Vec<AssetSpec> {
                 source: AssetSource::MlxVoice { voice_id: id },
             })
         })
-        .collect()
+        .collect();
+    if specs.is_empty() {
+        None
+    } else {
+        Some(specs)
+    }
+}
+
+/// Three-tier voice spec resolution:
+///   1. user cache at `<config_dir>/voices.cache.json` (refreshed via
+///      `fetch_remote_voice_catalog`, written explicitly by the user
+///      from onboarding or Settings)
+///   2. bundled `voices.manifest.json` (shipped inside the .app)
+///   3. hardcoded `fallback_voices()` (so the UI is never empty even on
+///      a broken install)
+fn load_voices_from_manifest() -> Vec<AssetSpec> {
+    if let Some(cache) = CATALOG_CACHE_PATH.get() {
+        if let Some(specs) = parse_voice_manifest(cache) {
+            log::info!(
+                "[catalog] voices loaded from user cache ({} entries) at {}",
+                specs.len(),
+                cache.display()
+            );
+            return specs;
+        }
+    }
+    let bundled = resolve_voices_manifest_path();
+    if let Some(specs) = parse_voice_manifest(&bundled) {
+        log::info!(
+            "[catalog] voices loaded from bundled manifest ({} entries) at {}",
+            specs.len(),
+            bundled.display()
+        );
+        return specs;
+    }
+    log::warn!("[catalog] no voices manifest readable, using hardcoded fallback");
+    fallback_voices()
+}
+
+/// Map the first character of a Kokoro voice id to a BCP-47 language tag.
+/// The convention is fixed by the model author (hexgrad/Kokoro-82M):
+/// 1st char = language family, 2nd char = gender. Unknown prefixes return
+/// `None` so a manifest with future characters (e.g. an unannounced
+/// language) is silently skipped instead of mislabelled.
+fn kokoro_lang_from_id(voice_id: &str) -> Option<&'static str> {
+    let c = voice_id.chars().next()?;
+    Some(match c {
+        'a' => "en-US",
+        'b' => "en-GB",
+        'e' => "es-ES",
+        'f' => "fr-FR",
+        'h' => "hi",
+        'i' => "it-IT",
+        'j' => "ja-JP",
+        'p' => "pt-BR",
+        'z' => "zh-CN",
+        _ => return None,
+    })
+}
+
+fn kokoro_gender_from_id(voice_id: &str) -> Option<&'static str> {
+    let c = voice_id.chars().nth(1)?;
+    Some(match c {
+        'f' => "female",
+        'm' => "male",
+        _ => return None,
+    })
+}
+
+/// Capitalise the suffix of a Kokoro voice id (`if_sara` → `Sara`).
+/// Falls back to the raw id if the underscore split fails.
+fn display_from_voice_id(voice_id: &str) -> String {
+    let suffix = voice_id.split('_').nth(1).unwrap_or(voice_id);
+    let mut chars = suffix.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => suffix.to_string(),
+    }
+}
+
+/// Fetch the live Kokoro 82M voice catalog from huggingface.co and write
+/// it to `<config_dir>/voices.cache.json`. Returns the number of voices
+/// persisted on success. Caller is responsible for invalidating in-process
+/// catalog state (`invalidate_catalog`) so the next `list_installable_assets`
+/// call picks up the new file.
+///
+/// **This is one of the very few places Marginalia performs a runtime
+/// network call.** It only runs when the user explicitly triggers it
+/// (onboarding `installModels` step, or a button in Settings →
+/// Installazioni). On failure the previous cache is left untouched, so
+/// the UI keeps showing whatever was last known.
+fn fetch_remote_voice_catalog_inner() -> Result<u32, String> {
+    let cache_path = CATALOG_CACHE_PATH
+        .get()
+        .ok_or_else(|| "catalog cache path not initialised — call FfiRuntime::new first".to_string())?;
+    let url =
+        "https://huggingface.co/api/models/prince-canuma/Kokoro-82M/tree/main/voices";
+    log::info!("[catalog] fetching voice list from {url}");
+    // Short per-attempt timeouts on purpose: the catalog is a tiny JSON
+    // listing (~10 KB), and the user wants the UI to fall back to the
+    // bundled manifest fast rather than spinning for half a minute on a
+    // flaky link. We then retry transient IO errors up to twice — HF
+    // Front sometimes truncates the TLS stream mid-response ("io:
+    // unexpected end of file") and the next attempt succeeds. HTTP
+    // status errors (4xx/5xx) are NOT retried — they aren't transient.
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(std::time::Duration::from_secs(3)))
+        .timeout_recv_response(Some(std::time::Duration::from_secs(3)))
+        .timeout_global(Some(std::time::Duration::from_secs(4)))
+        .user_agent("Marginalia/0.2 (https://github.com/Gibbio/Marginalia)")
+        .build()
+        .into();
+    const MAX_ATTEMPTS: u32 = 3;
+    const RETRY_BACKOFF_MS: u64 = 400;
+    let mut last_io_err: Option<String> = None;
+    let body: String = 'attempts: {
+        for attempt in 1..=MAX_ATTEMPTS {
+            match agent.get(url).call() {
+                Ok(mut resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        // HTTP-level error: not transient, bail immediately.
+                        return Err(format!(
+                            "HF API returned HTTP {} {}",
+                            status.as_u16(),
+                            status.canonical_reason().unwrap_or("")
+                        ));
+                    }
+                    match resp.body_mut().read_to_string() {
+                        Ok(body) => break 'attempts body,
+                        Err(e) => {
+                            log::warn!(
+                                "[catalog] fetch attempt {attempt}/{MAX_ATTEMPTS} body read failed: {e}"
+                            );
+                            last_io_err = Some(format!("read response body: {e}"));
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[catalog] fetch attempt {attempt}/{MAX_ATTEMPTS} request failed: {e}"
+                    );
+                    last_io_err = Some(format!("HF API request failed: {e}"));
+                }
+            }
+            if attempt < MAX_ATTEMPTS {
+                std::thread::sleep(std::time::Duration::from_millis(RETRY_BACKOFF_MS));
+            }
+        }
+        return Err(format!(
+            "HF API unreachable after {MAX_ATTEMPTS} attempts: {}",
+            last_io_err.unwrap_or_else(|| "no error captured".to_string())
+        ));
+    };
+    let entries: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("parse HF API JSON: {e}"))?;
+    let arr = entries
+        .as_array()
+        .ok_or_else(|| "HF API returned non-array body".to_string())?;
+    let mut voices = Vec::with_capacity(arr.len());
+    for entry in arr {
+        let path = match entry.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => continue,
+        };
+        // Skip non-voice files (README, config, …) and any non-safetensors
+        // tensor packs that may show up alongside voices/.
+        if !path.ends_with(".safetensors") {
+            continue;
+        }
+        let stem = match Path::new(path).file_stem().and_then(|s| s.to_str()) {
+            Some(s) => s,
+            None => continue,
+        };
+        let lang = match kokoro_lang_from_id(stem) {
+            Some(l) => l,
+            None => {
+                log::warn!("[catalog] skipping voice with unknown language prefix: {stem}");
+                continue;
+            }
+        };
+        let gender = kokoro_gender_from_id(stem).unwrap_or("unknown");
+        let display = display_from_voice_id(stem);
+        voices.push(serde_json::json!({
+            "id": stem,
+            "display": display,
+            "lang": lang,
+            "gender": gender,
+        }));
+    }
+    if voices.is_empty() {
+        return Err("HF API listing returned no recognizable voices".to_string());
+    }
+    voices.sort_by(|a, b| {
+        a["lang"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["lang"].as_str().unwrap_or(""))
+            .then_with(|| a["id"].as_str().unwrap_or("").cmp(b["id"].as_str().unwrap_or("")))
+    });
+    let count = voices.len() as u32;
+    let fetched_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let cache_doc = serde_json::json!({
+        "schema_version": 1,
+        "fetched_at_ms": fetched_at_ms,
+        "source": url,
+        "voices": voices,
+    });
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create cache dir {}: {e}", parent.display()))?;
+    }
+    std::fs::write(
+        cache_path,
+        serde_json::to_string_pretty(&cache_doc)
+            .map_err(|e| format!("serialize cache: {e}"))?,
+    )
+    .map_err(|e| format!("write cache {}: {e}", cache_path.display()))?;
+    log::info!(
+        "[catalog] wrote {count} voices to {}",
+        cache_path.display()
+    );
+    invalidate_catalog();
+    Ok(count)
+}
+
+fn invalidate_catalog() {
+    let mut w = CATALOG_CACHE.write().unwrap();
+    *w = None;
 }
 
 /// Minimal voice set used when the manifest can't be read. Keeps the UI
@@ -630,14 +864,29 @@ fn engine_specs() -> Vec<AssetSpec> {
     ]
 }
 
-/// Full catalog: engines first (hardcoded), then voices from the manifest.
-/// Built once per process via `LazyLock` — the manifest is read once at
-/// startup, subsequent calls return the cached vec.
-static CATALOG: std::sync::LazyLock<Vec<AssetSpec>> = std::sync::LazyLock::new(|| {
+/// In-process snapshot of the asset catalog (engines + voices). Lazy-built
+/// from `current_catalog()`; invalidated to `None` whenever a fetch writes
+/// a new `voices.cache.json` so the next call rereads the file.
+///
+/// Was a `LazyLock<Vec<AssetSpec>>`; replaced with an explicit RwLock so
+/// `fetch_remote_voice_catalog` can clear the cached snapshot without a
+/// process restart.
+static CATALOG_CACHE: std::sync::RwLock<Option<Vec<AssetSpec>>> =
+    std::sync::RwLock::new(None);
+
+fn current_catalog() -> Vec<AssetSpec> {
+    {
+        let g = CATALOG_CACHE.read().unwrap();
+        if let Some(v) = g.as_ref() {
+            return v.clone();
+        }
+    }
     let mut out = engine_specs();
     out.extend(load_voices_from_manifest());
+    let mut w = CATALOG_CACHE.write().unwrap();
+    *w = Some(out.clone());
     out
-});
+}
 
 /// FFI-exposed catalog row.
 pub struct InstallableAsset {
@@ -926,6 +1175,33 @@ impl FfiRuntime {
     /// management, so we return the bare type here.
     pub fn new(config_path: String) -> Result<Self, FfiError> {
         let config_path = PathBuf::from(&config_path);
+
+        // Install the file logger as the very first thing so `log::*` calls
+        // anywhere downstream (runtime, playback-host, AEC) reach disk. Done
+        // before the config-not-found check so we record that error too. The
+        // log file lands next to marginalia.toml (overridable via
+        // MARGINALIA_FFI_LOG_FILE); failures fall back to stderr (which a
+        // sandboxed .app routes into Console.app) and don't block startup.
+        let log_dir: PathBuf = config_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        match logger::init_in_dir(&log_dir) {
+            Ok(p) => log::info!(
+                "[ffi] FfiRuntime::new pid={} config={} log={}",
+                std::process::id(),
+                config_path.display(),
+                p.display(),
+            ),
+            Err(e) => eprintln!("[marginalia-ffi] log init failed: {e}"),
+        }
+
+        // Tell the catalog where to read/write the user-cached voice list.
+        // The cache is only written by `fetch_remote_voice_catalog`, never
+        // implicitly: a fresh install with no internet still falls back
+        // to the bundled `voices.manifest.json` and works offline.
+        set_catalog_cache_path(log_dir.join("voices.cache.json"));
+
         if !config_path.is_file() {
             return Err(FfiError::Config(format!(
                 "marginalia.toml not found at {}",
@@ -1388,6 +1664,10 @@ impl FfiRuntime {
     // ─────────────────────────────────────────────────────────
 
     pub fn start_session(&self, document_id: String) -> Result<(), FfiError> {
+        log::info!(
+            "[ffi] start_session doc={document_id} thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().start_session(&document_id)?;
         Ok(())
     }
@@ -1397,16 +1677,22 @@ impl FfiRuntime {
     }
 
     pub fn pause_session(&self) -> Result<(), FfiError> {
+        log::info!("[ffi] pause_session thread={:?}", std::thread::current().id());
         self.runtime.lock().unwrap().pause_session()?;
         Ok(())
     }
 
     pub fn resume_session(&self) -> Result<(), FfiError> {
+        log::info!(
+            "[ffi] resume_session thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().resume_session()?;
         Ok(())
     }
 
     pub fn stop_session(&self) -> Result<(), FfiError> {
+        log::info!("[ffi] stop_session thread={:?}", std::thread::current().id());
         self.runtime.lock().unwrap().stop_session()?;
         Ok(())
     }
@@ -1416,26 +1702,41 @@ impl FfiRuntime {
     // ─────────────────────────────────────────────────────────
 
     pub fn next_chunk(&self) -> Result<(), FfiError> {
+        log::info!("[ffi] next_chunk thread={:?}", std::thread::current().id());
         self.runtime.lock().unwrap().next_chunk()?;
         Ok(())
     }
     pub fn previous_chunk(&self) -> Result<(), FfiError> {
+        log::info!(
+            "[ffi] previous_chunk thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().previous_chunk()?;
         Ok(())
     }
     pub fn next_chapter(&self) -> Result<(), FfiError> {
+        log::info!("[ffi] next_chapter thread={:?}", std::thread::current().id());
         self.runtime.lock().unwrap().next_chapter()?;
         Ok(())
     }
     pub fn previous_chapter(&self) -> Result<(), FfiError> {
+        log::info!(
+            "[ffi] previous_chapter thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().previous_chapter()?;
         Ok(())
     }
     pub fn restart_chapter(&self) -> Result<(), FfiError> {
+        log::info!(
+            "[ffi] restart_chapter thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().restart_chapter()?;
         Ok(())
     }
     pub fn repeat_chunk(&self) -> Result<(), FfiError> {
+        log::info!("[ffi] repeat_chunk thread={:?}", std::thread::current().id());
         self.runtime.lock().unwrap().repeat_chunk()?;
         Ok(())
     }
@@ -1821,7 +2122,20 @@ impl FfiRuntime {
     /// the installed flag is a cache probe (no network). Called on every
     /// Settings/Onboarding open.
     pub fn list_installable_assets(&self) -> Vec<InstallableAsset> {
-        CATALOG.iter().map(InstallableAsset::from_spec).collect()
+        current_catalog()
+            .iter()
+            .map(InstallableAsset::from_spec)
+            .collect()
+    }
+
+    /// Refresh the voice catalog from huggingface.co. **One of the very
+    /// few network calls in Marginalia** — only fired when the user
+    /// explicitly asks for it (onboarding `installModels` step or the
+    /// "Aggiorna lista voci" button in Settings). Writes the result to
+    /// `<config_dir>/voices.cache.json`; the next `list_installable_assets`
+    /// call will pick it up. Returns the number of voices fetched.
+    pub fn fetch_remote_voice_catalog(&self) -> Result<u32, FfiError> {
+        fetch_remote_voice_catalog_inner().map_err(FfiError::Io)
     }
 
     /// Kick off an asynchronous download for the named asset. Returns
@@ -1830,7 +2144,8 @@ impl FfiRuntime {
     /// (which the runtime otherwise forces to `1`), downloads via
     /// `marginalia-models`, then restores the flag.
     pub fn install_asset(&self, asset_id: String) -> Result<(), FfiError> {
-        let spec = CATALOG
+        let catalog = current_catalog();
+        let spec = catalog
             .iter()
             .find(|s| s.id == asset_id)
             .ok_or_else(|| FfiError::Io(format!("unknown asset '{asset_id}'")))?;
@@ -1939,7 +2254,8 @@ impl FfiRuntime {
     /// don't bother with a background thread here. Unknown asset_id is an
     /// error; "asset not currently installed" is a no-op (Ok).
     pub fn uninstall_asset(&self, asset_id: String) -> Result<(), FfiError> {
-        let spec = CATALOG
+        let catalog = current_catalog();
+        let spec = catalog
             .iter()
             .find(|s| s.id == asset_id)
             .ok_or_else(|| FfiError::Io(format!("unknown asset '{asset_id}'")))?;

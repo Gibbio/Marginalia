@@ -28,8 +28,11 @@ url-import = ["marginalia-runtime/url-import"]
 [dependencies]
 hf-hub = "0.5"  # for the `Progress` trait used by the install downloader
 hound = "3.5"   # decode WAV note files when feeding the AEC render reference
-log = "0.4"
+log = { version = "0.4", features = ["std"] }  # std → set_boxed_logger for the FFI file logger
 serde_json = "1"  # reading voices.manifest.json at catalog build time
+# HTTP client for the Kokoro voice-catalog fetch on-demand from huggingface.co.
+# Pinned to the same major as marginalia-import-url to share the dep graph.
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 # Zip for B9 backup/restore (export/import marginalia.toml + sqlite db +
 # voices manifest as a single archive). `deflate` is all we need — the
 # archive is small enough that compression is basically free.

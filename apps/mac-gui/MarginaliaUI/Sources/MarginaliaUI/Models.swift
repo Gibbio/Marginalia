@@ -311,7 +311,7 @@ public enum MarginaliaEvent: Sendable {
     /// Synthesis kicked off — audio not ready yet. The gap between this
     /// and `synthesisReady` is what the "sintetizzando…" indicator covers.
     case synthesisStarted(documentId: String, section: Int, chunk: Int)
-    case synthesisReady(documentId: String, section: Int, chunk: Int, cacheHit: Bool)
+    case synthesisReady(documentId: String, section: Int, chunk: Int, cacheHit: Bool, elapsedMs: UInt64)
     case playbackFinished(documentId: String, section: Int, chunk: Int)
     case commandRecognized(rawText: String, action: String?)
     case sessionRestored(sessionId: String, documentId: String, section: Int, chunk: Int)
@@ -504,6 +504,19 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// cache directory. Called after install/uninstall completes.
     func refreshInstallations() async
 
+    /// Refresh the **catalog** itself from huggingface.co (network call,
+    /// short timeout, falls back to the bundled manifest on failure).
+    /// Triggered by the user from onboarding or the "Aggiorna lista voci"
+    /// button in Settings. Mock host is a no-op that just flips
+    /// `catalogRefreshInflight` briefly so the UI can be exercised.
+    func refreshRemoteVoiceCatalog() async
+    /// `true` while `refreshRemoteVoiceCatalog()` is in flight — the UI
+    /// disables the button and shows a spinner.
+    var catalogRefreshInflight: Bool { get }
+    /// Last-attempt human-readable status ("Lista aggiornata: 28 voci",
+    /// "Aggiornamento fallito: …"). Cleared at the next call.
+    var catalogRefreshStatus: String? { get }
+
     /// Real-time audio levels from the AEC pipeline, fed to the waveform
     /// widget in the Sidebar footer. Empty when no AEC is running (non-Apple
     /// STT, or before the first mic frame). The mock synthesises a gentle
@@ -606,6 +619,23 @@ public final class MockHost: MarginaliaHost, ObservableObject {
         InstallableAsset(id: "pdfium",        label: "PDFium (import PDF)",              size: "68 MB",  installed: false, removable: false, category: "importer"),
     ]
     @Published public var inflightDownloads: [String: InstallUiState] = [:]
+    @Published public var catalogRefreshInflight: Bool = false
+    @Published public var catalogRefreshStatus: String? = nil
+
+    /// Mock implementation: flips `catalogRefreshInflight` for ~1s and sets
+    /// a fake success message. Lets the SwiftUI preview exercise the spinner
+    /// without any network or FFI.
+    public func refreshRemoteVoiceCatalog() async {
+        await MainActor.run {
+            self.catalogRefreshInflight = true
+            self.catalogRefreshStatus = nil
+        }
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        await MainActor.run {
+            self.catalogRefreshInflight = false
+            self.catalogRefreshStatus = "Lista aggiornata: \(self.installations.count) voci."
+        }
+    }
 
     @Published public var chunkTargetChars: Int = 300
     @Published public var sttDebug: Bool = true

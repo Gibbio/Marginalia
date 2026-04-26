@@ -606,15 +606,20 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             synthesizingAnchor = "c\(sec)-\(ck)"
             synthesisStartedAt = Date()
             pushMessage("Sintesi ch.\(sec + 1).\(ck + 1)…")
-        case .synthesisReady(_, let sec, let ck, let cacheHit):
+        case .synthesisReady(_, let sec, let ck, let cacheHit, let elapsedMs):
             synthesizingAnchor = nil
-            let elapsed = synthesisStartedAt.map { -$0.timeIntervalSinceNow } ?? 0
             synthesisStartedAt = nil
             if cacheHit {
                 pushMessage("Cache hit ch.\(sec + 1).\(ck + 1)")
             } else {
+                // elapsedMs is measured Rust-side around tts.synthesize().
+                // Computing it Swift-side from `Date()` between
+                // .synthesisStarted and .synthesisReady reads ~0 because
+                // the FFI event drainer batches both events into the same
+                // poll tick.
+                let secs = Double(elapsedMs) / 1000.0
                 pushMessage(String(format: "Sintesi ch.%d.%d pronta in %.2fs",
-                                   sec + 1, ck + 1, elapsed))
+                                   sec + 1, ck + 1, secs))
             }
             Task { await refreshSessionSnapshot() }
         case .chunkAdvanced(_, let sec, let ck):
@@ -1042,8 +1047,8 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 return .chunkAdvanced(documentId: doc, section: Int(sec), chunk: Int(ck))
             case .synthesisStarted(let doc, let sec, let ck):
                 return .synthesisStarted(documentId: doc, section: Int(sec), chunk: Int(ck))
-            case .synthesisReady(let doc, let sec, let ck, let hit):
-                return .synthesisReady(documentId: doc, section: Int(sec), chunk: Int(ck), cacheHit: hit)
+            case .synthesisReady(let doc, let sec, let ck, let hit, let elapsedMs):
+                return .synthesisReady(documentId: doc, section: Int(sec), chunk: Int(ck), cacheHit: hit, elapsedMs: elapsedMs)
             case .playbackFinished(let doc, let sec, let ck):
                 return .playbackFinished(documentId: doc, section: Int(sec), chunk: Int(ck))
             case .commandRecognized(let raw, let cmd):
@@ -1077,9 +1082,53 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
 
     @Published public private(set) var inflightDownloads: [String: InstallUiState] = [:]
 
+    /// Non-nil while a remote-catalog refresh is in flight. UI watches this
+    /// to disable the "Aggiorna lista voci" button and show a small spinner.
+    @Published public private(set) var catalogRefreshInflight: Bool = false
+    /// Last-attempt outcome (success message or error). Cleared by the next
+    /// invocation. Used to surface "scaricate N voci" / "rete non disponibile"
+    /// in Settings.
+    @Published public var catalogRefreshStatus: String? = nil
+
     // The install progress poll runs only while something is inflight —
     // no point burning a 2 Hz timer when there's nothing to drain.
     private var installPollTimer: Timer?
+
+    /// Refresh the voice catalog from huggingface.co. **Network call** —
+    /// only fired on explicit user action: onboarding `installModels` step
+    /// (auto on appear) or the "Aggiorna lista voci" button in Settings.
+    /// On success the catalog cache file is rewritten and `installations`
+    /// is reloaded so the new voices show up immediately. On failure the
+    /// previous list stays intact and `catalogRefreshStatus` carries the
+    /// error message.
+    public func refreshRemoteVoiceCatalog() async {
+        await MainActor.run {
+            self.catalogRefreshInflight = true
+            self.catalogRefreshStatus = nil
+        }
+        let ffi = self.runtime
+        let result: Result<UInt32, Error> = await Task.detached {
+            do {
+                let count = try ffi.fetchRemoteVoiceCatalog()
+                return .success(count)
+            } catch {
+                return .failure(error)
+            }
+        }.value
+        switch result {
+        case .success(let count):
+            await refreshInstallations()
+            await MainActor.run {
+                self.catalogRefreshInflight = false
+                self.catalogRefreshStatus = "Lista aggiornata: \(count) voci."
+            }
+        case .failure(let err):
+            await MainActor.run {
+                self.catalogRefreshInflight = false
+                self.catalogRefreshStatus = "Aggiornamento fallito: \(err.localizedDescription)"
+            }
+        }
+    }
 
     /// Load the asset catalog from the FFI and map to the UI model. Called
     /// at init, and after every asset install/uninstall. Runs on a detached

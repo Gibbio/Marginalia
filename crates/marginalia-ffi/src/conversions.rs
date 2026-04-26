@@ -181,11 +181,13 @@ impl From<RuntimeEvent> for FfiRuntimeEvent {
                 section_index,
                 chunk_index,
                 cache_hit,
+                elapsed_ms,
             } => FfiRuntimeEvent::SynthesisReady {
                 document_id,
                 section_index: u32_lossy(section_index),
                 chunk_index: u32_lossy(chunk_index),
                 cache_hit,
+                elapsed_ms,
             },
             RuntimeEvent::PlaybackFinished {
                 document_id,

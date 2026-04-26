@@ -510,16 +510,22 @@ impl SqliteRuntime {
     ) -> Result<SynthesisResult, SynthesisError> {
         let voice = request.voice.clone().unwrap_or_default();
         let cache_key = format!("{document_id}:{section_index}:{chunk_index}:{voice}");
+        log::info!("[runtime] synthesize_cached key={cache_key}");
 
         // 1. Check in-memory cache (hot path for same session).
         if let Some(cached) = self.tts_cache.get(&cache_key) {
             if std::path::Path::new(&cached.audio_reference).exists() {
                 let result = cached.clone();
+                log::info!(
+                    "[runtime] synthesize_cached: in-memory hit audio_ref={}",
+                    result.audio_reference
+                );
                 self.event_sink.emit(RuntimeEvent::SynthesisReady {
                     document_id: document_id.to_string(),
                     section_index,
                     chunk_index,
                     cache_hit: true,
+                    elapsed_ms: 0,
                 });
                 return Ok(result);
             }
@@ -547,6 +553,10 @@ impl SqliteRuntime {
                     .extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("wav");
+                log::info!(
+                    "[runtime] synthesize_cached: on-disk hit path={}",
+                    cached_path.display()
+                );
                 let result = SynthesisResult {
                     provider_name: self.tts.describe_capabilities().provider_name,
                     voice: voice.clone(),
@@ -565,6 +575,7 @@ impl SqliteRuntime {
                     section_index,
                     chunk_index,
                     cache_hit: true,
+                    elapsed_ms: 0,
                 });
                 return Ok(result);
             }
@@ -579,7 +590,32 @@ impl SqliteRuntime {
             section_index,
             chunk_index,
         });
-        let mut result = self.tts.synthesize(request)?;
+        let provider = self.tts.describe_capabilities().provider_name;
+        let voice_for_log = request.voice.clone().unwrap_or_default();
+        let lang_for_log = request.language.clone();
+        let text_len = request.text.chars().count();
+        log::info!(
+            "[runtime] tts.synthesize provider={provider} voice={voice_for_log} lang={lang_for_log} text_len={text_len}"
+        );
+        let synth_start = std::time::Instant::now();
+        let mut result = match self.tts.synthesize(request) {
+            Ok(r) => {
+                log::info!(
+                    "[runtime] tts.synthesize ok provider={provider} elapsed_ms={} audio_ref={}",
+                    synth_start.elapsed().as_millis(),
+                    r.audio_reference,
+                );
+                r
+            }
+            Err(e) => {
+                log::error!(
+                    "[runtime] tts.synthesize FAILED provider={provider} voice={voice_for_log} lang={lang_for_log} elapsed_ms={} err={e}",
+                    synth_start.elapsed().as_millis(),
+                );
+                return Err(e);
+            }
+        };
+        let synth_elapsed_ms = synth_start.elapsed().as_millis() as u64;
 
         // 4. Rename to deterministic path so it persists across restarts.
         // Preserve whatever extension the synthesizer produced (.wav
@@ -611,6 +647,7 @@ impl SqliteRuntime {
             section_index,
             chunk_index,
             cache_hit: false,
+            elapsed_ms: synth_elapsed_ms,
         });
         Ok(result)
     }
@@ -940,6 +977,14 @@ impl SqliteRuntime {
             .session_repository
             .get_active_session()
             .ok_or(RuntimeError::MissingActiveSession)?;
+        let prev_pb = self.playback_engine.snapshot();
+        log::info!(
+            "[runtime] resume_session session.playback_state={:?} engine_state={:?} engine_last={} audio_ref={:?}",
+            session.playback_state,
+            prev_pb.state,
+            prev_pb.last_action,
+            prev_pb.audio_reference,
+        );
         let playback = self.playback_engine.resume();
         session.state = ReaderState::Reading;
         session.playback_state = playback.state;
@@ -1391,6 +1436,12 @@ impl SqliteRuntime {
         mut session: ReadingSession,
         command_name: &str,
     ) -> Result<(), RuntimeError> {
+        log::info!(
+            "[runtime] replay_session_at_position cmd={command_name} doc={} sec={} chunk={}",
+            session.document_id,
+            session.position.section_index,
+            session.position.chunk_index,
+        );
         let document = self
             .document_repository
             .get_document(&session.document_id)
@@ -1404,6 +1455,7 @@ impl SqliteRuntime {
             })?;
 
         let doc_id = session.document_id.clone();
+        log::info!("[runtime] replay: about to synthesize_cached");
         let synthesis = self.synthesize_cached(
             &doc_id,
             session.position.section_index,
@@ -1420,6 +1472,11 @@ impl SqliteRuntime {
                     .unwrap_or_else(|| self.config.default_language.clone()),
             },
         )?;
+        log::info!(
+            "[runtime] replay: synth done audio_ref={} bytes={}",
+            synthesis.audio_reference,
+            synthesis.byte_length,
+        );
         let playback = self
             .playback_engine
             .start(&document, &session.position, Some(synthesis));

@@ -290,6 +290,11 @@ impl PlaybackEngine for HostPlaybackEngine {
     }
 
     fn pause(&mut self) -> PlaybackSnapshot {
+        log::info!(
+            "[playback] pause: thread={:?} prev_state={:?}",
+            std::thread::current().id(),
+            self.snapshot.state
+        );
         if let Some(player) = &self.player {
             if self.snapshot.state == PlaybackState::Playing {
                 player.0.pause();
@@ -308,6 +313,13 @@ impl PlaybackEngine for HostPlaybackEngine {
     }
 
     fn resume(&mut self) -> PlaybackSnapshot {
+        log::info!(
+            "[playback] resume: thread={:?} prev_state={:?} player_paused={:?} player_empty={:?}",
+            std::thread::current().id(),
+            self.snapshot.state,
+            self.player.as_ref().map(|p| p.0.is_paused()),
+            self.player.as_ref().map(|p| p.0.empty()),
+        );
         if let Some(player) = &self.player {
             if self.snapshot.state == PlaybackState::Paused {
                 player.0.play();

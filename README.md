@@ -289,3 +289,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## Credits & upstream sources
+
+Marginalia depends on excellent open-source work by other people. The
+TTS/STT models, voices and Rust bindings are not ours — we wrap them, we
+don't redistribute the weights. Everything below is downloaded on demand
+to the user's machine (HuggingFace cache or per-asset path). Many thanks
+to the maintainers.
+
+### Models & voices (downloaded by `make bootstrap-*` and the in-app installer)
+
+| Asset | Source | License |
+|---|---|---|
+| Kokoro 82M (MLX, default on Apple Silicon) — weights `kokoro-v1_0.safetensors` and per-language voice embeddings under `voices/` | [`prince-canuma/Kokoro-82M`](https://huggingface.co/prince-canuma/Kokoro-82M) | Apache-2.0 |
+| Kokoro 82M (ONNX, cross-platform fallback) — `onnx/model_q8f16.onnx` | [`onnx-community/Kokoro-82M-v1.0-ONNX`](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) | Apache-2.0 |
+| Kokoro reference G2P (the phonemizer rules `marginalia-tts-mlx` mirrors clause-by-clause) | [`hexgrad/misaki`](https://github.com/hexgrad/misaki) | MIT |
+| Whisper STT — `ggml-small.bin` and the rest of the ggml family | [`ggerganov/whisper.cpp`](https://huggingface.co/ggerganov/whisper.cpp) | MIT (model weights: MIT, see whisper.cpp repo) |
+| Voice catalog HF API endpoint hit by Settings → Installazioni → "Aggiorna lista voci" | `https://huggingface.co/api/models/prince-canuma/Kokoro-82M/tree/main/voices` | (HF public API) |
+
+### Build dependencies that aren't on crates.io
+
+| Crate | Source | What it gives us |
+|---|---|---|
+| `voice-tts`, `voice-nn`, `voice-dsp` | [`Gibbio/voice-mlx`](https://github.com/Gibbio/voice-mlx) (fork with patched decoder) | The Kokoro inference path on MLX Metal that powers `marginalia-tts-mlx` |
+| `mlx-rs` | [`oxideai/mlx-rs`](https://github.com/oxideai/mlx-rs) (git HEAD — crates.io v0.25.3 bundles an older MLX C++ that's noticeably slower) | Rust bindings for Apple's MLX framework |
+
+### Runtime dependencies (audio / NLP / I/O) worth calling out
+
+| Crate | What it does |
+|---|---|
+| [`rodio`](https://crates.io/crates/rodio) (0.22) | Audio playback for the TUI and CLI; mac-gui uses `AVAudioPlayer` for chunks/notes/preview and only goes through rodio in `marginalia-playback-host` for shared sink ownership |
+| [`cpal`](https://crates.io/crates/cpal) (0.17) | Cross-platform audio device access (mic capture for the AEC pipeline, speaker output for rodio) |
+| [`aec3`](https://crates.io/crates/aec3) | Pure-Rust port of WebRTC AEC3 — keeps the TTS playback from triggering its own voice commands |
+| [`whisper-rs`](https://crates.io/crates/whisper-rs) (0.16) | Whisper.cpp Rust bindings used by `marginalia-stt-whisper` |
+| [`hf-hub`](https://crates.io/crates/hf-hub) (0.5) | HuggingFace cache layout + downloads with progress |
+| [`pdfium`](https://github.com/bblanchon/pdfium-binaries) | PDF text extraction (PDFium binaries — Apache-2.0 / BSD) |
+| [`espeak-ng`](https://github.com/espeak-ng/espeak-ng) | External phonemizer used by both TTS backends, called clause-by-clause |
+| [`epub`](https://crates.io/crates/epub) | Pure-Rust EPUB 2/3 parser used by `marginalia-import-epub` |
+| [`readability-rust`](https://crates.io/crates/readability) + [`scraper`](https://crates.io/crates/scraper) + [`ureq`](https://crates.io/crates/ureq) | The `marginalia-import-url` web-article importer |
+| Apple `SFSpeechRecognizer` (system framework) | Native Italian/multilingual STT used by `marginalia-stt-apple`'s Swift helper |
+
+If your project is in this list and you'd like the credit phrased
+differently — or removed — open an issue and we'll fix it.

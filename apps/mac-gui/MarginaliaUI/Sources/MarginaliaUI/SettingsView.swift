@@ -875,7 +875,14 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 sub: T("settings.sub.installations"),
                 info: T("settings.info.installations")
             )
-            OnlineBanner(accent: accent)
+
+            // Manual remote-catalog refresh. The voice list is otherwise
+            // populated from the bundled `voices.manifest.json` (or from
+            // a previously fetched `voices.cache.json`). Hitting this
+            // pulls the current catalog from huggingface.co — useful when
+            // Kokoro publishes new voices upstream after the .app was
+            // built.
+            catalogRefreshControl
 
             // Non-voice assets flat at the top — one install per user
             // per lifetime, no grouping needed.
@@ -892,6 +899,42 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             }
         }
         .onAppear { Task { await host.refreshInstallations() } }
+    }
+
+    private var catalogRefreshControl: some View {
+        HStack(spacing: 10) {
+            Button(action: {
+                Task { await host.refreshRemoteVoiceCatalog() }
+            }) {
+                HStack(spacing: 6) {
+                    if host.catalogRefreshInflight {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .frame(width: 12, height: 12)
+                    }
+                    Text(host.catalogRefreshInflight
+                         ? "Aggiornamento…"
+                         : "Aggiorna lista voci")
+                        .font(.serif(13))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(accent.main.opacity(0.5), lineWidth: 0.5)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(host.catalogRefreshInflight)
+
+            if let status = host.catalogRefreshStatus {
+                Text(status)
+                    .font(.serif(12, italic: true))
+                    .foregroundStyle(Tokens.textFaint)
+            }
+            Spacer()
+        }
     }
 
     /// Voices grouped by language, system-current first then alphabetical.
