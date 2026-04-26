@@ -478,10 +478,13 @@ struct LibRow: View {
                 if entry.needsReload {
                     // Pure indicator — not a tap target. The reload
                     // action is in the row's context menu so we don't
-                    // re-ingest on accidental clicks.
+                    // re-ingest on accidental clicks. Coloured with
+                    // the active accent so it actually pops against
+                    // the metadata line (`Tokens.textFaint` was too
+                    // muted to notice).
                     Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Tokens.textFaint)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(accent.main)
                         .help(T("sidebar.library.modified-on-disk"))
                 }
             }
