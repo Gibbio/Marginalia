@@ -977,46 +977,61 @@ public struct ReadingView<Host: MarginaliaHost>: View {
         }
     }
 
-    // Link overlay (curve from chunk → note)
+    // Link overlay (curve from chunk → note). When a chunk has multiple
+    // notes attached, one curve is drawn per linked note so the user
+    // sees the full fan-out (was: only `notes.first` — surprising when
+    // a chunk had 2+ notes and only one connector lit up).
     @ViewBuilder
     private var linkOverlay: some View {
         if let hoverId,
-           let note = notes.first(where: { $0.chunkId == hoverId }),
-           let chunkRect = chunkFrames[hoverId],
-           let noteRect = noteFrames[note.id] {
-            // Anchor: just inside the bottom-right corner of the hovered
-            // chunk. Using (maxY − inset) instead of midY keeps the line's
-            // exit point stable and visually "after" the passage, which is
-            // what notes are — a mark left at the end of what you read.
-            let insetX: CGFloat = 10
-            let insetY: CGFloat = 8
-            let x1 = chunkRect.maxX - insetX
-            let y1 = chunkRect.maxY - insetY
-            // Note endpoint: top-left of the note card, a few points down so
-            // the line lands on the note's index circle row, not on the
-            // border.
-            let x2 = noteRect.minX
-            let y2 = noteRect.minY + 24
-
-            // Bezier control points: stronger horizontal bias if the two
-            // endpoints are close vertically, gentler curve otherwise. This
-            // avoids the "wrong chunk" illusion when dy is small.
-            let dx = x2 - x1
-            let dy = y2 - y1
-            let horizontalPull = max(40, abs(dx) * 0.55)
-            let c1 = CGPoint(x: x1 + horizontalPull, y: y1 + dy * 0.1)
-            let c2 = CGPoint(x: x2 - horizontalPull, y: y2 - dy * 0.1)
-
-            Path { p in
-                p.move(to: CGPoint(x: x1, y: y1))
-                p.addCurve(to: CGPoint(x: x2, y: y2), control1: c1, control2: c2)
+           let chunkRect = chunkFrames[hoverId] {
+            let linkedNotes = notes.filter { $0.chunkId == hoverId }
+            ForEach(linkedNotes, id: \.id) { note in
+                if let noteRect = noteFrames[note.id] {
+                    chunkToNoteConnector(chunkRect: chunkRect, noteRect: noteRect)
+                }
             }
-            .stroke(accent.main.opacity(0.85), lineWidth: 1)
-            .shadow(color: accent.main, radius: 2)
-
-            Circle().fill(accent.main).frame(width: 6, height: 6).position(x: x1, y: y1)
-            Circle().fill(accent.main).frame(width: 6, height: 6).position(x: x2, y: y2)
         }
+    }
+
+    /// Draws a single bezier from the right edge of `chunkRect` to the
+    /// left edge of `noteRect`, with two endpoint dots. Extracted so
+    /// `linkOverlay` can call it once per linked note without
+    /// duplicating the curve math.
+    @ViewBuilder
+    private func chunkToNoteConnector(chunkRect: CGRect, noteRect: CGRect) -> some View {
+        // Anchor: just inside the bottom-right corner of the hovered
+        // chunk. Using (maxY − inset) instead of midY keeps the line's
+        // exit point stable and visually "after" the passage, which is
+        // what notes are — a mark left at the end of what you read.
+        let insetX: CGFloat = 10
+        let insetY: CGFloat = 8
+        let x1 = chunkRect.maxX - insetX
+        let y1 = chunkRect.maxY - insetY
+        // Note endpoint: top-left of the note card, a few points down so
+        // the line lands on the note's index circle row, not on the
+        // border.
+        let x2 = noteRect.minX
+        let y2 = noteRect.minY + 24
+
+        // Bezier control points: stronger horizontal bias if the two
+        // endpoints are close vertically, gentler curve otherwise. This
+        // avoids the "wrong chunk" illusion when dy is small.
+        let dx = x2 - x1
+        let dy = y2 - y1
+        let horizontalPull = max(40, abs(dx) * 0.55)
+        let c1 = CGPoint(x: x1 + horizontalPull, y: y1 + dy * 0.1)
+        let c2 = CGPoint(x: x2 - horizontalPull, y: y2 - dy * 0.1)
+
+        Path { p in
+            p.move(to: CGPoint(x: x1, y: y1))
+            p.addCurve(to: CGPoint(x: x2, y: y2), control1: c1, control2: c2)
+        }
+        .stroke(accent.main.opacity(0.85), lineWidth: 1)
+        .shadow(color: accent.main, radius: 2)
+
+        Circle().fill(accent.main).frame(width: 6, height: 6).position(x: x1, y: y1)
+        Circle().fill(accent.main).frame(width: 6, height: 6).position(x: x2, y: y2)
     }
 }
 
