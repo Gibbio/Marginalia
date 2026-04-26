@@ -255,6 +255,16 @@ pub struct SqliteRuntime {
     provider_doctor_blobs: HashMap<String, serde_json::Value>,
     /// Cache: (document_id, section, chunk, voice) → SynthesisResult
     tts_cache: HashMap<String, SynthesisResult>,
+    /// `voice_id → BCP-47 language tag` lookup, populated by the FFI
+    /// from the bundled `voices.manifest.json` (and refreshed when the
+    /// user pulls a new catalog from huggingface). Single source of
+    /// truth for the voice→lang relation; consulted by
+    /// `set_default_voice` so a voice swap also snaps the language to
+    /// match (otherwise espeak-ng would phonemize Italian text with
+    /// English rules and the user gets "Nicola with a British accent").
+    /// Empty until populated — when empty, voice changes leave the
+    /// language untouched (defensive default).
+    voice_to_lang: HashMap<String, String>,
     /// Push-based event system for app notifications.
     event_sink: RuntimeEventSink,
 }
@@ -401,6 +411,7 @@ impl SqliteRuntime {
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
             tts_cache: HashMap::new(),
+            voice_to_lang: HashMap::new(),
             event_sink: RuntimeEventSink::new(),
         })
     }
@@ -438,6 +449,7 @@ impl SqliteRuntime {
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
             provider_doctor_blobs: HashMap::new(),
             tts_cache: HashMap::new(),
+            voice_to_lang: HashMap::new(),
             event_sink: RuntimeEventSink::new(),
         })
     }
@@ -475,15 +487,57 @@ impl SqliteRuntime {
     /// any chunk they had already listened to. By sync'ing
     /// `session.voice`, the next resume rebuilds the cache key under the
     /// new voice → cache miss → fresh synthesis with the new voice.
+    /// Replace the catalog-driven `voice_id → BCP-47` map. Called by
+    /// the FFI from the live voice catalog (bundled
+    /// `voices.manifest.json` at startup; refreshed after a successful
+    /// `fetch_remote_voice_catalog`). The runtime never opens the
+    /// manifest directly — keeping that I/O on the FFI side avoids
+    /// a circular crate dep and keeps the runtime hermetic for tests.
+    pub fn set_voice_to_lang_map(&mut self, map: HashMap<String, String>) {
+        log::info!("[runtime] voice_to_lang map updated: {} entries", map.len());
+        self.voice_to_lang = map;
+    }
+
     pub fn set_default_voice(&mut self, voice: &str) {
         let voice_changed = self.config.default_voice != voice;
         self.config.default_voice = voice.to_string();
+        // The runtime's `default_language` must agree with the voice's
+        // implied language: if a user picks im_nicola while
+        // `default_language` is still en-GB (left over from a British
+        // voice on a previous doc), espeak-ng would phonemize the
+        // Italian text with English rules and Nicola's timbre would
+        // land on garbled phonemes — sounds like an Italian voice with
+        // a British accent. Look up `voice_to_lang` (single source of
+        // truth, populated by FFI from `voices.manifest.json`); on
+        // miss leave the language alone (defensive — better quiet than
+        // wrong).
+        let implied_lang = self.voice_to_lang.get(voice).cloned();
+        if let Some(ref lang) = implied_lang {
+            if self.config.default_language != *lang {
+                log::info!(
+                    "[runtime] default_language: {} → {} (derived from voice {voice})",
+                    self.config.default_language,
+                    lang
+                );
+                self.config.default_language = lang.clone();
+            }
+        }
         if let Some(mut session) = self.session_repository.get_active_session() {
+            let mut dirty = false;
             if session.voice.as_deref() != Some(voice) {
                 session.voice = Some(voice.to_string());
+                dirty = true;
+            }
+            if let Some(ref lang) = implied_lang {
+                if session.command_language.as_deref() != Some(lang.as_str()) {
+                    session.command_language = Some(lang.clone());
+                    dirty = true;
+                }
+            }
+            if dirty {
                 session.touch();
                 if let Err(e) = self.session_repository.save_session(session) {
-                    log::warn!("failed to refresh active session voice: {e}");
+                    log::warn!("failed to refresh active session voice/lang: {e}");
                 }
             }
         }

@@ -902,6 +902,29 @@ fn current_catalog() -> Vec<AssetSpec> {
     out
 }
 
+/// Build the `voice_id → BCP-47` map from the current catalog. Each
+/// voice spec carries its language as the `language` field (loaded
+/// from `voices.manifest.json` or the user-cached HF fetch). Used to
+/// seed `runtime.set_voice_to_lang_map` at boot and after every
+/// `fetch_remote_voice_catalog` so a voice swap also snaps the
+/// runtime's `default_language` to whatever the new voice implies.
+/// Single source of truth for the voice→lang relation; no hardcoded
+/// `id-prefix → lang` table anywhere.
+fn build_voice_to_lang_map() -> std::collections::HashMap<String, String> {
+    current_catalog()
+        .into_iter()
+        .filter_map(|spec| {
+            // The catalog stores voices with id `voice:<voice_id>`;
+            // `set_default_voice` is called with the bare `<voice_id>`
+            // (matches what the runtime / FFI passes around). Strip
+            // the prefix so the lookup keys align.
+            let id = spec.id.strip_prefix("voice:").map(str::to_string)?;
+            let lang = spec.language?;
+            Some((id, lang))
+        })
+        .collect()
+}
+
 /// FFI-exposed catalog row.
 pub struct InstallableAsset {
     pub id: String,
@@ -1322,6 +1345,17 @@ impl FfiRuntime {
                         let waveform_handle = output.sidecar.waveform_data.clone();
                         #[cfg(all(feature = "apple-stt", feature = "host-playback"))]
                         let slot = output.aec_render_slot.clone();
+                        // Push the catalog-derived voice→lang map so
+                        // `runtime.set_default_voice` can snap the
+                        // language to whatever the chosen voice
+                        // implies. Without this, switching from
+                        // bm_george to im_nicola would leave the
+                        // runtime's `default_language` at en-GB and
+                        // espeak-ng would phonemize Italian text with
+                        // English rules → "Nicola con accento british".
+                        if let Ok(mut rt) = runtime_arc.lock() {
+                            rt.set_voice_to_lang_map(build_voice_to_lang_map());
+                        }
                         let init = SidecarInit {
                             runtime: runtime_arc.clone(),
                             #[cfg(feature = "apple-stt")]
@@ -2167,7 +2201,16 @@ impl FfiRuntime {
     /// `<config_dir>/voices.cache.json`; the next `list_installable_assets`
     /// call will pick it up. Returns the number of voices fetched.
     pub fn fetch_remote_voice_catalog(&self) -> Result<u32, FfiError> {
-        fetch_remote_voice_catalog_inner().map_err(FfiError::Io)
+        let count = fetch_remote_voice_catalog_inner().map_err(FfiError::Io)?;
+        // The catalog snapshot was invalidated inside `_inner`. Rebuild
+        // the runtime's `voice_to_lang` map from the fresh catalog so a
+        // newly-fetched voice (e.g. the user just clicked "aggiorna
+        // lista" and Kokoro published a new language) immediately gets
+        // the right language when the user picks it.
+        if let Ok(mut rt) = self.runtime.lock() {
+            rt.set_voice_to_lang_map(build_voice_to_lang_map());
+        }
+        Ok(count)
     }
 
     /// Kick off an asynchronous download for the named asset. Returns
