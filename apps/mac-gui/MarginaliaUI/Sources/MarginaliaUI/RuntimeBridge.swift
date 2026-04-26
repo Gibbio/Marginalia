@@ -250,7 +250,11 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         // come free in the FFI list item; notes require a per-doc
         // query (listNotes). N small sqlite reads on refresh — fine
         // for libraries up to a few hundred entries.
-        let activeId = self.currentSession?.documentId
+        // The "is this doc the active one?" flag is NOT baked here
+        // (was: `active: d.id == activeId`). It's derived at render
+        // time in the Sidebar from `currentSession?.documentId`, so
+        // opening a different doc — which only updates `currentSession`,
+        // not `library` — still re-highlights the right row.
         let entries = docs.map { d -> LibraryEntry in
             let noteCount = runtime.listNotes(documentId: d.id).count
             return LibraryEntry(
@@ -260,7 +264,6 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 chapterCount: Int(d.chapterCount),
                 chunkCount: Int(d.chunkCount),
                 notes: noteCount,
-                active: d.id == activeId,
                 sourcePath: d.sourcePath,
                 needsReload: d.needsReload
             )

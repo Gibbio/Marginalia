@@ -6,6 +6,12 @@ import SwiftUI
 public struct Sidebar: View {
     public var accent: Accent
     public var library: [LibraryEntry]
+    /// Document_id of the currently-open session — drives the active
+    /// row highlight. Derived live from `host.currentSession?.documentId`
+    /// (was baked into `LibraryEntry.active`, which went stale because
+    /// `openDocument` updates `currentSession` but not `library`, so
+    /// switching docs left the highlight on the previous one).
+    public var activeDocumentId: String?
     public var micLevels: [Float]
     public var ttsLevels: [Float]
     /// Display name of the active TTS voice (e.g. "Sara"). Shown in the
@@ -48,6 +54,7 @@ public struct Sidebar: View {
 
     public init(accent: Accent,
                 library: [LibraryEntry],
+                activeDocumentId: String? = nil,
                 micLevels: [Float] = [],
                 ttsLevels: [Float] = [],
                 voiceName: String = "",
@@ -62,6 +69,7 @@ public struct Sidebar: View {
                 onOpenSettings: @escaping () -> Void = {}) {
         self.accent = accent
         self.library = library
+        self.activeDocumentId = activeDocumentId
         self.micLevels = micLevels
         self.ttsLevels = ttsLevels
         self.voiceName = voiceName
@@ -110,6 +118,7 @@ public struct Sidebar: View {
                         ForEach(filteredLibrary) { entry in
                             Button(action: { onOpenDocument(entry.id) }) {
                                 LibRow(entry: entry, accent: accent,
+                                       isActive: entry.id == activeDocumentId,
                                        onReload: { onReloadDocument(entry.id) })
                             }
                             .buttonStyle(.plain)
@@ -435,6 +444,11 @@ struct SideRow: View {
 struct LibRow: View {
     var entry: LibraryEntry
     var accent: Accent
+    /// True iff this row's document is the one currently open in the
+    /// reader. Computed by the parent `Sidebar` from
+    /// `activeDocumentId == entry.id` so it reacts immediately when the
+    /// user opens a different doc (no library refresh needed).
+    var isActive: Bool = false
     /// Direct-tap action for the reload glyph — bypasses the
     /// context-menu route. Default no-op so previews / non-library
     /// callers can omit it.
@@ -476,15 +490,16 @@ struct LibRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(entry.title)
-                .font(.serif(15, italic: entry.active))
-                .foregroundStyle(entry.active ? Tokens.text : Tokens.textDim)
+                .font(.serif(15, italic: isActive))
+                .foregroundStyle(isActive ? Tokens.text : Tokens.textDim)
                 .lineLimit(1)
             HStack(spacing: 6) {
                 if !metadataLine.isEmpty {
                     Text(metadataLine)
                         .font(.mono(9))
                         .tracking(0.3)
-                        .foregroundStyle(Tokens.textFaint)
+                        .foregroundStyle(isActive ? accent.main.opacity(0.9)
+                                                  : Tokens.textFaint)
                 }
                 if entry.needsReload {
                     // Direct-tap reload. Wrapping in a Button + plain
@@ -506,17 +521,16 @@ struct LibRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10).padding(.vertical, 8)
-        // Accent-washed bg on the active document, so the current reading
-        // context is always visible and the theme colour reads across the
-        // sidebar — not just on hairline accents.
-        .background(entry.active ? accent.soft : Color.clear)
+        // Active row mirrors the active CHUNK's treatment in ReadingView
+        // (`accent.soft.opacity(0.35)` wash + 2pt accent.main bar in
+        // the gutter): same visual language across the sidebar and the
+        // reader, so the user reads the connection at a glance.
+        .background(isActive ? accent.soft.opacity(0.35) : Color.clear)
         .overlay(alignment: .leading) {
-            if entry.active {
+            if isActive {
                 Rectangle()
                     .fill(accent.main)
                     .frame(width: 2)
-                    .padding(.vertical, 10)
-                    .shadow(color: accent.glow, radius: 5)
             }
         }
         .padding(.horizontal, 8)

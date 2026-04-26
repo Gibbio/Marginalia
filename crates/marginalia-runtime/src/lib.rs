@@ -476,6 +476,7 @@ impl SqliteRuntime {
     /// `session.voice`, the next resume rebuilds the cache key under the
     /// new voice → cache miss → fresh synthesis with the new voice.
     pub fn set_default_voice(&mut self, voice: &str) {
+        let voice_changed = self.config.default_voice != voice;
         self.config.default_voice = voice.to_string();
         if let Some(mut session) = self.session_repository.get_active_session() {
             if session.voice.as_deref() != Some(voice) {
@@ -485,6 +486,17 @@ impl SqliteRuntime {
                     log::warn!("failed to refresh active session voice: {e}");
                 }
             }
+        }
+        // Drop whatever audio is currently queued in the playback engine.
+        // The cached WAV was synthesized for the OLD voice; without this,
+        // a paused engine would replay the previous voice when the user
+        // hits play after switching. `resume_session` detects the
+        // resulting Stopped state and routes through
+        // `replay_session_at_position`, which re-synthesizes with the
+        // new voice (cache miss on the new content-addressed key).
+        if voice_changed {
+            log::info!("[runtime] default voice changed to {voice}, clearing playback engine");
+            let _ = self.playback_engine.stop();
         }
     }
 
@@ -1040,8 +1052,20 @@ impl SqliteRuntime {
     }
 
     /// Resume a paused reading session.
+    ///
+    /// Two paths:
+    /// - **Engine is Paused** (the common case: user clicked play after
+    ///   pausing) → just unpause; the queued WAV resumes from where it
+    ///   left off.
+    /// - **Engine is Stopped** (the queue was cleared by `stop_session`,
+    ///   `set_default_voice` after a voice swap, or a fresh
+    ///   `restore_session` at app start) → route through
+    ///   `replay_session_at_position`. This re-synthesizes the current
+    ///   chunk under the *current* voice + language and feeds it to the
+    ///   engine. Without this, after a voice change the user would hit
+    ///   play and still hear the old voice's cached audio.
     pub fn resume_session(&mut self) -> Result<(), RuntimeError> {
-        let mut session = self
+        let session = self
             .session_repository
             .get_active_session()
             .ok_or(RuntimeError::MissingActiveSession)?;
@@ -1053,6 +1077,13 @@ impl SqliteRuntime {
             prev_pb.last_action,
             prev_pb.audio_reference,
         );
+        if matches!(prev_pb.state, PlaybackState::Stopped) {
+            log::info!(
+                "[runtime] resume_session: engine is Stopped → routing through replay_session_at_position"
+            );
+            return self.replay_session_at_position(session, "resume_session");
+        }
+        let mut session = session;
         let playback = self.playback_engine.resume();
         session.state = ReaderState::Reading;
         session.playback_state = playback.state;

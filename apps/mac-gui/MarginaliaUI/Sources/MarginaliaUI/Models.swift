@@ -199,7 +199,6 @@ public struct LibraryEntry: Identifiable, Hashable, Sendable {
     public let chapterCount: Int
     public let chunkCount: Int
     public let notes: Int
-    public let active: Bool
     /// Filesystem path of the source file at ingestion time. Empty
     /// string when the host doesn't know it (mock fixtures, legacy
     /// rows). Drives the "Apri file in editor…" context-menu entry.
@@ -212,12 +211,12 @@ public struct LibraryEntry: Identifiable, Hashable, Sendable {
 
     public init(id: String, title: String, subtitle: String,
                 progressPct: Int, chapterCount: Int = 0, chunkCount: Int = 0,
-                notes: Int, active: Bool,
+                notes: Int,
                 sourcePath: String = "", needsReload: Bool = false) {
         self.id = id; self.title = title; self.subtitle = subtitle
         self.progressPct = progressPct
         self.chapterCount = chapterCount; self.chunkCount = chunkCount
-        self.notes = notes; self.active = active
+        self.notes = notes
         self.sourcePath = sourcePath; self.needsReload = needsReload
     }
 }
@@ -681,17 +680,17 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     // document so the preview shows something reasonable.
     @Published public var library: [LibraryEntry] = [
         LibraryEntry(id: "lib-1", title: "La montagna incantata", subtitle: "Thomas Mann",
-                     progressPct: 34, chapterCount: 8,  chunkCount: 214, notes: 12, active: true),
+                     progressPct: 34, chapterCount: 8,  chunkCount: 214, notes: 12),
         LibraryEntry(id: "lib-2", title: "Lettera a Giulia — v4", subtitle: "bozza",
-                     progressPct: 88, chapterCount: 1,  chunkCount: 7,   notes: 1,  active: false),
+                     progressPct: 88, chapterCount: 1,  chunkCount: 7,   notes: 1),
         LibraryEntry(id: "lib-3", title: "Appunti sul Simposio", subtitle: "Platone",
-                     progressPct: 12, chapterCount: 5,  chunkCount: 68,  notes: 4,  active: false),
+                     progressPct: 12, chapterCount: 5,  chunkCount: 68,  notes: 4),
         LibraryEntry(id: "lib-4", title: "Note al convegno", subtitle: "bozza",
-                     progressPct: 56, chapterCount: 3,  chunkCount: 22,  notes: 7,  active: false),
+                     progressPct: 56, chapterCount: 3,  chunkCount: 22,  notes: 7),
         LibraryEntry(id: "lib-5", title: "Il giovane Holden", subtitle: "J.D. Salinger",
-                     progressPct: 0,  chapterCount: 26, chunkCount: 312, notes: 0,  active: false),
+                     progressPct: 0,  chapterCount: 26, chunkCount: 312, notes: 0),
         LibraryEntry(id: "lib-6", title: "Paesaggi della mente", subtitle: "saggio · v2",
-                     progressPct: 22, chapterCount: 4,  chunkCount: 48,  notes: 3,  active: false),
+                     progressPct: 22, chapterCount: 4,  chunkCount: 48,  notes: 3),
     ]
 
     @Published public var currentSession: SessionState? = SessionState(
@@ -731,7 +730,7 @@ public final class MockHost: MarginaliaHost, ObservableObject {
         let newId = "lib-\(library.count + 1)"
         library.insert(LibraryEntry(
             id: newId, title: url.deletingPathExtension().lastPathComponent,
-            subtitle: "importato", progressPct: 0, notes: 0, active: false
+            subtitle: "importato", progressPct: 0, notes: 0
         ), at: 0)
         pushMessage("Importato: \(url.lastPathComponent)")
         return newId
@@ -739,7 +738,7 @@ public final class MockHost: MarginaliaHost, ObservableObject {
     public func importUrl(_ url: String) async throws -> String {
         let newId = "lib-url-\(library.count + 1)"
         library.insert(LibraryEntry(
-            id: newId, title: url, subtitle: "URL", progressPct: 0, notes: 0, active: false
+            id: newId, title: url, subtitle: "URL", progressPct: 0, notes: 0
         ), at: 0)
         pushMessage("URL importato: \(url)")
         return newId
@@ -826,7 +825,7 @@ public final class MockHost: MarginaliaHost, ObservableObject {
                 id: old.id, title: old.title, subtitle: old.subtitle,
                 progressPct: old.progressPct,
                 chapterCount: old.chapterCount, chunkCount: old.chunkCount,
-                notes: old.notes, active: old.active,
+                notes: old.notes,
                 sourcePath: old.sourcePath, needsReload: false
             )
         }

@@ -35,6 +35,7 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
                 Sidebar(
                     accent: accent,
                     library: host.library,
+                    activeDocumentId: host.currentSession?.documentId,
                     micLevels: host.micLevels,
                     ttsLevels: host.ttsLevels,
                     voiceName: voiceDisplayName,
