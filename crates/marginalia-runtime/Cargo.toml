@@ -1,6 +1,6 @@
 [package]
 name = "marginalia-runtime"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Host-neutral runtime composition for the Marginalia Beta engine"
 
@@ -31,7 +31,7 @@ marginalia-stt-whisper = { path = "../marginalia-stt-whisper", optional = true }
 marginalia-storage-sqlite = { path = "../marginalia-storage-sqlite" }
 marginalia-tts-kokoro = { path = "../marginalia-tts-kokoro" }
 marginalia-tts-mlx = { path = "../marginalia-tts-mlx", optional = true }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde_json = "1"
 sha2 = "0.10"
 # Language detection for B3 — detect a document's language from its first

@@ -18,6 +18,7 @@ use readability_rust::Readability;
 use scraper::{Html, Selector};
 use std::path::PathBuf;
 use std::time::Duration;
+use ureq::ResponseExt;
 
 /// Minimum length of an extracted paragraph to keep. Filters out single-word
 /// captions, share buttons, and stray inline markup.
@@ -41,17 +42,21 @@ pub struct UrlDocumentImporter {
 
 impl UrlDocumentImporter {
     pub fn new() -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(30))
-            .timeout_read(Duration::from_secs(30))
-            // Total-request cap: a slow-drip server that sends one byte per
-            // per-read timeout would otherwise hang indefinitely. 45s is
-            // comfortably above a normal article fetch.
-            .timeout(Duration::from_secs(45))
+        // ureq 3 reshaped agent construction: `AgentBuilder::new()` is gone,
+        // replaced by `Agent::config_builder()`. `timeout(...)` became
+        // `timeout_global(Some(...))`, the per-stage `timeout_connect` /
+        // `timeout_read` slots take `Option<Duration>` too, and the
+        // build chain ends with `.into()` to produce an `Agent`.
+        let config = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_recv_response(Some(Duration::from_secs(30)))
+            .timeout_global(Some(Duration::from_secs(45)))
             .user_agent(USER_AGENT)
-            .redirects(5)
+            .max_redirects(5)
             .build();
-        Self { agent }
+        Self {
+            agent: config.into(),
+        }
     }
 
     /// Fetch `url`, extract the readable article, and return an
@@ -67,30 +72,35 @@ impl UrlDocumentImporter {
         }
 
         log::info!("url-import: fetching {url}");
-        let response = self
+        let mut response = self
             .agent
             .get(url)
             .call()
             .map_err(|e| read_failed(url, format!("HTTP request failed: {e}")))?;
 
-        // ureq 2.x follows redirects transparently; `response.get_url()` is
-        // the final URL the payload came from, useful for logging short URLs
-        // and for the persisted source_path.
-        let final_url = response.get_url().to_string();
+        // ureq 3 returns `http::Response<Body>`; the URI extension carries
+        // the final URL after redirects. Fall back to the requested URL
+        // when the extension isn't populated (older mocks, no redirect).
+        let final_url = response.get_uri().to_string();
         if final_url != url {
             log::info!("url-import: redirected to {final_url}");
         }
 
         let status = response.status();
-        if !(200..300).contains(&status) {
+        if !status.is_success() {
             return Err(read_failed(
                 url,
-                format!("HTTP {status} {}", response.status_text()),
+                format!(
+                    "HTTP {} {}",
+                    status.as_u16(),
+                    status.canonical_reason().unwrap_or("")
+                ),
             ));
         }
 
         let html = response
-            .into_string()
+            .body_mut()
+            .read_to_string()
             .map_err(|e| read_failed(url, format!("failed to read response body: {e}")))?;
 
         if html.len() > MAX_RESPONSE_BYTES {

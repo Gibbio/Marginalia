@@ -1,6 +1,6 @@
 [package]
 name = "marginalia-stt-whisper"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Whisper-based dictation transcriber for Marginalia Beta"
 
@@ -14,7 +14,7 @@ coreml = ["whisper-rs/coreml"]
 cuda   = ["whisper-rs/cuda"]
 
 [dependencies]
-cpal = "0.15"
+cpal = "0.17"
 log = "0.4"
 marginalia-core = { path = "../marginalia-core" }
-whisper-rs = "0.14"
+whisper-rs = "0.16"

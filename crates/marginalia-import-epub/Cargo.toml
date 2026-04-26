@@ -1,6 +1,6 @@
 [package]
 name = "marginalia-import-epub"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "EPUB importer for Marginalia — extracts text from spine items, maps TOC to section titles"
 
@@ -8,4 +8,4 @@ description = "EPUB importer for Marginalia — extracts text from spine items, 
 epub = "2"
 log = "0.4"
 marginalia-core = { path = "../marginalia-core" }
-scraper = { version = "0.20", default-features = false }
+scraper = { version = "0.26", default-features = false }

@@ -1,6 +1,6 @@
 [package]
 name = "marginalia-ffi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "UniFFI bindings for the Marginalia runtime — Swift / Kotlin / Python consumers"
 
@@ -33,13 +33,13 @@ serde_json = "1"  # reading voices.manifest.json at catalog build time
 # Zip for B9 backup/restore (export/import marginalia.toml + sqlite db +
 # voices manifest as a single archive). `deflate` is all we need — the
 # archive is small enough that compression is basically free.
-zip = { version = "4", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 marginalia-config = { path = "../marginalia-config" }
 marginalia-core = { path = "../marginalia-core" }
 marginalia-models = { path = "../marginalia-models" }
 marginalia-runtime = { path = "../marginalia-runtime" }
 thiserror = "2"
-uniffi = { version = "0.29", features = ["cli"] }
+uniffi = { version = "0.31", features = ["cli"] }
 
 [build-dependencies]
-uniffi = { version = "0.29", features = ["build"] }
+uniffi = { version = "0.31", features = ["build"] }

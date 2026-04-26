@@ -132,7 +132,11 @@ impl WhisperDictationTranscriber {
             Some(name) => host
                 .input_devices()
                 .map_err(|e| format!("Cannot list input devices: {e}"))?
-                .find(|d| d.name().ok().as_deref() == Some(name.as_str()))
+                .find(|d| {
+                    d.description()
+                        .map(|desc| desc.name() == name)
+                        .unwrap_or(false)
+                })
                 .ok_or_else(|| format!("Input device '{name}' not found"))?,
             None => host
                 .default_input_device()
@@ -145,7 +149,7 @@ impl WhisperDictationTranscriber {
             .default_input_config()
             .map_err(|e| format!("No default input config: {e}"))?;
         let channels = default_config.channels() as usize;
-        let actual_rate = default_config.sample_rate().0;
+        let actual_rate = default_config.sample_rate();
 
         let stream_config = cpal::StreamConfig {
             channels: default_config.channels(),
@@ -260,27 +264,28 @@ impl WhisperDictationTranscriber {
             .full(params, &samples)
             .map_err(|e| format!("Whisper inference failed: {e}"))?;
 
-        let n = state
-            .full_n_segments()
-            .map_err(|e| format!("Cannot count Whisper segments: {e}"))?;
+        // whisper-rs 0.16 reshaped the segment API: `full_n_segments`
+        // returns a bare c_int now and per-segment data is accessed via
+        // `get_segment(i) -> Option<WhisperSegment>` with `to_str`,
+        // `start_timestamp`, `end_timestamp`. Skip on lookup failures
+        // rather than propagating — a missing segment in a long
+        // transcript shouldn't kill the whole capture.
+        let n = state.full_n_segments();
 
         let mut segments: Vec<DictationSegment> = Vec::new();
         let mut full_text = String::new();
 
         for i in 0..n {
-            let text = state
-                .full_get_segment_text(i)
-                .map_err(|e| format!("Cannot read Whisper segment {i}: {e}"))?;
+            let Some(seg) = state.get_segment(i) else {
+                continue;
+            };
+            let Ok(text) = seg.to_str() else { continue };
             let text = text.trim().to_string();
             if text.is_empty() {
                 continue;
             }
-            let t0 = state
-                .full_get_segment_t0(i)
-                .map_err(|e| format!("Cannot read segment t0 {i}: {e}"))?;
-            let t1 = state
-                .full_get_segment_t1(i)
-                .map_err(|e| format!("Cannot read segment t1 {i}: {e}"))?;
+            let t0 = seg.start_timestamp();
+            let t1 = seg.end_timestamp();
 
             if !full_text.is_empty() {
                 full_text.push(' ');
@@ -447,7 +452,7 @@ impl WhisperInterruptMonitor {
             .default_input_config()
             .map_err(|e| format!("No default input config: {e}"))?;
         let channels = default_config.channels() as usize;
-        let actual_sample_rate = default_config.sample_rate().0;
+        let actual_sample_rate = default_config.sample_rate();
         let stream_config = cpal::StreamConfig {
             channels: default_config.channels(),
             sample_rate: default_config.sample_rate(),
@@ -601,9 +606,10 @@ impl SpeechInterruptMonitor for WhisperInterruptMonitor {
         params.set_print_timestamps(false);
 
         let text = if state.full(params, &samples_f32).is_ok() {
-            let n = state.full_n_segments().unwrap_or(0);
+            let n = state.full_n_segments();
             (0..n)
-                .filter_map(|i| state.full_get_segment_text(i).ok())
+                .filter_map(|i| state.get_segment(i))
+                .filter_map(|seg| seg.to_str().ok().map(|s| s.to_string()))
                 .collect::<Vec<_>>()
                 .join(" ")
                 .trim()

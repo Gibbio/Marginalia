@@ -1,6 +1,6 @@
 [package]
 name = "marginalia-storage-sqlite"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "SQLite persistence for the Marginalia Beta engine"
 
@@ -8,5 +8,5 @@ description = "SQLite persistence for the Marginalia Beta engine"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log = "0.4"
 marginalia-core = { path = "../marginalia-core" }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde_json = "1"

@@ -1,12 +1,12 @@
 [package]
 name = "marginalia-stt-apple"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Apple native STT via SFSpeechRecognizer — macOS Neural Engine, zero models"
 
 [dependencies]
 aec3 = "0.1"
-cpal = "0.15"
+cpal = "0.17"
 hound = "3.5"  # WAV writer for persisting dictation audio (recorded notes)
 log = "0.4"
 marginalia-core = { path = "../marginalia-core" }

@@ -152,7 +152,7 @@ impl AecPipeline {
         let default_config = device
             .default_input_config()
             .map_err(|e| format!("no default input config: {e}"))?;
-        let device_rate = default_config.sample_rate().0;
+        let device_rate = default_config.sample_rate();
         let channels = default_config.channels() as usize;
 
         let stream_config = cpal::StreamConfig {

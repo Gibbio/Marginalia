@@ -2,15 +2,15 @@ use marginalia_core::domain::{Document, PlaybackState, ReadingPosition};
 use marginalia_core::ports::{
     PlaybackEngine, PlaybackSnapshot, ProviderCapabilities, ProviderExecutionMode, SynthesisResult,
 };
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
 use std::io::BufReader;
 
-/// Wrapper to make rodio's OutputStream Send.
-/// The stream is created and dropped on the same thread context;
-/// we only hold it as a drop guard to keep the audio device open.
-struct SendOutputStream(#[allow(dead_code)] OutputStream);
-unsafe impl Send for SendOutputStream {}
+/// Wrapper to make rodio's MixerDeviceSink Send.
+/// The sink is created and dropped on the same thread; we only hold it
+/// as a drop guard to keep the audio device open.
+struct SendDeviceSink(#[allow(dead_code)] MixerDeviceSink);
+unsafe impl Send for SendDeviceSink {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostPlaybackConfig {
@@ -18,9 +18,14 @@ pub struct HostPlaybackConfig {
 }
 
 pub struct HostPlaybackEngine {
-    _stream: Option<SendOutputStream>,
-    stream_handle: Option<OutputStreamHandle>,
-    sink: Option<Sink>,
+    /// Holds the device sink open for the lifetime of the engine. The
+    /// `Player` borrows the mixer from this; we never store the player
+    /// in a field that outlives this stream.
+    device_sink: Option<SendDeviceSink>,
+    /// The currently-playing player, if any. Recreated per chunk —
+    /// `Player::connect_new(mixer)` is cheap, and the previous player's
+    /// stop on drop is what tears down the prior chunk.
+    player: Option<Player>,
     snapshot: PlaybackSnapshot,
     /// Optional callback invoked with the f32 mono samples of each WAV chunk
     /// right before playback starts. Used by the AEC pipeline as the render
@@ -45,17 +50,16 @@ pub struct HostPlaybackEngine {
 
 impl Default for HostPlaybackEngine {
     fn default() -> Self {
-        let (stream, handle) = match OutputStream::try_default() {
-            Ok((s, h)) => (Some(SendOutputStream(s)), Some(h)),
+        let device_sink = match DeviceSinkBuilder::open_default_sink() {
+            Ok(sink) => Some(SendDeviceSink(sink)),
             Err(e) => {
                 log::warn!("[playback] audio output not available: {e}");
-                (None, None)
+                None
             }
         };
         Self {
-            _stream: stream,
-            stream_handle: handle,
-            sink: None,
+            device_sink,
+            player: None,
             on_play_samples: None,
             on_playback_paused: None,
             on_playback_resumed: None,
@@ -110,7 +114,7 @@ impl HostPlaybackEngine {
 
     /// Check if current playback has finished (for auto-advance).
     pub fn is_finished(&self) -> bool {
-        self.sink.as_ref().is_some_and(|s| s.empty())
+        self.player.as_ref().is_some_and(|p| p.empty())
             && self.snapshot.state == PlaybackState::Playing
     }
 }
@@ -161,7 +165,7 @@ impl PlaybackEngine for HostPlaybackEngine {
             return self.snapshot();
         };
 
-        let Some(handle) = &self.stream_handle else {
+        let Some(device_sink) = &self.device_sink else {
             self.snapshot.state = PlaybackState::Stopped;
             self.snapshot.last_action = "start-no-audio-device".to_string();
             return self.snapshot();
@@ -176,7 +180,7 @@ impl PlaybackEngine for HostPlaybackEngine {
             }
         };
 
-        let source = match Decoder::new(BufReader::new(file)) {
+        let source = match Decoder::try_from(BufReader::new(file)) {
             Ok(s) => s,
             Err(e) => {
                 // Corrupted cached FLAC (truncated write, disk full
@@ -194,39 +198,34 @@ impl PlaybackEngine for HostPlaybackEngine {
             }
         };
 
-        let sink = match Sink::try_new(handle) {
-            Ok(s) => s,
-            Err(_) => {
-                self.snapshot.state = PlaybackState::Stopped;
-                self.snapshot.last_action = "start-sink-failed".to_string();
-                return self.snapshot();
-            }
-        };
+        // rodio 0.22 replaced `Sink::try_new(handle)` with
+        // `Player::connect_new(mixer)`. The previous chunk's player (if
+        // any) is dropped here, which stops it cleanly.
+        let player = Player::connect_new(device_sink.0.mixer());
 
-        // Feed the WAV samples to the AEC render callback (if set) BEFORE
-        // starting playback, so the AEC thread has the reference ready.
+        // Feed the f32 mono samples to the AEC render callback (if set)
+        // BEFORE starting playback, so the AEC thread has the reference
+        // ready. rodio 0.22's Decoder yields `f32` samples (Sample =
+        // Float), so no i16 conversion is needed; just downmix to mono
+        // by averaging-of-first channel.
         if let Some(ref cb) = self.on_play_samples {
             if let Ok(f2) = File::open(&synthesis.audio_reference) {
-                if let Ok(decoder) = Decoder::new(BufReader::new(f2)) {
-                    let channels = decoder.channels() as usize;
-                    let samples_i16: Vec<i16> = decoder.collect();
-                    // Convert to f32 mono.
+                if let Ok(decoder) = Decoder::try_from(BufReader::new(f2)) {
+                    let channels = decoder.channels().get() as usize;
+                    let samples: Vec<f32> = decoder.collect();
                     let samples_f32: Vec<f32> = if channels <= 1 {
-                        samples_i16.iter().map(|&s| s as f32 / 32768.0).collect()
+                        samples
                     } else {
-                        samples_i16
-                            .chunks(channels)
-                            .map(|frame| frame[0] as f32 / 32768.0)
-                            .collect()
+                        samples.chunks(channels).map(|frame| frame[0]).collect()
                     };
                     cb(samples_f32);
                 }
             }
         }
 
-        sink.set_volume(self.volume);
-        sink.append(source);
-        self.sink = Some(sink);
+        player.set_volume(self.volume);
+        player.append(source);
+        self.player = Some(player);
         self.snapshot.state = PlaybackState::Playing;
         self.snapshot.last_action = "start".to_string();
         self.snapshot.audio_reference = Some(synthesis.audio_reference);
@@ -234,9 +233,9 @@ impl PlaybackEngine for HostPlaybackEngine {
     }
 
     fn pause(&mut self) -> PlaybackSnapshot {
-        if let Some(sink) = &self.sink {
+        if let Some(player) = &self.player {
             if self.snapshot.state == PlaybackState::Playing {
-                sink.pause();
+                player.pause();
                 self.snapshot.state = PlaybackState::Paused;
             }
         }
@@ -252,9 +251,9 @@ impl PlaybackEngine for HostPlaybackEngine {
     }
 
     fn resume(&mut self) -> PlaybackSnapshot {
-        if let Some(sink) = &self.sink {
+        if let Some(player) = &self.player {
             if self.snapshot.state == PlaybackState::Paused {
-                sink.play();
+                player.play();
                 self.snapshot.state = PlaybackState::Playing;
             }
         }
@@ -266,8 +265,8 @@ impl PlaybackEngine for HostPlaybackEngine {
     }
 
     fn stop(&mut self) -> PlaybackSnapshot {
-        if let Some(sink) = self.sink.take() {
-            sink.stop();
+        if let Some(player) = self.player.take() {
+            player.stop();
         }
         if let Some(cb) = &self.on_playback_cleared {
             cb();
@@ -290,8 +289,8 @@ impl PlaybackEngine for HostPlaybackEngine {
     fn snapshot(&self) -> PlaybackSnapshot {
         let mut snapshot = self.snapshot.clone();
         // Update state if playback finished naturally
-        if let Some(sink) = &self.sink {
-            if sink.empty() && snapshot.state == PlaybackState::Playing {
+        if let Some(player) = &self.player {
+            if player.empty() && snapshot.state == PlaybackState::Playing {
                 snapshot.state = PlaybackState::Stopped;
                 snapshot.last_action = "completed".to_string();
             }
@@ -305,8 +304,8 @@ impl PlaybackEngine for HostPlaybackEngine {
         // request via a future "più forte" voice command extension.
         let clamped = volume.max(0.0);
         self.volume = clamped;
-        if let Some(sink) = &self.sink {
-            sink.set_volume(clamped);
+        if let Some(player) = &self.player {
+            player.set_volume(clamped);
         }
     }
 

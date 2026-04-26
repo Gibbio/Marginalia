@@ -306,7 +306,10 @@ fn setup_audio(desired_rate: u32, device_name: Option<&str>) -> Result<AudioSetu
             .ok_or_else(|| "No default audio input device available".to_string())?,
     };
 
-    let dev_name = device.name().unwrap_or_else(|_| "unknown".to_string());
+    let dev_name = device
+        .description()
+        .map(|d| d.name().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
 
     // Prefer desired_rate, fall back to the device default.
     let (stream_config, actual_rate) = preferred_config(&device, desired_rate)?;
@@ -329,13 +332,13 @@ fn preferred_config(
     let supports_desired = device
         .supported_input_configs()
         .map_err(|e| format!("Cannot query device configs: {e}"))?
-        .any(|c| c.min_sample_rate().0 <= desired_rate && c.max_sample_rate().0 >= desired_rate);
+        .any(|c| c.min_sample_rate() <= desired_rate && c.max_sample_rate() >= desired_rate);
 
     if supports_desired {
         return Ok((
             cpal::StreamConfig {
                 channels: 1,
-                sample_rate: cpal::SampleRate(desired_rate),
+                sample_rate: desired_rate,
                 buffer_size: cpal::BufferSize::Default,
             },
             desired_rate,
@@ -346,7 +349,7 @@ fn preferred_config(
     let default = device
         .default_input_config()
         .map_err(|e| format!("No default input config: {e}"))?;
-    let actual_rate = default.sample_rate().0;
+    let actual_rate = default.sample_rate();
     Ok((
         cpal::StreamConfig {
             channels: default.channels(),
@@ -388,8 +391,8 @@ fn find_input_device_by_name(host: &cpal::Host, name: &str) -> Result<cpal::Devi
     host.input_devices()
         .map_err(|e| format!("Cannot enumerate audio devices: {e}"))?
         .find(|d| {
-            d.name()
-                .map(|n| n.to_lowercase().contains(&normalized))
+            d.description()
+                .map(|desc| desc.name().to_lowercase().contains(&normalized))
                 .unwrap_or(false)
         })
         .ok_or_else(|| format!("Audio input device '{name}' not found"))

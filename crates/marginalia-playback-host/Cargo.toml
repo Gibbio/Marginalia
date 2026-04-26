@@ -1,6 +1,6 @@
 [package]
 name = "marginalia-playback-host"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Host-side playback engine for Marginalia Beta desktop runtimes"
 
@@ -8,4 +8,4 @@ description = "Host-side playback engine for Marginalia Beta desktop runtimes"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log = "0.4"
 marginalia-core = { path = "../marginalia-core" }
-rodio = { version = "0.19", default-features = false, features = ["wav", "flac"] }
+rodio = { version = "0.22", default-features = false, features = ["wav", "flac", "playback"] }
