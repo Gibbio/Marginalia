@@ -124,7 +124,6 @@ fn build_dispatch_importer(pdfium_lib_dir: Option<&std::path::Path>) -> Dispatch
 }
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
-static NOTE_COUNTER: AtomicU64 = AtomicU64::new(1);
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Map `whatlang::Lang` to a BCP-47 2-letter prefix for matching against
@@ -1176,7 +1175,13 @@ impl SqliteRuntime {
             .get_active_session()
             .ok_or(RuntimeError::MissingActiveSession)?;
         let note = VoiceNote {
-            note_id: format!("note-{}", NOTE_COUNTER.fetch_add(1, Ordering::Relaxed)),
+            // UUID v4: process-local + monotonic. The previous
+            // `format!("note-{}", NOTE_COUNTER.fetch_add(1, ...))`
+            // restarted from 1 on every app launch, so the second
+            // session's `note-1` overwrote the first session's `note-1`
+            // through `save_note`'s `ON CONFLICT(note_id) DO UPDATE`.
+            // UUIDs make collisions cryptographically impossible.
+            note_id: uuid::Uuid::new_v4().to_string(),
             session_id: session.session_id.clone(),
             document_id: session.document_id.clone(),
             position: session.position.clone(),

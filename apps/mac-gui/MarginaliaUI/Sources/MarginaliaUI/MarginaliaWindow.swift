@@ -247,32 +247,17 @@ public struct MarginaliaWindow<Host: MarginaliaHost>: View {
         #endif
     }
 
-    /// Intercept the sidebar's reload intent with a confirmation alert.
-    /// With the path-stable id scheme notes + sessions stay attached;
-    /// chunks may shift indices if the file was edited upstream of
-    /// existing notes — surface that subtlety so the user knows what
-    /// they're clicking.
+    /// One-click reload — no confirm dialog. With the path-stable id
+    /// scheme the operation is non-destructive (notes + sessions stay
+    /// attached) and the user typically reaches this either by clicking
+    /// the deliberate "modificato" glyph in the sidebar row or by
+    /// picking the matching context-menu entry. An accidental click
+    /// just re-ingests the file (~1s) with no data loss.
     private func handleReloadDocument(_ id: String) {
-        #if canImport(AppKit)
-        let title = host.library.first(where: { $0.id == id })?.title ?? "questo documento"
-        let alert = NSAlert()
-        alert.messageText = "Re-importare \"\(title)\"?"
-        alert.informativeText = "Il file sul disco è cambiato. Note e sessione restano agganciate; le note ancorate a un chunk specifico potrebbero finire su testo leggermente diverso se hai inserito o tolto contenuto sopra di esse."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Ricarica")
-        alert.addButton(withTitle: "Annulla")
-        if alert.runModal() == .alertFirstButtonReturn {
-            Task {
-                do { try await host.reloadDocument(id: id) }
-                catch { host.pushMessage("Errore ricarica: \(error.localizedDescription)") }
-            }
-        }
-        #else
         Task {
             do { try await host.reloadDocument(id: id) }
             catch { host.pushMessage("Errore ricarica: \(error.localizedDescription)") }
         }
-        #endif
     }
 
     /// Consume a drag-drop payload and import any file URLs we recognise.

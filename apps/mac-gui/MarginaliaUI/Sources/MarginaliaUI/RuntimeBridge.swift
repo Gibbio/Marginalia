@@ -775,6 +775,14 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             }
             if let err {
                 liveNote = nil
+                // Suppress the noisy toast when the user already
+                // cancelled (sheet cancel OR sheet save with typed
+                // text — both call `cancelPendingDictation`). The
+                // dictation timeout / empty-transcript event still
+                // arrives a few seconds later, but the user neither
+                // wants to see "errore dettatura" nor needs the mic-
+                // unplugged hint in that flow.
+                if wasCancelled { break }
                 pushMessage("Errore dettatura: \(err)")
                 // B14 — discriminate "no audio captured" from "you
                 // didn't speak". If the OS reports no audio input

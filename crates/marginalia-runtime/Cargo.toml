@@ -34,6 +34,10 @@ marginalia-tts-mlx = { path = "../marginalia-tts-mlx", optional = true }
 rusqlite = { version = "0.39", features = ["bundled"] }
 serde_json = "1"
 sha2 = "0.10"
+# UUIDs for note ids — was a process-local AtomicU64 counter that reset
+# to 1 on every app restart, silently overwriting previously-saved notes
+# via the storage's ON CONFLICT(note_id) DO UPDATE upsert.
+uuid = { version = "1", features = ["v4"] }
 # Language detection for B3 — detect a document's language from its first
 # chunks at `start_session` time and warn the user if the selected voice
 # doesn't match. Pure-Rust, zero-dep, ~1ms per detection.

@@ -109,7 +109,8 @@ public struct Sidebar: View {
                     SideSection(title: T("sidebar.library.title"), accent: accent) {
                         ForEach(filteredLibrary) { entry in
                             Button(action: { onOpenDocument(entry.id) }) {
-                                LibRow(entry: entry, accent: accent)
+                                LibRow(entry: entry, accent: accent,
+                                       onReload: { onReloadDocument(entry.id) })
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
@@ -428,6 +429,10 @@ struct SideRow: View {
 struct LibRow: View {
     var entry: LibraryEntry
     var accent: Accent
+    /// Direct-tap action for the reload glyph — bypasses the
+    /// context-menu route. Default no-op so previews / non-library
+    /// callers can omit it.
+    var onReload: () -> Void = {}
 
     /// Compact, real metadata line: "N capitoli · M chunk · K note". The
     /// three parts each drop out when they'd be 0 so a fresh-ingested doc
@@ -476,16 +481,20 @@ struct LibRow: View {
                         .foregroundStyle(Tokens.textFaint)
                 }
                 if entry.needsReload {
-                    // Pure indicator — not a tap target. The reload
-                    // action is in the row's context menu so we don't
-                    // re-ingest on accidental clicks. Coloured with
-                    // the active accent so it actually pops against
-                    // the metadata line (`Tokens.textFaint` was too
-                    // muted to notice).
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(accent.main)
-                        .help(T("sidebar.library.modified-on-disk"))
+                    // Direct-tap reload. Wrapping in a Button + plain
+                    // style means SwiftUI routes the click to THIS
+                    // button (not the outer row's "open" button) when
+                    // the user lands on the glyph. Accent-coloured so
+                    // it pops against the metadata line.
+                    Button(action: onReload) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(accent.main)
+                            .padding(.horizontal, 2).padding(.vertical, 1)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(T("sidebar.library.modified-on-disk"))
                 }
             }
         }
