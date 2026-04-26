@@ -123,8 +123,17 @@ fn bundled_helper_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let mut cur: &Path = exe.as_path();
     while let Some(parent) = cur.parent() {
-        if parent.extension().and_then(|e: &std::ffi::OsStr| e.to_str()) == Some("app") {
-            return Some(parent.join("Contents").join("Helpers").join(helper_filename()));
+        if parent
+            .extension()
+            .and_then(|e: &std::ffi::OsStr| e.to_str())
+            == Some("app")
+        {
+            return Some(
+                parent
+                    .join("Contents")
+                    .join("Helpers")
+                    .join(helper_filename()),
+            );
         }
         cur = parent;
     }
@@ -529,17 +538,16 @@ impl DictationTranscriber for AppleDictationTranscriber {
             .recorded_audio_dir
             .join(format!("{}.wav", uuid::Uuid::new_v4()));
 
-        let recording_started =
-            match aec_pipeline::start_dictation_recording(
-                &self.recorder_slot,
-                audio_path.clone(),
-            ) {
-                Ok(()) => true,
-                Err(e) => {
-                    log::warn!("[apple-stt] dictation recording failed to start: {e}");
-                    false
-                }
-            };
+        let recording_started = match aec_pipeline::start_dictation_recording(
+            &self.recorder_slot,
+            audio_path.clone(),
+        ) {
+            Ok(()) => true,
+            Err(e) => {
+                log::warn!("[apple-stt] dictation recording failed to start: {e}");
+                false
+            }
+        };
 
         let result = (|| -> Result<String, String> {
             // Drain any stale dictation lines that may have arrived between

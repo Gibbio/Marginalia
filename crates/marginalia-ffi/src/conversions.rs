@@ -213,9 +213,7 @@ impl From<RuntimeEvent> for FfiRuntimeEvent {
             RuntimeEvent::SessionStopped { document_id } => {
                 FfiRuntimeEvent::SessionStopped { document_id }
             }
-            RuntimeEvent::IngestStarted { source } => {
-                FfiRuntimeEvent::IngestStarted { source }
-            }
+            RuntimeEvent::IngestStarted { source } => FfiRuntimeEvent::IngestStarted { source },
             RuntimeEvent::IngestFinished {
                 source,
                 document_id,

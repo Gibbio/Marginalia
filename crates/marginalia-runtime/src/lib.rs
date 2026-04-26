@@ -51,8 +51,8 @@ pub use builder::{BuildOutput, RuntimeBuilder, RuntimeSidecar};
 pub use discovery::{Discovery, Gender, LangInfo, SttEngine, TtsBackend, VoiceInfo};
 pub use events::{EventCallback, RuntimeEvent, RuntimeEventSink};
 pub use frontend::{RuntimeFrontend, RuntimeFrontendResponse};
-pub use reconfigure::{apply_provider_spec, ApplyReport, ProviderSpec, ReconfigureContext};
 pub use marginalia_core::ports::SttEngineOutput;
+pub use reconfigure::{apply_provider_spec, ApplyReport, ProviderSpec, ReconfigureContext};
 
 /// Routes import requests to the right backend by file extension.
 ///
@@ -366,7 +366,9 @@ impl SqliteRuntime {
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
-            dictation_transcriber: Arc::new(Mutex::new(Box::new(FakeDictationTranscriber::default()))),
+            dictation_transcriber: Arc::new(Mutex::new(Box::new(
+                FakeDictationTranscriber::default(),
+            ))),
             dictation_partial: Arc::new(Mutex::new(String::new())),
             rewrite_generator: Box::new(FakeRewriteGenerator::new()),
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
@@ -401,7 +403,9 @@ impl SqliteRuntime {
             playback_engine: Box::new(FakePlaybackEngine::new()),
             tts: Box::new(FakeSpeechSynthesizer::new()),
             command_recognizer: Box::new(FakeCommandRecognizer::default()),
-            dictation_transcriber: Arc::new(Mutex::new(Box::new(FakeDictationTranscriber::default()))),
+            dictation_transcriber: Arc::new(Mutex::new(Box::new(
+                FakeDictationTranscriber::default(),
+            ))),
             dictation_partial: Arc::new(Mutex::new(String::new())),
             rewrite_generator: Box::new(FakeRewriteGenerator::new()),
             topic_summarizer: Box::new(FakeTopicSummarizer::new()),
@@ -485,10 +489,7 @@ impl SqliteRuntime {
     /// Replace the TTS speech synthesizer provider with a pre-boxed trait
     /// object. Used by `reconfigure::apply_provider_spec`, which picks the
     /// concrete backend at runtime and returns `Box<dyn SpeechSynthesizer>`.
-    pub fn set_speech_synthesizer_boxed(
-        &mut self,
-        synthesizer: Box<dyn SpeechSynthesizer + Send>,
-    ) {
+    pub fn set_speech_synthesizer_boxed(&mut self, synthesizer: Box<dyn SpeechSynthesizer + Send>) {
         self.tts = synthesizer;
     }
 
@@ -534,11 +535,16 @@ impl SqliteRuntime {
             let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
             let wav_path = cache_dir.join(format!("{hash}.wav"));
             let flac_path = cache_dir.join(format!("{hash}.flac"));
-            let cached_path = if wav_path.exists() { wav_path }
-                              else if flac_path.exists() { flac_path }
-                              else { wav_path };  // sentinel; .exists() below is false
+            let cached_path = if wav_path.exists() {
+                wav_path
+            } else if flac_path.exists() {
+                flac_path
+            } else {
+                wav_path
+            }; // sentinel; .exists() below is false
             if cached_path.exists() {
-                let ext = cached_path.extension()
+                let ext = cached_path
+                    .extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("wav");
                 let result = SynthesisResult {
@@ -1131,7 +1137,11 @@ impl SqliteRuntime {
     /// Overwrite the transcript of an existing note. Looks up the note,
     /// mutates the transcript, saves back through the `save_note`
     /// upsert. Returns the updated note; errors when the id is unknown.
-    pub fn update_note(&mut self, note_id: &str, new_text: &str) -> Result<VoiceNote, RuntimeError> {
+    pub fn update_note(
+        &mut self,
+        note_id: &str,
+        new_text: &str,
+    ) -> Result<VoiceNote, RuntimeError> {
         let trimmed = new_text.trim();
         if trimmed.is_empty() {
             return Err(RuntimeError::Runtime(
@@ -1277,9 +1287,7 @@ impl SqliteRuntime {
     /// Cloneable handle to the dictation transcriber — used by the FFI's
     /// dedicated dictation thread so the blocking `transcribe()` call
     /// doesn't hold the runtime-wide lock.
-    pub fn dictation_transcriber_handle(
-        &self,
-    ) -> Arc<Mutex<Box<dyn DictationTranscriber + Send>>> {
+    pub fn dictation_transcriber_handle(&self) -> Arc<Mutex<Box<dyn DictationTranscriber + Send>>> {
         self.dictation_transcriber.clone()
     }
 
@@ -1678,10 +1686,7 @@ mod tests {
         assert!(restored.is_some(), "should restore the active session");
         let session = restored.unwrap();
         assert_eq!(session.document_id, outcome.document.document_id);
-        assert_eq!(
-            session.position.chunk_index,
-            pos_before.chunk_index
-        );
+        assert_eq!(session.position.chunk_index, pos_before.chunk_index);
 
         let _ = fs::remove_file(path);
     }

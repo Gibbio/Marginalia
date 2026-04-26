@@ -327,8 +327,7 @@ impl AppConfig {
     pub fn load_from(path: &std::path::Path) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        toml::from_str(&content)
-            .map_err(|e| format!("cannot parse {}: {e}", path.display()))
+        toml::from_str(&content).map_err(|e| format!("cannot parse {}: {e}", path.display()))
     }
 
     /// Load from `MARGINALIA_CONFIG` env var, or from `default_path` if
@@ -359,8 +358,7 @@ impl AppConfig {
     /// template in `apps/tui-rs/marginalia.toml` remains the documentation
     /// reference.
     pub fn write_to(&self, path: &std::path::Path) -> Result<(), String> {
-        let body = toml::to_string_pretty(self)
-            .map_err(|e| format!("serialize config: {e}"))?;
+        let body = toml::to_string_pretty(self).map_err(|e| format!("serialize config: {e}"))?;
         let header = "# Marginalia — written by the app. Edit via Settings UI.\n";
         let full = format!("{header}{body}");
 
@@ -371,8 +369,7 @@ impl AppConfig {
         // Write to a sibling `.tmp` then rename → atomic swap, avoids
         // leaving a half-written file on crash.
         let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, full)
-            .map_err(|e| format!("write {}: {e}", tmp.display()))?;
+        std::fs::write(&tmp, full).map_err(|e| format!("write {}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, path)
             .map_err(|e| format!("rename {} → {}: {e}", tmp.display(), path.display()))?;
         Ok(())

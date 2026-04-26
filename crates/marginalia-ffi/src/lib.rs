@@ -231,8 +231,7 @@ impl From<reconfigure::ApplyReport> for ApplyReport {
 struct SidecarInit {
     runtime: Arc<Mutex<SqliteRuntime>>,
     #[cfg(feature = "apple-stt")]
-    waveform_handle:
-        Option<Arc<Mutex<marginalia_runtime::builder::WaveformData>>>,
+    waveform_handle: Option<Arc<Mutex<marginalia_runtime::builder::WaveformData>>>,
     /// Cloned handle to the AEC render slot so the parent thread can
     /// feed the reference signal when GUI-side playback (note WAVs via
     /// AVAudioPlayer) starts. The slot is `Clone` and stays valid even
@@ -782,7 +781,9 @@ fn is_asset_cached(source: &AssetSource) -> bool {
             format!("voices/{voice_id}.safetensors"),
         ),
         AssetSource::Whisper { file } => ("ggerganov", "whisper.cpp", file.clone()),
-        AssetSource::KokoroOnnx { file } => ("onnx-community", "Kokoro-82M-v1.0-ONNX", file.clone()),
+        AssetSource::KokoroOnnx { file } => {
+            ("onnx-community", "Kokoro-82M-v1.0-ONNX", file.clone())
+        }
     };
     let repo_dir = hf_cache_root().join(format!("models--{owner}--{name}"));
     let Ok(rev) = std::fs::read_to_string(repo_dir.join("refs/main")) else {
@@ -836,9 +837,9 @@ fn mirror_to_mlx_dir(
 ) -> std::io::Result<()> {
     let target: PathBuf = match source {
         AssetSource::MlxCore { file } => dir.join(file),
-        AssetSource::MlxVoice { voice_id } => dir
-            .join("voices")
-            .join(format!("{voice_id}.safetensors")),
+        AssetSource::MlxVoice { voice_id } => {
+            dir.join("voices").join(format!("{voice_id}.safetensors"))
+        }
         _ => return Ok(()), // non-MLX, nothing to do
     };
     if let Some(parent) = target.parent() {
@@ -868,7 +869,9 @@ fn download_asset_with_progress(
             format!("voices/{voice_id}.safetensors"),
         ),
         AssetSource::Whisper { file } => ("ggerganov/whisper.cpp", file.to_string()),
-        AssetSource::KokoroOnnx { file } => ("onnx-community/Kokoro-82M-v1.0-ONNX", file.to_string()),
+        AssetSource::KokoroOnnx { file } => {
+            ("onnx-community/Kokoro-82M-v1.0-ONNX", file.to_string())
+        }
     };
     mgr.download_with_progress(repo, &file, progress)
         .map_err(|e| e.to_string())
@@ -896,8 +899,7 @@ pub struct FfiRuntime {
     /// SQLite database path — same reason as `config_path`.
     db_path: PathBuf,
     #[cfg(feature = "apple-stt")]
-    waveform_handle:
-        Option<Arc<Mutex<marginalia_runtime::builder::WaveformData>>>,
+    waveform_handle: Option<Arc<Mutex<marginalia_runtime::builder::WaveformData>>>,
     /// Forward the AEC render reference from the parent thread when the
     /// GUI plays a note WAV via AVAudioPlayer (which bypasses the rodio
     /// host engine and therefore the existing render callback). Cloned
@@ -967,8 +969,7 @@ impl FfiRuntime {
         // Build the runtime on a dedicated thread — `RuntimeBuilder::build()`
         // produces both the Send `SqliteRuntime` and the `!Send` sidecar.
         // We keep the sidecar on that thread for the rest of its life.
-        let (init_tx, init_rx) =
-            mpsc::sync_channel::<Result<SidecarInit, String>>(1);
+        let (init_tx, init_rx) = mpsc::sync_channel::<Result<SidecarInit, String>>(1);
         let (cmd_tx, cmd_rx) = mpsc::channel::<SidecarCmd>();
 
         let mlx_cfg = tui.mlx.clone();
@@ -995,8 +996,7 @@ impl FfiRuntime {
         // and the LangPicker compared "it" to "it-IT" → no selection
         // + the "no voices for this language" filter went empty even
         // when Italian voices were installed.
-        runtime_cfg.default_language =
-            reconfigure::normalize_apple_language(&tui.stt.language);
+        runtime_cfg.default_language = reconfigure::normalize_apple_language(&tui.stt.language);
         let db_path_clone = db_path.clone();
         // Captured for use inside the sidecar thread when the config
         // didn't specify a cache dir — same resolution rule as db_path.
@@ -1388,10 +1388,7 @@ impl FfiRuntime {
     // ─────────────────────────────────────────────────────────
 
     pub fn start_session(&self, document_id: String) -> Result<(), FfiError> {
-        self.runtime
-            .lock()
-            .unwrap()
-            .start_session(&document_id)?;
+        self.runtime.lock().unwrap().start_session(&document_id)?;
         Ok(())
     }
 
@@ -1443,11 +1440,7 @@ impl FfiRuntime {
         Ok(())
     }
     /// Click-to-seek: jump to `(section, chunk)` in the active document.
-    pub fn seek_to_chunk(
-        &self,
-        section_index: u32,
-        chunk_index: u32,
-    ) -> Result<(), FfiError> {
+    pub fn seek_to_chunk(&self, section_index: u32, chunk_index: u32) -> Result<(), FfiError> {
         self.runtime
             .lock()
             .unwrap()
@@ -1559,9 +1552,7 @@ impl FfiRuntime {
                         text: String::new(),
                         duration_secs: duration,
                         note_id: None,
-                        error_message: Some(
-                            "dettatura vuota o non riconosciuta".to_string(),
-                        ),
+                        error_message: Some("dettatura vuota o non riconosciuta".to_string()),
                     });
                     return;
                 }
@@ -1645,11 +1636,7 @@ impl FfiRuntime {
     }
 
     /// Overwrite the transcript of an existing note.
-    pub fn update_note(
-        &self,
-        note_id: String,
-        new_text: String,
-    ) -> Result<NoteView, FfiError> {
+    pub fn update_note(&self, note_id: String, new_text: String) -> Result<NoteView, FfiError> {
         let note = self
             .runtime
             .lock()
@@ -1720,7 +1707,9 @@ impl FfiRuntime {
                     let mut out: Vec<f32> = Vec::new();
                     'outer: loop {
                         // Take channels-worth of samples; keep first channel only.
-                        let Some(first) = iter.next() else { break 'outer };
+                        let Some(first) = iter.next() else {
+                            break 'outer;
+                        };
                         let Ok(v) = first else { break 'outer };
                         out.push(v as f32 / scale);
                         for _ in 1..channels {
@@ -1735,7 +1724,9 @@ impl FfiRuntime {
                     let mut iter = reader.into_samples::<f32>();
                     let mut out: Vec<f32> = Vec::new();
                     'outer: loop {
-                        let Some(first) = iter.next() else { break 'outer };
+                        let Some(first) = iter.next() else {
+                            break 'outer;
+                        };
                         let Ok(v) = first else { break 'outer };
                         out.push(v);
                         for _ in 1..channels {
@@ -1959,7 +1950,9 @@ impl FfiRuntime {
                 format!("voices/{voice_id}.safetensors"),
             ),
             AssetSource::Whisper { file } => ("ggerganov/whisper.cpp", file.to_string()),
-            AssetSource::KokoroOnnx { file } => ("onnx-community/Kokoro-82M-v1.0-ONNX", file.to_string()),
+            AssetSource::KokoroOnnx { file } => {
+                ("onnx-community/Kokoro-82M-v1.0-ONNX", file.to_string())
+            }
         };
         marginalia_models::ModelManager::uninstall_from_repo(repo, &file)
             .map_err(|e| FfiError::Io(e.to_string()))?;
@@ -1972,9 +1965,9 @@ impl FfiRuntime {
             if p.is_absolute() {
                 let mirror = match &spec.source {
                     AssetSource::MlxCore { file } => Some(p.join(file)),
-                    AssetSource::MlxVoice { voice_id } => Some(
-                        p.join("voices").join(format!("{voice_id}.safetensors")),
-                    ),
+                    AssetSource::MlxVoice { voice_id } => {
+                        Some(p.join("voices").join(format!("{voice_id}.safetensors")))
+                    }
                     _ => None,
                 };
                 if let Some(mirror) = mirror {
@@ -2016,13 +2009,12 @@ impl FfiRuntime {
         .filter(|(p, _)| p.is_file())
         .collect();
 
-        let file = std::fs::File::create(&out)
-            .map_err(|e| FfiError::Io(format!("create backup: {e}")))?;
+        let file =
+            std::fs::File::create(&out).map_err(|e| FfiError::Io(format!("create backup: {e}")))?;
         let mut zip = zip::ZipWriter::new(file);
-        let opts: zip::write::SimpleFileOptions =
-            zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated)
-                .unix_permissions(0o644);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o644);
 
         for (src, archive_name) in files {
             let bytes = std::fs::read(&src)
@@ -2044,10 +2036,10 @@ impl FfiRuntime {
     /// NOT hot-reload the runtime — the caller must restart the app.
     pub fn import_backup(&self, src_path: String) -> Result<(), FfiError> {
         let src = PathBuf::from(&src_path);
-        let file = std::fs::File::open(&src)
-            .map_err(|e| FfiError::Io(format!("open backup: {e}")))?;
-        let mut archive = zip::ZipArchive::new(file)
-            .map_err(|e| FfiError::Io(format!("read zip: {e}")))?;
+        let file =
+            std::fs::File::open(&src).map_err(|e| FfiError::Io(format!("open backup: {e}")))?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(|e| FfiError::Io(format!("read zip: {e}")))?;
 
         // Map archive entries back to destination paths. Unknown names
         // are skipped (forward-compat when future backups include extra
@@ -2110,17 +2102,50 @@ fn voice_commands_section_to_entries(
     section: &marginalia_config::VoiceCommandsSection,
 ) -> Vec<VoiceCommandEntry> {
     vec![
-        VoiceCommandEntry { action: "pause".into(),        triggers: section.pause.clone() },
-        VoiceCommandEntry { action: "resume".into(),       triggers: section.resume.clone() },
-        VoiceCommandEntry { action: "next".into(),         triggers: section.next.clone() },
-        VoiceCommandEntry { action: "back".into(),         triggers: section.back.clone() },
-        VoiceCommandEntry { action: "repeat".into(),       triggers: section.repeat.clone() },
-        VoiceCommandEntry { action: "stop".into(),         triggers: section.stop.clone() },
-        VoiceCommandEntry { action: "next_chapter".into(), triggers: section.next_chapter.clone() },
-        VoiceCommandEntry { action: "prev_chapter".into(), triggers: section.prev_chapter.clone() },
-        VoiceCommandEntry { action: "bookmark".into(),     triggers: section.bookmark.clone() },
-        VoiceCommandEntry { action: "note".into(),         triggers: section.note.clone() },
-        VoiceCommandEntry { action: "where".into(),        triggers: section.r#where.clone() },
+        VoiceCommandEntry {
+            action: "pause".into(),
+            triggers: section.pause.clone(),
+        },
+        VoiceCommandEntry {
+            action: "resume".into(),
+            triggers: section.resume.clone(),
+        },
+        VoiceCommandEntry {
+            action: "next".into(),
+            triggers: section.next.clone(),
+        },
+        VoiceCommandEntry {
+            action: "back".into(),
+            triggers: section.back.clone(),
+        },
+        VoiceCommandEntry {
+            action: "repeat".into(),
+            triggers: section.repeat.clone(),
+        },
+        VoiceCommandEntry {
+            action: "stop".into(),
+            triggers: section.stop.clone(),
+        },
+        VoiceCommandEntry {
+            action: "next_chapter".into(),
+            triggers: section.next_chapter.clone(),
+        },
+        VoiceCommandEntry {
+            action: "prev_chapter".into(),
+            triggers: section.prev_chapter.clone(),
+        },
+        VoiceCommandEntry {
+            action: "bookmark".into(),
+            triggers: section.bookmark.clone(),
+        },
+        VoiceCommandEntry {
+            action: "note".into(),
+            triggers: section.note.clone(),
+        },
+        VoiceCommandEntry {
+            action: "where".into(),
+            triggers: section.r#where.clone(),
+        },
     ]
 }
 

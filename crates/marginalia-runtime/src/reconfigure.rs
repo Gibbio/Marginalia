@@ -60,9 +60,7 @@ pub struct ApplyReport {
 pub struct AecRenderSlot {
     inner: Arc<
         Mutex<
-            Option<
-                std::sync::mpsc::SyncSender<marginalia_stt_apple::aec_pipeline::RenderCommand>,
-            >,
+            Option<std::sync::mpsc::SyncSender<marginalia_stt_apple::aec_pipeline::RenderCommand>>,
         >,
     >,
 }
@@ -386,7 +384,8 @@ fn rebuild_stt(
 
                 let mut dict_cfg = WhisperConfig::new(&model_path);
                 dict_cfg.language = whisper_lang;
-                dict_cfg.max_duration_seconds = ctx.stt.dictation.max_record_seconds.unwrap_or(60.0);
+                dict_cfg.max_duration_seconds =
+                    ctx.stt.dictation.max_record_seconds.unwrap_or(60.0);
                 dict_cfg.silence_timeout_seconds = ctx.stt.dictation.silence_timeout.unwrap_or(1.5);
                 if let Some(v) = ctx.stt.dictation.speech_threshold {
                     dict_cfg.speech_threshold = v;
@@ -422,14 +421,8 @@ mod tests {
     #[test]
     fn apple_lang_normalization() {
         assert_eq!(normalize_apple_language(&None), "it-IT");
-        assert_eq!(
-            normalize_apple_language(&Some("it".to_string())),
-            "it-IT"
-        );
-        assert_eq!(
-            normalize_apple_language(&Some("en".to_string())),
-            "en-US"
-        );
+        assert_eq!(normalize_apple_language(&Some("it".to_string())), "it-IT");
+        assert_eq!(normalize_apple_language(&Some("en".to_string())), "en-US");
         assert_eq!(
             normalize_apple_language(&Some("it-IT".to_string())),
             "it-IT"

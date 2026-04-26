@@ -95,8 +95,8 @@ fn wait_for_app(
 
     draw(&format!("Loading {} snapshots...", backend.mode_label()))?;
     let voice_commands = config::load().voice_commands;
-    let mut app = App::new(backend, logger.clone(), voice_commands)
-        .map_err(|m| log_error(logger, m))?;
+    let mut app =
+        App::new(backend, logger.clone(), voice_commands).map_err(|m| log_error(logger, m))?;
 
     draw("Checking configured providers...")?;
     app.run_startup_checks();

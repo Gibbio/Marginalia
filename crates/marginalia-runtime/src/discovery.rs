@@ -341,10 +341,8 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
-            "marginalia-discovery-{}-{n}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("marginalia-discovery-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -423,11 +421,23 @@ mod tests {
         let whisper = dir.join("ggml-small.bin");
         let d = Discovery::new(&dir, Some(whisper.clone()));
         let engines = d.list_stt_engines();
-        assert!(!engines.iter().find(|e| e.id == "whisper").unwrap().available);
+        assert!(
+            !engines
+                .iter()
+                .find(|e| e.id == "whisper")
+                .unwrap()
+                .available
+        );
 
         fs::write(&whisper, b"stub").unwrap();
         let d = Discovery::new(&dir, Some(whisper));
         let engines = d.list_stt_engines();
-        assert!(engines.iter().find(|e| e.id == "whisper").unwrap().available);
+        assert!(
+            engines
+                .iter()
+                .find(|e| e.id == "whisper")
+                .unwrap()
+                .available
+        );
     }
 }

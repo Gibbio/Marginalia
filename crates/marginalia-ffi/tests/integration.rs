@@ -69,8 +69,7 @@ fake = true
 fn open_ingest_session_poll() {
     let (_tmp, cfg_path, doc_path) = scratch_env();
 
-    let runtime = FfiRuntime::new(cfg_path.to_string_lossy().into_owned())
-        .expect("open runtime");
+    let runtime = FfiRuntime::new(cfg_path.to_string_lossy().into_owned()).expect("open runtime");
 
     // Library starts empty.
     assert_eq!(runtime.list_documents().len(), 0);

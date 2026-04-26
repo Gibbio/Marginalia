@@ -44,8 +44,7 @@ pub fn start_dictation_recording(
     path: PathBuf,
 ) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
     }
     let spec = WavSpec {
         channels: 1,
@@ -55,7 +54,9 @@ pub fn start_dictation_recording(
     };
     let writer = WavWriter::create(&path, spec)
         .map_err(|e| format!("create wav {}: {e}", path.display()))?;
-    let mut guard = slot.lock().map_err(|_| "recorder slot poisoned".to_string())?;
+    let mut guard = slot
+        .lock()
+        .map_err(|_| "recorder slot poisoned".to_string())?;
     *guard = Some(DictationRecorder { writer, path });
     Ok(())
 }
@@ -65,9 +66,7 @@ pub fn start_dictation_recording(
 /// (e.g. stop called without a matching start). Finalising the writer
 /// flushes the RIFF header's size fields — without it the WAV would
 /// be unplayable.
-pub fn stop_dictation_recording(
-    slot: &DictationRecorderSlot,
-) -> Option<PathBuf> {
+pub fn stop_dictation_recording(slot: &DictationRecorderSlot) -> Option<PathBuf> {
     let mut guard = slot.lock().ok()?;
     let rec = guard.take()?;
     let path = rec.path.clone();

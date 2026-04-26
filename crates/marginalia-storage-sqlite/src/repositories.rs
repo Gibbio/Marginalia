@@ -326,22 +326,32 @@ impl DocumentRepository for SQLiteDocumentRepository {
             .expect("sqlite connection lock poisoned");
         // Cascade manually — the schema does NOT have ON DELETE CASCADE
         // on chunks/sections/notes, so do it in a single transaction.
-        let tx = connection
-            .unchecked_transaction()
-            .map_err(storage_err)?;
-        tx.execute("DELETE FROM chunks WHERE document_id = ?", params![document_id])
-            .map_err(storage_err)?;
-        tx.execute("DELETE FROM sections WHERE document_id = ?", params![document_id])
-            .map_err(storage_err)?;
-        tx.execute("DELETE FROM notes WHERE document_id = ?", params![document_id])
-            .map_err(storage_err)?;
+        let tx = connection.unchecked_transaction().map_err(storage_err)?;
+        tx.execute(
+            "DELETE FROM chunks WHERE document_id = ?",
+            params![document_id],
+        )
+        .map_err(storage_err)?;
+        tx.execute(
+            "DELETE FROM sections WHERE document_id = ?",
+            params![document_id],
+        )
+        .map_err(storage_err)?;
+        tx.execute(
+            "DELETE FROM notes WHERE document_id = ?",
+            params![document_id],
+        )
+        .map_err(storage_err)?;
         tx.execute(
             "DELETE FROM sessions WHERE document_id = ?",
             params![document_id],
         )
         .map_err(storage_err)?;
         let rows = tx
-            .execute("DELETE FROM documents WHERE document_id = ?", params![document_id])
+            .execute(
+                "DELETE FROM documents WHERE document_id = ?",
+                params![document_id],
+            )
             .map_err(storage_err)?;
         tx.commit().map_err(storage_err)?;
         Ok(rows > 0)

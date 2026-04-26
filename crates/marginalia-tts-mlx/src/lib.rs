@@ -178,7 +178,8 @@ impl SpeechSynthesizer for MlxSpeechSynthesizer {
                 Err(e) => {
                     log::warn!(
                         "[mlx] requested voice '{req_voice}' not loadable ({e}); \
-                         falling back to default '{}'", self.default_voice
+                         falling back to default '{}'",
+                        self.default_voice
                     );
                     None
                 }
