@@ -12,6 +12,16 @@ use std::io::BufReader;
 struct SendDeviceSink(#[allow(dead_code)] MixerDeviceSink);
 unsafe impl Send for SendDeviceSink {}
 
+/// Same Send override for the persistent `Player`. rodio 0.22's audio
+/// thread only pulls samples reliably when the Player was created on
+/// the same thread as the underlying cpal stream. We honour that by
+/// constructing it once at engine init (alongside the DeviceSink) and
+/// keep reusing it from any thread that holds the runtime mutex —
+/// `append`/`pause`/`clear` all just push to internal channels which
+/// are MPSC-safe.
+struct SendPlayer(Player);
+unsafe impl Send for SendPlayer {}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostPlaybackConfig {
     pub command_template: Option<Vec<String>>,
@@ -19,13 +29,16 @@ pub struct HostPlaybackConfig {
 
 pub struct HostPlaybackEngine {
     /// Holds the device sink open for the lifetime of the engine. The
-    /// `Player` borrows the mixer from this; we never store the player
-    /// in a field that outlives this stream.
+    /// `Player` borrows the mixer from this; the player is created on
+    /// the same thread to keep cpal's audio callback alive.
     device_sink: Option<SendDeviceSink>,
-    /// The currently-playing player, if any. Recreated per chunk —
-    /// `Player::connect_new(mixer)` is cheap, and the previous player's
-    /// stop on drop is what tears down the prior chunk.
-    player: Option<Player>,
+    /// Persistent player. Created once next to `device_sink` so the
+    /// rodio audio thread is wired correctly. Each `start()` calls
+    /// `clear()` then `play()` + `append(source)`. Recreating per
+    /// chunk caused silent playback in cross-thread scenarios because
+    /// rodio 0.22's audio thread doesn't pick up sources from players
+    /// created on a different thread than the cpal stream.
+    player: Option<SendPlayer>,
     snapshot: PlaybackSnapshot,
     /// Optional callback invoked with the f32 mono samples of each WAV chunk
     /// right before playback starts. Used by the AEC pipeline as the render
@@ -50,16 +63,25 @@ pub struct HostPlaybackEngine {
 
 impl Default for HostPlaybackEngine {
     fn default() -> Self {
-        let device_sink = match DeviceSinkBuilder::open_default_sink() {
-            Ok(sink) => Some(SendDeviceSink(sink)),
+        let (device_sink, player) = match DeviceSinkBuilder::open_default_sink() {
+            Ok(sink) => {
+                // Construct the player on the same thread as the device
+                // sink so rodio's audio callback recognises it. Shipping
+                // it across threads later (via SendPlayer) is fine —
+                // append/clear/pause only touch MPSC channels.
+                let p = Player::connect_new(sink.mixer());
+                // Idle until the first chunk arrives.
+                p.pause();
+                (Some(SendDeviceSink(sink)), Some(SendPlayer(p)))
+            }
             Err(e) => {
                 log::warn!("[playback] audio output not available: {e}");
-                None
+                (None, None)
             }
         };
         Self {
             device_sink,
-            player: None,
+            player,
             on_play_samples: None,
             on_playback_paused: None,
             on_playback_resumed: None,
@@ -114,7 +136,7 @@ impl HostPlaybackEngine {
 
     /// Check if current playback has finished (for auto-advance).
     pub fn is_finished(&self) -> bool {
-        self.player.as_ref().is_some_and(|p| p.empty())
+        self.player.as_ref().is_some_and(|p| p.0.empty())
             && self.snapshot.state == PlaybackState::Playing
     }
 }
@@ -165,11 +187,15 @@ impl PlaybackEngine for HostPlaybackEngine {
             return self.snapshot();
         };
 
-        let Some(device_sink) = &self.device_sink else {
+        let Some(player) = &self.player else {
             self.snapshot.state = PlaybackState::Stopped;
             self.snapshot.last_action = "start-no-audio-device".to_string();
             return self.snapshot();
         };
+        // Drop unused binding silently — we touch the device sink only
+        // implicitly via the player. Kept around to keep the cpal
+        // stream alive.
+        let _ = &self.device_sink;
 
         let file = match File::open(&synthesis.audio_reference) {
             Ok(f) => f,
@@ -198,16 +224,11 @@ impl PlaybackEngine for HostPlaybackEngine {
             }
         };
 
-        // rodio 0.22 replaced `Sink::try_new(handle)` with
-        // `Player::connect_new(mixer)`. The previous chunk's player (if
-        // any) is dropped here, which stops it cleanly.
-        let player = Player::connect_new(device_sink.0.mixer());
-
         // Feed the f32 mono samples to the AEC render callback (if set)
         // BEFORE starting playback, so the AEC thread has the reference
         // ready. rodio 0.22's Decoder yields `f32` samples (Sample =
         // Float), so no i16 conversion is needed; just downmix to mono
-        // by averaging-of-first channel.
+        // by taking the first channel of each frame.
         if let Some(ref cb) = self.on_play_samples {
             if let Ok(f2) = File::open(&synthesis.audio_reference) {
                 if let Ok(decoder) = Decoder::try_from(BufReader::new(f2)) {
@@ -223,9 +244,15 @@ impl PlaybackEngine for HostPlaybackEngine {
             }
         }
 
-        player.set_volume(self.volume);
-        player.append(source);
-        self.player = Some(player);
+        // Drain anything the previous chunk left queued (clear() also
+        // pauses the player), then resume + append + set volume. The
+        // persistent player must stay alive — recreating it here would
+        // break audio output when start() runs from a thread other
+        // than the one that created the cpal stream.
+        player.0.clear();
+        player.0.play();
+        player.0.set_volume(self.volume);
+        player.0.append(source);
         self.snapshot.state = PlaybackState::Playing;
         self.snapshot.last_action = "start".to_string();
         self.snapshot.audio_reference = Some(synthesis.audio_reference);
@@ -235,7 +262,7 @@ impl PlaybackEngine for HostPlaybackEngine {
     fn pause(&mut self) -> PlaybackSnapshot {
         if let Some(player) = &self.player {
             if self.snapshot.state == PlaybackState::Playing {
-                player.pause();
+                player.0.pause();
                 self.snapshot.state = PlaybackState::Paused;
             }
         }
@@ -253,7 +280,7 @@ impl PlaybackEngine for HostPlaybackEngine {
     fn resume(&mut self) -> PlaybackSnapshot {
         if let Some(player) = &self.player {
             if self.snapshot.state == PlaybackState::Paused {
-                player.play();
+                player.0.play();
                 self.snapshot.state = PlaybackState::Playing;
             }
         }
@@ -265,8 +292,11 @@ impl PlaybackEngine for HostPlaybackEngine {
     }
 
     fn stop(&mut self) -> PlaybackSnapshot {
-        if let Some(player) = self.player.take() {
-            player.stop();
+        // Drain the queue but keep the persistent player alive — tearing
+        // it down would force a fresh `Player::connect_new` on the next
+        // start(), which only works on the cpal-stream thread.
+        if let Some(player) = &self.player {
+            player.0.clear();
         }
         if let Some(cb) = &self.on_playback_cleared {
             cb();
@@ -290,7 +320,7 @@ impl PlaybackEngine for HostPlaybackEngine {
         let mut snapshot = self.snapshot.clone();
         // Update state if playback finished naturally
         if let Some(player) = &self.player {
-            if player.empty() && snapshot.state == PlaybackState::Playing {
+            if player.0.empty() && snapshot.state == PlaybackState::Playing {
                 snapshot.state = PlaybackState::Stopped;
                 snapshot.last_action = "completed".to_string();
             }
@@ -305,7 +335,7 @@ impl PlaybackEngine for HostPlaybackEngine {
         let clamped = volume.max(0.0);
         self.volume = clamped;
         if let Some(player) = &self.player {
-            player.set_volume(clamped);
+            player.0.set_volume(clamped);
         }
     }
 
