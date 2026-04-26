@@ -259,18 +259,6 @@ pub struct SqliteRuntime {
     event_sink: RuntimeEventSink,
 }
 
-/// Re-derive a document's id from its source path, mirroring
-/// `marginalia_core::domain::build_document_from_import` so legacy
-/// (content-hashed) rows can be migrated to the path-stable scheme on
-/// reload. Falling back to the raw path on canonicalization failure
-/// matches the domain behaviour.
-fn path_stable_document_id(source_path: &Path) -> String {
-    use sha2::{Digest, Sha256};
-    let canonical = std::fs::canonicalize(source_path).unwrap_or_else(|_| source_path.to_path_buf());
-    let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
-    format!("{:x}", digest)[..12].to_string()
-}
-
 /// Returns `true` iff the file at `source_path` exists and its current
 /// SHA-256 differs from `stored_sha`. Used by `list_documents` to flag
 /// rows whose source file was edited externally since last ingestion.
@@ -547,9 +535,37 @@ impl SqliteRuntime {
         chunk_index: usize,
         request: SynthesisRequest,
     ) -> Result<SynthesisResult, SynthesisError> {
+        // Content-addressed cache key: `sha256(text + voice + lang)`.
+        // Was position-keyed (`{doc}:{sec}:{chunk}:{voice}`), but that
+        // meant the same key could point to DIFFERENT audio across a
+        // doc reload — same chunk index, new text from disk → cached
+        // WAV played the OLD content. Hashing the actual payload
+        // (text + voice + language) makes the key match the audio's
+        // true identity: identical chunks share cache entries (across
+        // documents and across reloads), edited chunks miss the cache
+        // and re-synthesize, deleted documents leave their cache files
+        // as harmless orphans (only a few KB each).
         let voice = request.voice.clone().unwrap_or_default();
-        let cache_key = format!("{document_id}:{section_index}:{chunk_index}:{voice}");
-        log::info!("[runtime] synthesize_cached key={cache_key}");
+        let cache_key = {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(request.text.as_bytes());
+            h.update(b":");
+            h.update(voice.as_bytes());
+            h.update(b":");
+            h.update(request.language.as_bytes());
+            format!("{:x}", h.finalize())
+        };
+        log::info!(
+            "[runtime] synthesize_cached key={} doc={} sec={} chunk={} voice={} lang={} text_len={}",
+            &cache_key[..12],
+            document_id,
+            section_index,
+            chunk_index,
+            voice,
+            request.language,
+            request.text.chars().count()
+        );
 
         // 1. Check in-memory cache (hot path for same session).
         if let Some(cached) = self.tts_cache.get(&cache_key) {
@@ -571,15 +587,12 @@ impl SqliteRuntime {
         }
 
         // 2. Check on-disk cache by deterministic filename (cross-session).
-        // Synthesizer extension switched from .flac → .wav (Apple high-
-        // level audio APIs decode WAV reliably; FLAC needs the right
-        // codec install). Look for either: existing FLAC caches stay
-        // usable on the in-app rodio path, new entries are WAV.
+        // Filename IS the cache key (already a sha256 hex digest), so
+        // no extra hashing step. `.wav` for MLX now; `.flac` kept as a
+        // legacy fallback for any older entries still on disk.
         if let Some(ref cache_dir) = self.config.tts_cache_dir {
-            use sha2::{Digest, Sha256};
-            let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
-            let wav_path = cache_dir.join(format!("{hash}.wav"));
-            let flac_path = cache_dir.join(format!("{hash}.flac"));
+            let wav_path = cache_dir.join(format!("{cache_key}.wav"));
+            let flac_path = cache_dir.join(format!("{cache_key}.flac"));
             let cached_path = if wav_path.exists() {
                 wav_path
             } else if flac_path.exists() {
@@ -656,18 +669,16 @@ impl SqliteRuntime {
         };
         let synth_elapsed_ms = synth_start.elapsed().as_millis() as u64;
 
-        // 4. Rename to deterministic path so it persists across restarts.
-        // Preserve whatever extension the synthesizer produced (.wav
-        // for MLX now, but .flac fallback in case other backends still
-        // use it).
+        // 4. Rename to the content-addressed stable path so the next
+        // session (or a different document with an identical chunk)
+        // hits the on-disk cache. `cache_key` IS the sha256 hex
+        // already, so it doubles as the filename stem.
         if let Some(ref cache_dir) = self.config.tts_cache_dir {
-            use sha2::{Digest, Sha256};
-            let hash = format!("{:x}", Sha256::digest(cache_key.as_bytes()));
             let ext = std::path::Path::new(&result.audio_reference)
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("wav");
-            let stable_path = cache_dir.join(format!("{hash}.{ext}"));
+            let stable_path = cache_dir.join(format!("{cache_key}.{ext}"));
             if let Err(e) = std::fs::rename(&result.audio_reference, &stable_path) {
                 if std::fs::copy(&result.audio_reference, &stable_path).is_ok() {
                     let _ = std::fs::remove_file(&result.audio_reference);
@@ -1227,12 +1238,16 @@ impl SqliteRuntime {
     }
 
     /// Remove a document from the library. Cascades to chunks, sections,
-    /// notes and sessions via the storage repository, and sweeps any
-    /// per-chunk WAV/FLAC files that the TTS cache produced for this doc
-    /// (those would otherwise leak forever — the cache filenames are
-    /// hashed and not browseable). If the document being removed is the
-    /// active session's document, stop the session first so the UI
-    /// doesn't end up rendering a ghost chunk.
+    /// notes and sessions via the storage repository. If the document
+    /// being removed is the active session's document, stop the session
+    /// first so the UI doesn't end up rendering a ghost chunk.
+    ///
+    /// **TTS cache**: not swept. The cache is content-addressed
+    /// (`sha256(text + voice + lang)`); cache entries for this doc's
+    /// chunks may still be useful (e.g. another doc has identical
+    /// chunks, the user re-imports later). Orphaned WAVs are ~50 KB
+    /// each — disk waste isn't worth the complexity of tracking
+    /// reference counts across documents.
     pub fn delete_document(&mut self, document_id: &str) -> Result<bool, RuntimeError> {
         // Stop session if it's for this doc.
         if let Some(s) = self.session_repository.get_active_session() {
@@ -1240,9 +1255,6 @@ impl SqliteRuntime {
                 let _ = self.stop_session();
             }
         }
-        // Sweep the TTS cache BEFORE the SQL cascade — once chunks are
-        // gone we can't enumerate them to compute the cache filenames.
-        self.evict_tts_cache_for_document(document_id);
         self.document_repository
             .delete_document(document_id)
             .map_err(|e| RuntimeError::Runtime(format!("delete_document: {e}")))
@@ -1251,11 +1263,17 @@ impl SqliteRuntime {
     /// Re-ingest a document from its source file on disk. Used when the
     /// user edits the source externally (the GUI flags the row as
     /// "modificato dall'ultima importazione" via
-    /// `DocumentListItem::needs_reload`). With the path-stable id scheme
-    /// the existing row is upserted in place — notes / sessions / future
-    /// AI elaborations stay attached. For pre-migration rows whose id
-    /// was content-hashed we first rename the row id to the new
-    /// path-hashed id so the upsert lands on the same lineage.
+    /// `DocumentListItem::needs_reload`). The path-stable id derivation
+    /// in `build_document_from_import` ensures the resulting document
+    /// lands on the same `document_id`, so the existing row is upserted
+    /// in place — notes / sessions / future AI elaborations stay
+    /// attached.
+    ///
+    /// **TTS cache**: nothing to evict. The cache is content-addressed
+    /// (`sha256(text + voice + lang)`), so chunks that survived the
+    /// edit unchanged keep their cache entry, edited chunks naturally
+    /// miss-and-resynth. Orphaned WAVs from the old text are ~50 KB
+    /// each — disk waste isn't worth tracking ref-counts for.
     pub fn reload_document(
         &mut self,
         document_id: &str,
@@ -1267,91 +1285,12 @@ impl SqliteRuntime {
                 document_id: document_id.to_string(),
             })?;
         let source_path = document.source_path.clone();
-        let new_id = path_stable_document_id(&source_path);
-        if new_id != document_id {
-            // Legacy row: migrate the id across all tables before the
-            // re-ingest, so notes / sessions stay attached.
-            self.document_repository
-                .rename_document_id(document_id, &new_id)
-                .map_err(|e| RuntimeError::Runtime(format!("rename_document_id: {e}")))?;
-        }
-        // Sweep the TTS cache for the (possibly renamed) id BEFORE the
-        // re-ingest. Cache key is `{id}:{section}:{chunk}:{voice}` →
-        // unchanged keys after a content edit would replay stale audio.
-        self.evict_tts_cache_for_document(&new_id);
-        let result = self.ingest_path(&source_path).map_err(|e| {
+        self.ingest_path(&source_path).map_err(|e| {
             RuntimeError::Runtime(format!("reload_document: ingest failed: {e}"))
-        })?;
-        Ok(result)
+        })
     }
 
-    /// Sweep `<tts_cache_dir>/{sha}.wav|.flac` for every cache key
-    /// `{document_id}:{section}:{chunk}:{voice}` derivable from the
-    /// current chunks list and known voices. Bounded by chunks×voices.
-    /// Best-effort — IO errors are logged and skipped (the orphan files
-    /// are storage waste, not correctness).
-    fn evict_tts_cache_for_document(&self, document_id: &str) {
-        use sha2::{Digest, Sha256};
-        let Some(cache_dir) = self.config.tts_cache_dir.as_ref() else {
-            return;
-        };
-        let Some(document) = self.document_repository.get_document(document_id) else {
-            return;
-        };
-        let voices = self.cache_voices_for_document(document_id);
-        if voices.is_empty() {
-            return;
-        }
-        let mut removed = 0usize;
-        for section in &document.sections {
-            for chunk in &section.chunks {
-                for voice in &voices {
-                    let key = format!(
-                        "{}:{}:{}:{}",
-                        document_id, section.index, chunk.index, voice
-                    );
-                    let hash = format!("{:x}", Sha256::digest(key.as_bytes()));
-                    for ext in ["wav", "flac"] {
-                        let path = cache_dir.join(format!("{hash}.{ext}"));
-                        if path.exists() && std::fs::remove_file(&path).is_ok() {
-                            removed += 1;
-                        }
-                    }
-                }
-            }
-        }
-        if removed > 0 {
-            log::info!(
-                "[runtime] evicted {removed} TTS cache files for document {document_id}"
-            );
-        }
-    }
-
-    /// Voices to consider when sweeping the TTS cache for a document.
-    /// Two sources:
-    ///   - the configured `default_voice` (covers most users)
-    ///   - the voice on the active session, if it's for this doc
-    ///     (covers the user who just switched voice and is reloading
-    ///     this doc)
-    /// Multi-voice users who read the same doc with N different voices
-    /// over time may leave a few stale cache entries for the voices we
-    /// don't enumerate; they're storage waste, not correctness — the new
-    /// reload only re-synthesizes for the active voice anyway.
-    fn cache_voices_for_document(&self, document_id: &str) -> Vec<String> {
-        let mut out = vec![self.config.default_voice.clone()];
-        if let Some(s) = self.session_repository.get_active_session() {
-            if s.document_id == document_id {
-                if let Some(v) = s.voice {
-                    if !out.iter().any(|existing| existing == &v) {
-                        out.push(v);
-                    }
-                }
-            }
-        }
-        out
-    }
-
-    /// Overwrite the transcript of an existing note. Looks up the note,
+/// Overwrite the transcript of an existing note. Looks up the note,
     /// mutates the transcript, saves back through the `save_note`
     /// upsert. Returns the updated note; errors when the id is unknown.
     pub fn update_note(

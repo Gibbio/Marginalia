@@ -379,57 +379,6 @@ impl DocumentRepository for SQLiteDocumentRepository {
     }
 }
 
-impl SQLiteDocumentRepository {
-    /// Atomically rename a document_id across every table that references
-    /// it. Used by `reload_document` to migrate pre-migration rows from
-    /// the old (content-hashed) id scheme to the path-stable scheme so
-    /// notes / sessions stay attached to the live row. No-op when the
-    /// id is unchanged. Errors out if a row already exists at `new_id`
-    /// (the caller would orphan data otherwise).
-    pub fn rename_document_id(
-        &mut self,
-        old_id: &str,
-        new_id: &str,
-    ) -> Result<(), StorageError> {
-        if old_id == new_id {
-            return Ok(());
-        }
-        let connection = self
-            .connection
-            .lock()
-            .expect("sqlite connection lock poisoned");
-        // Defensive: refuse to clobber an existing row at `new_id`.
-        let target_exists: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id = ?)",
-                params![new_id],
-                |row| row.get::<_, i64>(0).map(|n| n != 0),
-            )
-            .map_err(storage_err)?;
-        if target_exists {
-            return Err(StorageError(format!(
-                "rename_document_id: target id {new_id} already exists"
-            )));
-        }
-        let tx = connection.unchecked_transaction().map_err(storage_err)?;
-        for table in [
-            "documents",
-            "document_chunks",
-            "document_sections",
-            "notes",
-            "sessions",
-        ] {
-            tx.execute(
-                &format!("UPDATE {table} SET document_id = ? WHERE document_id = ?"),
-                params![new_id, old_id],
-            )
-            .map_err(storage_err)?;
-        }
-        tx.commit().map_err(storage_err)?;
-        Ok(())
-    }
-}
-
 // ---------------------------------------------------------------------------
 // SessionRepository
 // ---------------------------------------------------------------------------
