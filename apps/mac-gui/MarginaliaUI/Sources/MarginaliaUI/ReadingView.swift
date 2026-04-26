@@ -1428,34 +1428,6 @@ struct NoteCard: View {
         // window before firing the single-tap closure.
         .onTapGesture(count: 2) { onSeekAndPlay() }
         .onTapGesture(count: 1) { onSeek() }
-        // Right-click → Marginalia-styled context menu. Mirrors the
-        // hover-revealed icon buttons (edit / delete) plus the seek
-        // and play actions that are otherwise only reachable via
-        // tap / double-tap. Discoverable for users who don't know
-        // the gestures.
-        .marginaliaContextMenu(accent: accent) {
-            [
-                .init(label: T(isPlaying
-                               ? "reading.note.menu.stop"
-                               : "reading.note.menu.play"),
-                      icon: isPlaying ? "stop.fill" : "play.fill",
-                      action: { onPlay() }),
-                .init(label: T("reading.note.menu.seek"),
-                      icon: "arrow.right.circle",
-                      action: { onSeek() }),
-                .init(label: T("reading.note.menu.edit"),
-                      icon: "pencil",
-                      action: {
-                          editBuffer = note.body
-                          editing = true
-                      }),
-                .divider,
-                .init(label: T("reading.note.menu.delete"),
-                      icon: "trash",
-                      isDestructive: true,
-                      action: onDelete),
-            ]
-        }
         .animation(.easeOut(duration: 0.18), value: isActive)
         .onHover { h in
             hovered = h

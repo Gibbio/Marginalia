@@ -111,12 +111,6 @@
 "reading.note.delete"         = "Delete note";
 "reading.note.play"           = "Play note";
 "reading.note.stop"           = "Stop playback";
-// Reading view — note context menu (right-click on a note card)
-"reading.note.menu.play"      = "Play";
-"reading.note.menu.stop"      = "Stop";
-"reading.note.menu.seek"      = "Jump to chunk";
-"reading.note.menu.edit"      = "Edit text";
-"reading.note.menu.delete"    = "Delete";
 
 // Reading view — note compose sheet
 "reading.compose.kicker"      = "NEW NOTE";

@@ -113,12 +113,6 @@
 "reading.note.delete"         = "Elimina nota";
 "reading.note.play"           = "Riproduci nota";
 "reading.note.stop"           = "Ferma riproduzione";
-// Reading view — note context menu (right-click on a note card)
-"reading.note.menu.play"      = "Riproduci";
-"reading.note.menu.stop"      = "Ferma";
-"reading.note.menu.seek"      = "Vai al chunk";
-"reading.note.menu.edit"      = "Modifica testo";
-"reading.note.menu.delete"    = "Elimina";
 
 // Reading view — note compose sheet
 "reading.compose.kicker"      = "NUOVA NOTA";
