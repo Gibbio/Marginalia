@@ -221,6 +221,15 @@ impl From<reconfigure::ApplyReport> for ApplyReport {
     }
 }
 
+/// What `clear_all_notes` actually did, surfaced to the UI so the user
+/// gets concrete feedback ("X note rimosse · Y MB liberati") rather
+/// than a generic "fatto".
+#[derive(Debug, Clone, Default)]
+pub struct ClearNotesReport {
+    pub notes_deleted: u32,
+    pub bytes_freed: u64,
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Sidecar-thread command protocol
 // ──────────────────────────────────────────────────────────────────────
@@ -2161,6 +2170,138 @@ impl FfiRuntime {
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_default()
+    }
+
+    /// Absolute path of the SQLite library (resolved from
+    /// `marginalia.toml`'s `database_path` against the config's parent
+    /// directory). Used by Settings to reveal the file in Finder.
+    pub fn database_path(&self) -> String {
+        self.db_path.display().to_string()
+    }
+
+    /// Absolute path of the directory that holds recorded voice-note
+    /// audio (`<marginalia-data>/notes-audio/`). Mirrors the derivation
+    /// used by `builder.rs` and `reconfigure.rs` so the UI agrees with
+    /// where the STT helper actually writes WAVs.
+    pub fn notes_audio_dir(&self) -> String {
+        let rt = self.runtime.lock().unwrap();
+        let Some(cache_dir) = rt.config().tts_cache_dir.as_ref() else {
+            return String::new();
+        };
+        let parent = cache_dir.parent().unwrap_or(cache_dir.as_path());
+        parent.join("notes-audio").display().to_string()
+    }
+
+    /// Absolute path of the active `marginalia.toml`. The Settings page
+    /// shows this in the sub-nav footer so the user knows exactly which
+    /// file the running app reads from.
+    pub fn config_path(&self) -> String {
+        self.config_path.display().to_string()
+    }
+
+    /// Empty the on-disk TTS cache directory and the runtime's in-memory
+    /// cache map. Returns the number of bytes freed. Walks
+    /// `tts_cache_dir` and removes regular files; subdirectories (none
+    /// today, but be defensive) are left untouched. The next chunk
+    /// request synthesizes from scratch.
+    pub fn clear_tts_cache(&self) -> u64 {
+        let cache_dir = {
+            let rt = self.runtime.lock().unwrap();
+            rt.config().tts_cache_dir.clone()
+        };
+        let Some(dir) = cache_dir else {
+            log::info!("[ffi] clear_tts_cache: no cache dir configured");
+            return 0;
+        };
+        let mut bytes_freed: u64 = 0;
+        match std::fs::read_dir(&dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let Ok(meta) = entry.metadata() else { continue };
+                    if !meta.is_file() {
+                        continue;
+                    }
+                    let size = meta.len();
+                    match std::fs::remove_file(&path) {
+                        Ok(_) => bytes_freed = bytes_freed.saturating_add(size),
+                        Err(e) => log::warn!(
+                            "[ffi] clear_tts_cache: failed to remove {}: {e}",
+                            path.display()
+                        ),
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "[ffi] clear_tts_cache: read_dir({}) failed: {e}",
+                    dir.display()
+                );
+                return 0;
+            }
+        }
+        // Drop the in-memory map too — otherwise `synthesize_cached`'s
+        // step-1 hot path would still hand back deleted file paths.
+        self.runtime.lock().unwrap().clear_tts_cache_memory();
+        log::info!(
+            "[ffi] clear_tts_cache: freed {} bytes from {}",
+            bytes_freed,
+            dir.display()
+        );
+        bytes_freed
+    }
+
+    /// Wipe **every** voice note (audio + DB row) from the system. The
+    /// runtime first deletes referenced WAVs from disk, then truncates
+    /// the `notes` table; any orphan files left in `notes_audio_dir`
+    /// (recordings whose row was lost in an earlier crash) are swept
+    /// here too so the directory ends up empty. Returns
+    /// `(notes_deleted, bytes_freed)` so the UI can show a precise
+    /// toast. Destructive — the caller is responsible for confirming
+    /// with the user before invoking.
+    pub fn clear_all_notes(&self) -> Result<ClearNotesReport, FfiError> {
+        let (count, mut bytes_freed) = self
+            .runtime
+            .lock()
+            .unwrap()
+            .clear_all_notes()
+            .map_err(|e| FfiError::Runtime(e.to_string()))?;
+        // Sweep any orphan files left in notes_audio_dir.
+        let notes_dir = {
+            let rt = self.runtime.lock().unwrap();
+            rt.config().tts_cache_dir.as_ref().map(|cache| {
+                cache
+                    .parent()
+                    .unwrap_or(cache.as_path())
+                    .join("notes-audio")
+            })
+        };
+        if let Some(dir) = notes_dir {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let Ok(meta) = entry.metadata() else { continue };
+                    if !meta.is_file() {
+                        continue;
+                    }
+                    let size = meta.len();
+                    match std::fs::remove_file(&path) {
+                        Ok(_) => bytes_freed = bytes_freed.saturating_add(size),
+                        Err(e) => log::warn!(
+                            "[ffi] clear_all_notes orphan sweep: failed to remove {}: {e}",
+                            path.display()
+                        ),
+                    }
+                }
+            }
+        }
+        log::info!(
+            "[ffi] clear_all_notes: deleted {count} notes, freed {bytes_freed} bytes total"
+        );
+        Ok(ClearNotesReport {
+            notes_deleted: count as u32,
+            bytes_freed,
+        })
     }
 
     /// Snapshot the AEC waveform buffers. Empty arrays on non-apple-stt

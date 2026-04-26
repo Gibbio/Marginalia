@@ -771,6 +771,39 @@ impl NoteRepository for SQLiteNoteRepository {
             .ok()?;
         stmt.query_row(params![note_id], note_from_row).ok()
     }
+
+    fn list_all_notes(&self) -> Vec<VoiceNote> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite connection lock poisoned");
+        let mut stmt = match connection.prepare("SELECT * FROM notes") {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("list_all_notes prepare failed: {e}");
+                return Vec::new();
+            }
+        };
+        let rows = match stmt.query_map([], note_from_row) {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("list_all_notes query failed: {e}");
+                return Vec::new();
+            }
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
+    fn delete_all_notes(&mut self) -> Result<usize, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .expect("sqlite connection lock poisoned");
+        let rows = connection
+            .execute("DELETE FROM notes", [])
+            .map_err(storage_err)?;
+        Ok(rows)
+    }
 }
 
 // ---------------------------------------------------------------------------

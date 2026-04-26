@@ -92,6 +92,14 @@ pub trait NoteRepository {
     fn delete_note(&mut self, note_id: &str) -> Result<bool, StorageError>;
     /// Look up a single note by id; `None` when absent.
     fn get_note(&self, note_id: &str) -> Option<VoiceNote>;
+    /// Snapshot every note in storage. Used by `Runtime::clear_all_notes`
+    /// to harvest `raw_audio_path`s before truncating the table — the
+    /// FFI wipes the audio files in lockstep with the DB rows.
+    fn list_all_notes(&self) -> Vec<VoiceNote>;
+    /// Delete every note row. Returns the number of rows removed.
+    /// Audio file cleanup is the caller's responsibility (it gets the
+    /// paths from `list_all_notes` first).
+    fn delete_all_notes(&mut self) -> Result<usize, StorageError>;
 }
 
 impl<T> NoteRepository for &mut T
@@ -116,6 +124,14 @@ where
 
     fn get_note(&self, note_id: &str) -> Option<VoiceNote> {
         (**self).get_note(note_id)
+    }
+
+    fn list_all_notes(&self) -> Vec<VoiceNote> {
+        (**self).list_all_notes()
+    }
+
+    fn delete_all_notes(&mut self) -> Result<usize, StorageError> {
+        (**self).delete_all_notes()
     }
 }
 

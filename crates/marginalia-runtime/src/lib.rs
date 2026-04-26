@@ -773,6 +773,51 @@ impl SqliteRuntime {
         &self.database
     }
 
+    /// Drop every entry from the in-memory TTS cache. Files on disk are
+    /// the FFI's responsibility (it owns `tts_cache_dir`); without
+    /// flushing the map alongside the file deletion, `synthesize_cached`
+    /// would still hit step 1 and hand back a path that no longer exists.
+    pub fn clear_tts_cache_memory(&mut self) {
+        self.tts_cache.clear();
+    }
+
+    /// Wipe every voice note from storage and remove the recorded audio
+    /// files referenced by `raw_audio_path`. Returns
+    /// `(notes_deleted, audio_bytes_freed)`. The caller (FFI) is
+    /// responsible for sweeping any stray files left in the notes-audio
+    /// directory afterwards (orphaned recordings whose row was already
+    /// gone). Active session is unaffected — only the notes attached to
+    /// it disappear; the runtime keeps playing.
+    pub fn clear_all_notes(&mut self) -> Result<(usize, u64), RuntimeError> {
+        // Snapshot first so we know which files to remove. After
+        // `delete_all_notes` truncates the table this list is the only
+        // surviving record of the audio paths.
+        let snapshot = self.note_repository.list_all_notes();
+        let mut bytes_freed: u64 = 0;
+        for note in &snapshot {
+            if let Some(path) = note.raw_audio_path.as_ref() {
+                if let Ok(meta) = std::fs::metadata(path) {
+                    let size = meta.len();
+                    match std::fs::remove_file(path) {
+                        Ok(_) => bytes_freed = bytes_freed.saturating_add(size),
+                        Err(e) => log::warn!(
+                            "clear_all_notes: failed to remove {}: {e}",
+                            path.display()
+                        ),
+                    }
+                }
+            }
+        }
+        let count = self
+            .note_repository
+            .delete_all_notes()
+            .map_err(|e| RuntimeError::Runtime(format!("delete_all_notes: {e}")))?;
+        log::info!(
+            "[runtime] clear_all_notes: removed {count} rows, freed {bytes_freed} bytes"
+        );
+        Ok((count, bytes_freed))
+    }
+
     /// Import a document from a file path into the runtime's storage.
     /// Emits `IngestStarted` / `IngestFinished` so the UI can overlay a
     /// "sto leggendo …" spinner during chunking — large PDFs take several

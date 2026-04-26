@@ -559,6 +559,34 @@ public protocol MarginaliaHost: AnyObject, ObservableObject {
     /// to compute the on-disk size and offer "reveal in Finder".
     var ttsCacheDir: String { get }
 
+    /// Absolute path of the SQLite library file. Stable for the lifetime
+    /// of the host. Settings shows it next to "mostra".
+    var libraryDatabasePath: String { get }
+
+    /// Absolute path of the active `marginalia.toml`. Mirrored in the
+    /// Settings sub-nav footer so the user can see exactly which config
+    /// the running app reads from.
+    var configPath: String { get }
+
+    /// Empty the TTS audio cache (on-disk WAV/FLAC + the runtime's
+    /// in-memory map). Returns bytes freed so the UI can show a toast.
+    @discardableResult
+    func clearTtsCache() async throws -> Int64
+
+    /// Absolute path of the recorded voice-notes directory. Empty
+    /// string when the runtime hasn't configured a TTS cache dir yet
+    /// (the notes path is derived from it).
+    var notesAudioDir: String { get }
+
+    /// **Destructive.** Wipes every note from storage and removes the
+    /// recorded audio files. The caller must confirm with the user
+    /// first; this method does not prompt. Returns
+    /// `(deletedCount, bytesFreed)` for the toast. The host also
+    /// refreshes its in-memory `notes` array and the per-doc note
+    /// counts in `library`.
+    @discardableResult
+    func clearAllNotes() async throws -> (deletedCount: Int, bytesFreed: Int64)
+
     /// Synthesize a short preview WAV for the given text in the given voice
     /// and return the absolute path. Used by the Voice preview play button
     /// in Settings. Throws if the current TTS backend is unavailable.
@@ -900,6 +928,36 @@ public final class MockHost: MarginaliaHost, ObservableObject {
 
     public var ttsCacheDir: String {
         ".marginalia/tts-cache"
+    }
+
+    public var libraryDatabasePath: String {
+        // Mirror the live host: the FFI resolves `database_path` against
+        // the config's parent directory, so we hand back an absolute
+        // path here too. Lets the Settings UI exercise the same code
+        // path (Reveal-in-Finder, tildeify, etc.) under preview.
+        NSHomeDirectory() + "/Library/Application Support/Marginalia/.marginalia/beta.sqlite3"
+    }
+
+    public var configPath: String {
+        NSHomeDirectory() + "/Library/Application Support/Marginalia/marginalia.toml"
+    }
+
+    public func clearTtsCache() async throws -> Int64 {
+        // Mock: pretend we freed a plausible amount so the toast still
+        // exercises its formatting in previews.
+        try await Task.sleep(for: .milliseconds(150))
+        pushMessage("Cache audio: svuotata (mock)")
+        return 142 * 1024 * 1024
+    }
+
+    public var notesAudioDir: String {
+        NSHomeDirectory() + "/Library/Application Support/Marginalia/.marginalia/notes-audio"
+    }
+
+    public func clearAllNotes() async throws -> (deletedCount: Int, bytesFreed: Int64) {
+        try await Task.sleep(for: .milliseconds(200))
+        pushMessage("Cache note: svuotata (mock)")
+        return (deletedCount: 12, bytesFreed: 8 * 1024 * 1024)
     }
 
     public func synthesizePreview(text: String, voice: String) async throws -> String {

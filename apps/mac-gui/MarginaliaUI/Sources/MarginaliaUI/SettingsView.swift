@@ -41,6 +41,22 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     /// while this is set, otherwise mid-animation offsets snap `section`
     /// back to wherever the scroll is passing through.
     @State private var programmaticScroll: Bool = false
+    /// Confirmation sheet for the destructive "svuota cache audio"
+    /// action. The body view reads the current cache size at render
+    /// time, so the dialog's tagline always shows the up-to-date
+    /// number even if the user lingers before confirming.
+    @State private var showClearCacheConfirm: Bool = false
+    /// Set while `host.clearTtsCache()` is running so the sheet's
+    /// confirm button can render a spinner. Brief on a small cache;
+    /// for a multi-GB cache the file walk dominates.
+    @State private var clearingCache: Bool = false
+    /// Confirmation sheet for the **destructive** "svuota cache note"
+    /// action. Wipes every voice note (DB + audio file). Two-step gate
+    /// so the user can't trip it accidentally — the Conferma button is
+    /// disabled until they tick `notesConfirmAcknowledged`.
+    @State private var showClearNotesConfirm: Bool = false
+    @State private var clearingNotes: Bool = false
+    @State private var notesConfirmAcknowledged: Bool = false
 
     // Editable STT tuning values, persisted locally until the FFI
     // `save_config` signature is extended to round-trip them.
@@ -195,11 +211,13 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 .tracking(1.2)
                 .foregroundStyle(Tokens.textFaint)
                 .padding(.horizontal, 20).padding(.bottom, 4)
-            Text("~/Library/App Support/\nMarginalia/marginalia.toml")
+            Text(Self.tildeify(host.configPath))
                 .font(.mono(10))
                 .foregroundStyle(Tokens.textDim)
                 .padding(.horizontal, 20)
                 .lineSpacing(2)
+                .textSelection(.enabled)
+                .help(host.configPath)
             Spacer()
         }
         .padding(.vertical, 18)
@@ -371,11 +389,11 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     .tracking(1.5)
                     .foregroundStyle(Tokens.textFaint)
                 // Same sentence we ship to the synthesizer — quoted so
-                // the user reads what they'll hear. Single source of
-                // truth: change `settings.voice.preview_sentence` in
-                // both lprojs and both the audio and the on-screen
-                // caption update together.
-                Text("\u{201C}\(T("settings.voice.preview_sentence"))\u{201D}")
+                // the user reads what they'll hear. Tracks the voice's
+                // language (draft.language), not the interface, so the
+                // user can audition a French voice with a French phrase
+                // while keeping the UI in Italian.
+                Text("\u{201C}\(Self.previewSentence(forLang: draft.language))\u{201D}")
                     .font(.serif(15, italic: true))
                     .foregroundStyle(Tokens.text)
                     .lineSpacing(3)
@@ -437,13 +455,12 @@ public struct SettingsView<Host: MarginaliaHost>: View {
 
     private func previewVoice() {
         previewing = true
-        // Sentence is sourced from the user's interface language, not
-        // from the voice's language: the picker has voices for every
-        // installed locale and we want the same prompt to read the same
-        // way across them. The phonemizer (espeak-ng, per-clause) can
-        // pronounce any Latin-script text with any voice — a French
-        // voice reading Italian sounds accented but stays intelligible.
-        let sample = T("settings.voice.preview_sentence")
+        // Sentence tracks the voice's language (draft.language) so
+        // changing "Lingua" above swaps both the on-screen caption and
+        // the synthesized audio — letting the user audition a voice in
+        // its own locale while keeping the UI in another. Falls back to
+        // English when the locale isn't covered by the table.
+        let sample = Self.previewSentence(forLang: draft.language)
         host.pushMessage("Anteprima voce: \(draft.voice)…")
         Task {
             defer { Task { @MainActor in previewing = false } }
@@ -515,6 +532,47 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     errorMessage = "Anteprima fallita: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    /// Compact a `$HOME`-prefixed absolute path into a `~/…` form for
+    /// display. Pure cosmetic — `Reveal-in-Finder` and the help-tooltip
+    /// still operate on the original absolute path. No-op when the path
+    /// doesn't start with the home directory.
+    private static func tildeify(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
+    }
+
+    /// Preview phrase for a voice locale (BCP-47, e.g. "it-IT", "en-GB").
+    /// Matches the language the *voice* speaks, not the UI — so the user
+    /// can audition each voice in its own locale. Region-specific entries
+    /// (`pt-BR`/`pt-PT`, `zh-CN`/`zh-TW`) come first; if the full tag
+    /// misses we fall back to the primary subtag, then to English.
+    private static func previewSentence(forLang bcp47: String) -> String {
+        let full = bcp47.lowercased()
+        switch full {
+        case "pt-br": return "O tempo, no alto da serra, não é o tempo da planície."
+        case "pt-pt": return "O tempo, na alta montanha, não é o tempo da planície."
+        case "zh-cn": return "高山上的时间，不是平原上的时间。"
+        case "zh-tw": return "高山上的時間，不是平原上的時間。"
+        default: break
+        }
+        let primary = String(full.prefix(2))
+        switch primary {
+        case "it": return "Il tempo, nell'alta montagna, non è il tempo della pianura."
+        case "en": return "Time, high in the mountains, is not the time of the lowlands."
+        case "fr": return "Le temps, en haute montagne, n'est pas le temps de la plaine."
+        case "de": return "Die Zeit, hoch in den Bergen, ist nicht die Zeit der Täler."
+        case "es": return "El tiempo, en la alta montaña, no es el tiempo de la llanura."
+        case "pt": return "O tempo, na alta montanha, não é o tempo da planície."
+        case "ja": return "高山の時は、平地の時とは異なる。"
+        case "zh": return "高山上的时间，不是平原上的时间。"
+        case "hi": return "ऊँचे पहाड़ों का समय मैदानों का समय नहीं है।"
+        default:   return "Time, high in the mountains, is not the time of the lowlands."
         }
     }
 
@@ -729,17 +787,237 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             )
             volumeSlider
             chunkSizeSlider
-            PathRow(label: "Libreria",
-                    value: ".marginalia/beta.sqlite3",
-                    tag: "SQLite", action: nil, accent: accent,
-                    onBrowse: { revealInFinder(host.ttsCacheDir) },
+            PathRow(label: T("settings.text-prep.library"),
+                    value: Self.tildeify(host.libraryDatabasePath),
+                    tag: String(format: T("settings.text-prep.tag.sqlite"),
+                                fileSize(host.libraryDatabasePath)),
+                    action: nil, accent: accent,
+                    onBrowse: nil,
+                    onRevealInFinder: { revealInFinder(host.libraryDatabasePath) })
+            PathRow(label: T("settings.text-prep.cache-audio"),
+                    value: Self.tildeify(host.ttsCacheDir),
+                    tag: String(format: T("settings.text-prep.tag.cache-audio"),
+                                cacheDirSize()),
+                    action: T("settings.text-prep.action.clear"), accent: accent,
+                    onBrowse: nil,
+                    onAction: { showClearCacheConfirm = true },
                     onRevealInFinder: { revealInFinder(host.ttsCacheDir) })
-            PathRow(label: "Cache audio",
-                    value: host.ttsCacheDir,
-                    tag: "FLAC · 1 per chunk · \(cacheDirSize())",
-                    action: "svuota", accent: accent,
-                    onBrowse: { revealInFinder(host.ttsCacheDir) },
-                    onRevealInFinder: { revealInFinder(host.ttsCacheDir) })
+            PathRow(label: T("settings.text-prep.cache-notes"),
+                    value: Self.tildeify(host.notesAudioDir),
+                    tag: String(format: T("settings.text-prep.tag.cache-notes"),
+                                directorySize(host.notesAudioDir)),
+                    action: T("settings.text-prep.action.clear"), accent: accent,
+                    onBrowse: nil,
+                    onAction: {
+                        notesConfirmAcknowledged = false
+                        showClearNotesConfirm = true
+                    },
+                    onRevealInFinder: { revealInFinder(host.notesAudioDir) })
+        }
+        .sheet(isPresented: $showClearCacheConfirm) {
+            clearCacheConfirmSheet
+        }
+        .sheet(isPresented: $showClearNotesConfirm) {
+            clearNotesConfirmSheet
+        }
+    }
+
+    /// Themed modal for the "svuota cache audio" action. Mirrors the
+    /// look of `UrlImportSheet`: kicker + serif title + italic blurb +
+    /// Annulla/Conferma buttons. Confirm calls `host.clearTtsCache()`
+    /// off the main actor, then surfaces a transient toast with the
+    /// number of bytes freed so the user has explicit feedback that
+    /// something happened.
+    private var clearCacheConfirmSheet: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(T("settings.clear-cache.kicker"))
+                    .font(.mono(10)).tracking(2)
+                    .foregroundStyle(Tokens.textFaint)
+                Text(T("settings.clear-cache.title"))
+                    .font(.serif(22, weight: .medium))
+                    .foregroundStyle(Tokens.text)
+                Text(String(format: T("settings.clear-cache.body"), cacheDirSize()))
+                    .font(.serif(13, italic: true))
+                    .foregroundStyle(Tokens.textDim)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button(T("settings.dialog.cancel")) { showClearCacheConfirm = false }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(clearingCache)
+                Button(action: confirmClearCache) {
+                    HStack(spacing: 8) {
+                        if clearingCache {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .controlSize(.small)
+                                .tint(.red)
+                        }
+                        Text(clearingCache
+                             ? T("settings.clear-cache.confirming")
+                             : T("settings.clear-cache.confirm"))
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(clearingCache)
+            }
+        }
+        .padding(28)
+        .frame(width: 480)
+        .background(Tokens.bg)
+    }
+
+    private func confirmClearCache() {
+        guard !clearingCache else { return }
+        clearingCache = true
+        Task {
+            let freed: Int64
+            do {
+                freed = try await host.clearTtsCache()
+            } catch {
+                await MainActor.run {
+                    clearingCache = false
+                    showClearCacheConfirm = false
+                    host.transientToast = ToastMessage(
+                        text: String(format: T("settings.toast.cache-failed"),
+                                     error.localizedDescription),
+                        kind: .error
+                    )
+                }
+                return
+            }
+            await MainActor.run {
+                clearingCache = false
+                showClearCacheConfirm = false
+                let bytes = ByteCountFormatter.string(
+                    fromByteCount: freed, countStyle: .file
+                )
+                host.transientToast = ToastMessage(
+                    text: freed > 0
+                        ? String(format: T("settings.toast.cache-cleared"), bytes)
+                        : T("settings.toast.cache-empty"),
+                    kind: .info
+                )
+            }
+        }
+    }
+
+    /// Themed modal for the **destructive** "svuota cache note" action.
+    /// Distinguishing details vs the cache-audio sheet:
+    ///   • red kicker / glyph instead of neutral
+    ///   • two-step confirmation: an explicit checkbox the user must
+    ///     tick before "Svuota" enables, so a stray Enter/click can't
+    ///     wipe their notes
+    ///   • the blurb spells out exactly what disappears (audio + DB
+    ///     rows, every document) and that the change is irreversible
+    private var clearNotesConfirmSheet: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.red.opacity(0.85))
+                    Text(T("settings.clear-notes.kicker"))
+                        .font(.mono(10)).tracking(2)
+                        .foregroundStyle(Color.red.opacity(0.85))
+                }
+                Text(T("settings.clear-notes.title"))
+                    .font(.serif(22, weight: .medium))
+                    .foregroundStyle(Tokens.text)
+                // The body uses inline Markdown (** **, ` `) — Text(_:)
+                // applied to a String literal renders it verbatim. We
+                // build it from the localized template via
+                // LocalizedStringKey to keep the bold + monospace path
+                // styling.
+                Text(LocalizedStringKey(
+                    String(format: T("settings.clear-notes.body"),
+                           Self.tildeify(host.notesAudioDir))
+                ))
+                    .font(.serif(13, italic: true))
+                    .foregroundStyle(Tokens.textDim)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Two-step gate. Conferma stays disabled until ticked, even
+            // if the user mashes Enter — the keyboard shortcut on the
+            // button respects `.disabled`.
+            AccentCheckbox(
+                checked: $notesConfirmAcknowledged,
+                label: T("settings.clear-notes.acknowledge"),
+                accent: accent
+            )
+
+            HStack {
+                Spacer()
+                Button(T("settings.dialog.cancel")) { showClearNotesConfirm = false }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(clearingNotes)
+                Button(action: confirmClearNotes) {
+                    HStack(spacing: 8) {
+                        if clearingNotes {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .controlSize(.small)
+                                .tint(.red)
+                        }
+                        Text(clearingNotes
+                             ? T("settings.clear-notes.confirming")
+                             : T("settings.clear-notes.confirm"))
+                            .foregroundStyle(Color.red.opacity(0.9))
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(clearingNotes || !notesConfirmAcknowledged)
+            }
+        }
+        .padding(28)
+        .frame(width: 520)
+        .background(Tokens.bg)
+    }
+
+    private func confirmClearNotes() {
+        guard !clearingNotes, notesConfirmAcknowledged else { return }
+        clearingNotes = true
+        Task {
+            let result: (deletedCount: Int, bytesFreed: Int64)
+            do {
+                result = try await host.clearAllNotes()
+            } catch {
+                await MainActor.run {
+                    clearingNotes = false
+                    showClearNotesConfirm = false
+                    host.transientToast = ToastMessage(
+                        text: String(format: T("settings.toast.notes-failed"),
+                                     error.localizedDescription),
+                        kind: .error
+                    )
+                }
+                return
+            }
+            await MainActor.run {
+                clearingNotes = false
+                showClearNotesConfirm = false
+                notesConfirmAcknowledged = false
+                let bytes = ByteCountFormatter.string(
+                    fromByteCount: result.bytesFreed, countStyle: .file
+                )
+                let count = result.deletedCount
+                let text: String
+                if count == 0 {
+                    text = T("settings.toast.notes-empty")
+                } else if count == 1 {
+                    text = String(format: T("settings.toast.notes-cleared_one"), bytes)
+                } else {
+                    text = String(format: T("settings.toast.notes-cleared_other"),
+                                  Int64(count), bytes)
+                }
+                host.transientToast = ToastMessage(text: text, kind: .info)
+            }
         }
     }
 
@@ -804,15 +1082,11 @@ public struct SettingsView<Host: MarginaliaHost>: View {
         }
     }
 
-    /// Returns a formatted size string for the TTS cache directory, e.g.
-    /// "142 MB" or "0 byte". Walks the dir synchronously — cheap for the
-    /// expected order of magnitude (a few thousand FLAC files max).
-    private func cacheDirSize() -> String {
-        // Use the absolute path the runtime reports (was a relative
-        // stub before — sandboxed `.app` working directory is `/`,
-        // so the relative path resolved to a non-existent location
-        // and the size always read 0).
-        let path = host.ttsCacheDir
+    /// Formatted total size of every regular file under `path` (recursive).
+    /// Walks the dir synchronously — cheap for the expected order of
+    /// magnitude (a few thousand small files). Returns "—" for an empty
+    /// path, "0 byte" if the dir doesn't exist yet.
+    private func directorySize(_ path: String) -> String {
         guard !path.isEmpty else { return "—" }
         let url = URL(fileURLWithPath: path)
         guard let enumerator = FileManager.default.enumerator(
@@ -832,6 +1106,20 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                                          countStyle: .file)
     }
 
+    /// Formatted size of a single file (the SQLite library). "—" when
+    /// the path is empty or the file isn't on disk yet (first run).
+    private func fileSize(_ path: String) -> String {
+        guard !path.isEmpty else { return "—" }
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? Int64
+        else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+
+    private func cacheDirSize() -> String {
+        directorySize(host.ttsCacheDir)
+    }
+
     private var chunkSizeSlider: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -839,7 +1127,8 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                     .font(.sans(11))
                     .tracking(0.5)
                     .foregroundStyle(Tokens.textDim)
-                Text("· \(draftChunkChars) caratteri")
+                Text(String(format: T("settings.text-prep.chunk-size.suffix"),
+                            Int64(draftChunkChars)))
                     .font(.sans(11))
                     .foregroundStyle(Tokens.textFaint)
             }
@@ -852,14 +1141,14 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             )
             .tint(accent.main)
             HStack {
-                Text("100 · più navigabile, sintesi rapida")
+                Text(T("settings.text-prep.chunk-size.left"))
                 Spacer()
-                Text("300 · ascolto continuo")
+                Text(T("settings.text-prep.chunk-size.right"))
             }
             .font(.mono(9))
             .foregroundStyle(Tokens.textFaint)
             if draftChunkChars != host.chunkTargetChars {
-                Text("⚠ il cambio richiederà di re-importare i documenti esistenti.")
+                Text(T("settings.text-prep.chunk-size.warn"))
                     .font(.serif(12, italic: true))
                     .foregroundStyle(accent.main)
                     .padding(.top, 4)

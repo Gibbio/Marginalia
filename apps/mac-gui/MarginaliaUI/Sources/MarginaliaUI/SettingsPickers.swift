@@ -413,9 +413,9 @@ public struct PathRow: View {
                 if let rev = onRevealInFinder {
                     IconBtn(label: "mostra", action: rev)
                 }
-                IconBtn(label: "sfoglia", action: onBrowse ?? {})
-                    .opacity(onBrowse == nil ? 0.4 : 1)
-                    .disabled(onBrowse == nil)
+                if let browse = onBrowse {
+                    IconBtn(label: "sfoglia", action: browse)
+                }
                 if let a = action {
                     IconBtn(label: a, danger: true, action: onAction ?? {})
                 }

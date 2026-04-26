@@ -307,6 +307,24 @@ interface FfiRuntime {
   string whisper_model_path();
   string tts_cache_dir();
 
+  // Absolute path of the SQLite library (resolved from `database_path`
+  // in marginalia.toml). Stable for the lifetime of the runtime.
+  string database_path();
+  // Absolute path of the active marginalia.toml the runtime was opened
+  // with. Used by Settings' sub-nav footer.
+  string config_path();
+  // Empty the on-disk TTS cache (FLAC/WAV files in `tts_cache_dir`) and
+  // the runtime's in-memory entry map. Returns bytes freed.
+  u64 clear_tts_cache();
+
+  // Absolute path of the recorded-voice-notes directory
+  // (`<config_dir>/.marginalia/notes-audio` by default).
+  string notes_audio_dir();
+  // Wipe every note (DB row + recorded audio file). Destructive — the
+  // caller must confirm with the user first.
+  [Throws=FfiError]
+  ClearNotesReport clear_all_notes();
+
   // Feed the AEC render reference for audio the GUI plays through a
   // pipeline outside the rodio host engine (Swift `AVAudioPlayer` for
   // note playback). Returns false if the file couldn't be decoded so
@@ -342,6 +360,11 @@ interface FfiRuntime {
 dictionary WaveformSnapshot {
   sequence<f32> tts_levels;
   sequence<f32> mic_levels;
+};
+
+dictionary ClearNotesReport {
+  u32 notes_deleted;
+  u64 bytes_freed;
 };
 
 // ─────────────────────────────────────────────────────────────

@@ -371,6 +371,44 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
         runtime.ttsCacheDir()
     }
 
+    public var libraryDatabasePath: String {
+        runtime.databasePath()
+    }
+
+    public var configPath: String {
+        runtime.configPath()
+    }
+
+    public func clearTtsCache() async throws -> Int64 {
+        // Walk the cache dir + flush in-memory map on the FFI side. Done
+        // off the main actor so the UI stays responsive on a large cache.
+        let freed = await Task.detached { [runtime] in
+            runtime.clearTtsCache()
+        }.value
+        return Int64(freed)
+    }
+
+    public var notesAudioDir: String {
+        runtime.notesAudioDir()
+    }
+
+    public func clearAllNotes() async throws -> (deletedCount: Int, bytesFreed: Int64) {
+        // FFI wipes both DB rows and audio files; we then flush the
+        // host's in-memory `notes` array (so the open document's margin
+        // panel empties) and refresh `library` so per-doc note counts
+        // drop to zero. Detached because the file walk dominates on a
+        // large notes dir.
+        let report = try await Task.detached { [runtime] in
+            try runtime.clearAllNotes()
+        }.value
+        await MainActor.run {
+            self.notes = []
+        }
+        await refreshLibrary()
+        return (deletedCount: Int(report.notesDeleted),
+                bytesFreed: Int64(report.bytesFreed))
+    }
+
     /// Decode the WAV at `path`, downmix to mono f32 at 24kHz, and ship
     /// it to the AEC pipeline as the next render reference. Bridges the
     /// Swift-side `AVAudioPlayer` note playback into the same echo-

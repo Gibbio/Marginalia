@@ -292,6 +292,16 @@ mod tests {
         fn get_note(&self, note_id: &str) -> Option<VoiceNote> {
             self.notes.iter().find(|n| n.note_id == note_id).cloned()
         }
+
+        fn list_all_notes(&self) -> Vec<VoiceNote> {
+            self.notes.clone()
+        }
+
+        fn delete_all_notes(&mut self) -> Result<usize, StorageError> {
+            let count = self.notes.len();
+            self.notes.clear();
+            Ok(count)
+        }
     }
 
     struct StubDraftRepository;

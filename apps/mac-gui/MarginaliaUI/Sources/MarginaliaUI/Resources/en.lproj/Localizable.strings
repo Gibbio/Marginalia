@@ -39,7 +39,7 @@
 "settings.info.voice"         = "Each voice is a small neural embedding (≈500 KB) downloaded locally. The picker shows only voices installed for the current language; uninstalled ones are greyed out.";
 "settings.info.stt"           = "Apple Speech is the system recognizer (low cost, high quality, requires macOS Dictation to be enabled). Whisper is a local ggml model (~465 MB), fully offline. Switching restarts the helper — a few hundred milliseconds.";
 "settings.info.commands"      = "Each action has one or more synonyms. Words can be in any language — they aren't translated, the raw audio is what matters. Words already used by another action will be rejected to avoid ambiguity.";
-"settings.info.text-prep"     = "A chunk is the atomic unit of synthesis and voice navigation. Smaller chunks = snappier command response and finer jumps, but more fragmentation. Changes require re-importing existing documents. The audio cache holds synthesized FLACs; clearing it loses no work, only regeneration time.";
+"settings.info.text-prep"     = "A chunk is the atomic unit of synthesis and voice navigation. Smaller chunks = snappier command response and finer jumps, but more fragmentation. Changes require re-importing existing documents. The audio cache holds the synthesized chunk files; clearing it loses no work, only regeneration time. The notes cache holds the recorded dictation audio: clearing it permanently deletes the linked annotations as well.";
 "settings.info.installations" = "Marginalia runs offline. Only in this section, and only when you explicitly act, may the app reach huggingface.co and github.com to download missing models. All assets are Apache-2.0 or MIT.";
 "settings.info.theme"         = "Changes the accent tint — highlights, player pill, audio bars, note hover. The warm-dark background stays — it's part of Marginalia's identity.";
 "settings.info.diagnostics"   = "Live provider status and filesystem paths. Includes the last ApplyReport (elapsed time, what was swapped). Handy when something isn't working — selectable for copy-paste.";
@@ -56,6 +56,47 @@
 "settings.stt.open-sys-prefs"     = "Open System Settings →";
 "settings.audio.volume"           = "Volume";
 "settings.text-prep.chunk-size"   = "CHUNK SIZE";
+
+// Text-prep — path rows + chunk-size copy
+"settings.text-prep.library"             = "Library";
+"settings.text-prep.cache-audio"         = "Audio cache";
+"settings.text-prep.cache-notes"         = "Notes cache";
+"settings.text-prep.tag.sqlite"          = "SQLite · %@";
+"settings.text-prep.tag.cache-audio"     = "1 file per chunk · %@";
+"settings.text-prep.tag.cache-notes"     = "WAV · 1 per dictated note · %@";
+"settings.text-prep.action.clear"        = "clear";
+"settings.text-prep.chunk-size.suffix"   = "· %lld characters";
+"settings.text-prep.chunk-size.left"     = "100 · more navigable, faster synth";
+"settings.text-prep.chunk-size.right"    = "300 · continuous listening";
+"settings.text-prep.chunk-size.warn"     = "⚠ this change will require re-importing existing documents.";
+
+// Clear-cache (audio) confirmation sheet
+"settings.clear-cache.kicker"            = "AUDIO CACHE";
+"settings.clear-cache.title"             = "Clear the cache?";
+"settings.clear-cache.body"              = "%@ of synthesized audio files will be deleted. Documents, notes, and bookmarks stay intact — chunks will be re-synthesized on the next playback.";
+"settings.clear-cache.confirm"           = "Clear";
+"settings.clear-cache.confirming"        = "Clearing…";
+
+// Clear-notes (destructive) confirmation sheet
+"settings.clear-notes.kicker"            = "WARNING · NOTES CACHE";
+"settings.clear-notes.title"             = "Delete all notes?";
+"settings.clear-notes.body"              = "Audio files in `%@` **and** every recorded note (audio and text) across **all** documents — including those attached to chunks and bookmarks — will be permanently deleted. Documents stay intact, but the annotations cannot be recovered.";
+"settings.clear-notes.acknowledge"       = "I understand notes will be deleted permanently.";
+"settings.clear-notes.confirm"           = "Delete everything";
+"settings.clear-notes.confirming"        = "Deleting…";
+
+// Toasts surfaced after the clear actions
+"settings.toast.cache-cleared"           = "Audio cache cleared · %@ freed";
+"settings.toast.cache-empty"             = "Audio cache already empty";
+"settings.toast.cache-failed"            = "Clear failed: %@";
+"settings.toast.notes-cleared_one"       = "1 note deleted · %@ freed";
+"settings.toast.notes-cleared_other"     = "%1$lld notes deleted · %2$@ freed";
+"settings.toast.notes-empty"             = "No notes to delete";
+"settings.toast.notes-failed"            = "Notes deletion failed: %@";
+
+// Capitalized cancel for sheet buttons (separate from the all-lowercase
+// `common.cancel` used in chip/edit contexts).
+"settings.dialog.cancel"                 = "Cancel";
 "settings.theme.accent-tint"      = "Accent tint";
 "settings.diagnostics.export-log" = "Export log…";
 "settings.diagnostics.restore-defaults" = "Restore defaults…";
