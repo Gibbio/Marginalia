@@ -673,11 +673,10 @@ fn display_from_voice_id(voice_id: &str) -> String {
 /// Installazioni). On failure the previous cache is left untouched, so
 /// the UI keeps showing whatever was last known.
 fn fetch_remote_voice_catalog_inner() -> Result<u32, String> {
-    let cache_path = CATALOG_CACHE_PATH
-        .get()
-        .ok_or_else(|| "catalog cache path not initialised — call FfiRuntime::new first".to_string())?;
-    let url =
-        "https://huggingface.co/api/models/prince-canuma/Kokoro-82M/tree/main/voices";
+    let cache_path = CATALOG_CACHE_PATH.get().ok_or_else(|| {
+        "catalog cache path not initialised — call FfiRuntime::new first".to_string()
+    })?;
+    let url = "https://huggingface.co/api/models/prince-canuma/Kokoro-82M/tree/main/voices";
     log::info!("[catalog] fetching voice list from {url}");
     // Short per-attempt timeouts on purpose: the catalog is a tiny JSON
     // listing (~10 KB), and the user wants the UI to fall back to the
@@ -735,8 +734,8 @@ fn fetch_remote_voice_catalog_inner() -> Result<u32, String> {
             last_io_err.unwrap_or_else(|| "no error captured".to_string())
         ));
     };
-    let entries: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| format!("parse HF API JSON: {e}"))?;
+    let entries: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("parse HF API JSON: {e}"))?;
     let arr = entries
         .as_array()
         .ok_or_else(|| "HF API returned non-array body".to_string())?;
@@ -779,7 +778,12 @@ fn fetch_remote_voice_catalog_inner() -> Result<u32, String> {
             .as_str()
             .unwrap_or("")
             .cmp(b["lang"].as_str().unwrap_or(""))
-            .then_with(|| a["id"].as_str().unwrap_or("").cmp(b["id"].as_str().unwrap_or("")))
+            .then_with(|| {
+                a["id"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["id"].as_str().unwrap_or(""))
+            })
     });
     let count = voices.len() as u32;
     let fetched_at_ms = std::time::SystemTime::now()
@@ -798,14 +802,10 @@ fn fetch_remote_voice_catalog_inner() -> Result<u32, String> {
     }
     std::fs::write(
         cache_path,
-        serde_json::to_string_pretty(&cache_doc)
-            .map_err(|e| format!("serialize cache: {e}"))?,
+        serde_json::to_string_pretty(&cache_doc).map_err(|e| format!("serialize cache: {e}"))?,
     )
     .map_err(|e| format!("write cache {}: {e}", cache_path.display()))?;
-    log::info!(
-        "[catalog] wrote {count} voices to {}",
-        cache_path.display()
-    );
+    log::info!("[catalog] wrote {count} voices to {}", cache_path.display());
     invalidate_catalog();
     Ok(count)
 }
@@ -899,8 +899,7 @@ fn engine_specs() -> Vec<AssetSpec> {
 /// Was a `LazyLock<Vec<AssetSpec>>`; replaced with an explicit RwLock so
 /// `fetch_remote_voice_catalog` can clear the cached snapshot without a
 /// process restart.
-static CATALOG_CACHE: std::sync::RwLock<Option<Vec<AssetSpec>>> =
-    std::sync::RwLock::new(None);
+static CATALOG_CACHE: std::sync::RwLock<Option<Vec<AssetSpec>>> = std::sync::RwLock::new(None);
 
 fn current_catalog() -> Vec<AssetSpec> {
     {
@@ -1757,7 +1756,10 @@ impl FfiRuntime {
     }
 
     pub fn pause_session(&self) -> Result<(), FfiError> {
-        log::info!("[ffi] pause_session thread={:?}", std::thread::current().id());
+        log::info!(
+            "[ffi] pause_session thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().pause_session()?;
         Ok(())
     }
@@ -1772,7 +1774,10 @@ impl FfiRuntime {
     }
 
     pub fn stop_session(&self) -> Result<(), FfiError> {
-        log::info!("[ffi] stop_session thread={:?}", std::thread::current().id());
+        log::info!(
+            "[ffi] stop_session thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().stop_session()?;
         Ok(())
     }
@@ -1795,7 +1800,10 @@ impl FfiRuntime {
         Ok(())
     }
     pub fn next_chapter(&self) -> Result<(), FfiError> {
-        log::info!("[ffi] next_chapter thread={:?}", std::thread::current().id());
+        log::info!(
+            "[ffi] next_chapter thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().next_chapter()?;
         Ok(())
     }
@@ -1816,7 +1824,10 @@ impl FfiRuntime {
         Ok(())
     }
     pub fn repeat_chunk(&self) -> Result<(), FfiError> {
-        log::info!("[ffi] repeat_chunk thread={:?}", std::thread::current().id());
+        log::info!(
+            "[ffi] repeat_chunk thread={:?}",
+            std::thread::current().id()
+        );
         self.runtime.lock().unwrap().repeat_chunk()?;
         Ok(())
     }
@@ -2295,9 +2306,7 @@ impl FfiRuntime {
                 }
             }
         }
-        log::info!(
-            "[ffi] clear_all_notes: deleted {count} notes, freed {bytes_freed} bytes total"
-        );
+        log::info!("[ffi] clear_all_notes: deleted {count} notes, freed {bytes_freed} bytes total");
         Ok(ClearNotesReport {
             notes_deleted: count as u32,
             bytes_freed,

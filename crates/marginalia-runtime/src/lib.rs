@@ -800,10 +800,9 @@ impl SqliteRuntime {
                     let size = meta.len();
                     match std::fs::remove_file(path) {
                         Ok(_) => bytes_freed = bytes_freed.saturating_add(size),
-                        Err(e) => log::warn!(
-                            "clear_all_notes: failed to remove {}: {e}",
-                            path.display()
-                        ),
+                        Err(e) => {
+                            log::warn!("clear_all_notes: failed to remove {}: {e}", path.display())
+                        }
                     }
                 }
             }
@@ -812,9 +811,7 @@ impl SqliteRuntime {
             .note_repository
             .delete_all_notes()
             .map_err(|e| RuntimeError::Runtime(format!("delete_all_notes: {e}")))?;
-        log::info!(
-            "[runtime] clear_all_notes: removed {count} rows, freed {bytes_freed} bytes"
-        );
+        log::info!("[runtime] clear_all_notes: removed {count} rows, freed {bytes_freed} bytes");
         Ok((count, bytes_freed))
     }
 
@@ -1415,12 +1412,11 @@ impl SqliteRuntime {
                 document_id: document_id.to_string(),
             })?;
         let source_path = document.source_path.clone();
-        self.ingest_path(&source_path).map_err(|e| {
-            RuntimeError::Runtime(format!("reload_document: ingest failed: {e}"))
-        })
+        self.ingest_path(&source_path)
+            .map_err(|e| RuntimeError::Runtime(format!("reload_document: ingest failed: {e}")))
     }
 
-/// Overwrite the transcript of an existing note. Looks up the note,
+    /// Overwrite the transcript of an existing note. Looks up the note,
     /// mutates the transcript, saves back through the `save_note`
     /// upsert. Returns the updated note; errors when the id is unknown.
     pub fn update_note(
