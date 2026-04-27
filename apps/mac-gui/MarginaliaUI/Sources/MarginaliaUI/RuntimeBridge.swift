@@ -440,9 +440,23 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
             runtime.prefetchNext()
         }
         // Also refresh the waveform so the Sidebar footer shows live mic/TTS.
+        // Dedupe before publishing: an unconditional @Published assign at
+        // 10Hz invalidates every view that observes ttsLevels/micLevels
+        // and chains into NSHostingView.beginTransaction → ViewGraphRoot-
+        // ValueUpdater on the runloop observer, which dominates idle CPU
+        // on the main thread (~50% of wall time, per `sample`). We compare
+        // QUANTIZED snapshots (each value rounded to 0.01 = 100 buckets)
+        // so the constant micro-fluctuations of the mic noise floor in
+        // idle don't keep firing the setter — the Waveform widget only
+        // renders bar heights to one or two pixels of precision anyway,
+        // sub-quantum changes are invisible.
         let snap = runtime.pollWaveform()
-        micLevels = snap.micLevels
-        ttsLevels = snap.ttsLevels
+        if !Self.levelsApproxEqual(snap.micLevels, micLevels) {
+            micLevels = snap.micLevels
+        }
+        if !Self.levelsApproxEqual(snap.ttsLevels, ttsLevels) {
+            ttsLevels = snap.ttsLevels
+        }
 
         // Poll the live partial transcript (Apple STT). When the user
         // is dictating a note, the helper streams "DICT_PARTIAL <text>"
@@ -1114,6 +1128,23 @@ public final class FFIHost: MarginaliaHost, ObservableObject {
                 )
             }
         }
+    }
+
+    /// Quantized equality for waveform level arrays. Bucketize each
+    /// value to 0.01 steps and compare the resulting integer keys.
+    /// Two arrays that differ only by sub-quantum mic noise hash to
+    /// the same bucket sequence and skip the @Published assign — the
+    /// Waveform widget renders bar heights to a couple of pixels of
+    /// precision so the dropped invalidates have no visible effect,
+    /// but they cut a measurable chunk of the SwiftUI redraw budget
+    /// in idle (sample showed `Published.subscript.setter` chaining
+    /// into `NSHostingView.beginTransaction` on every micro-fluctuation).
+    private static func levelsApproxEqual(_ a: [Float], _ b: [Float]) -> Bool {
+        guard a.count == b.count else { return false }
+        for i in 0..<a.count {
+            if Int(a[i] * 100) != Int(b[i] * 100) { return false }
+        }
+        return true
     }
 
     private func mapPlaybackState(_ p: MarginaliaKit.PlaybackState) -> PlaybackState {

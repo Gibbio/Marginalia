@@ -1403,19 +1403,34 @@ struct NoteCard: View {
                 // pattern. While `isPlaying`, polls the AVAudioPlayer's
                 // currentTime/duration at ~20Hz and feeds the ratio in
                 // as `playedFraction`, so the bar visibly fills left-to-
-                // right. When idle, the fraction is 0 and the bar sits
-                // dimmed in place.
-                TimelineView(.periodic(from: Date(), by: 0.05)) { _ in
-                    let fraction: Double = {
-                        guard isPlaying,
-                              let p = player,
-                              p.duration > 0
-                        else { return 0 }
-                        return min(1.0, p.currentTime / p.duration)
-                    }()
+                // right. While idle, render once with fraction 0 and
+                // skip the timeline entirely — otherwise every visible
+                // note card was driving a 20Hz redraw forever, which
+                // showed up as a chunk of `ViewGraphRootValueUpdater.
+                // render` in `sample` even with no playback active.
+                if isPlaying {
+                    TimelineView(.periodic(from: Date(), by: 0.05)) { _ in
+                        let fraction: Double = {
+                            guard let p = player,
+                                  p.duration > 0
+                            else { return 0 }
+                            return min(1.0, p.currentTime / p.duration)
+                        }()
+                        Waveform(
+                            count: 32,
+                            playedFraction: fraction,
+                            accent: accent.main,
+                            dim: accent.main.opacity(0.3),
+                            seed: 0.42, minHeight: 2, maxBump: 12,
+                            liveLevels: levels.isEmpty ? nil : levels
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 18)
+                    }
+                } else {
                     Waveform(
                         count: 32,
-                        playedFraction: fraction,
+                        playedFraction: 0,
                         accent: accent.main,
                         dim: accent.main.opacity(0.3),
                         seed: 0.42, minHeight: 2, maxBump: 12,
