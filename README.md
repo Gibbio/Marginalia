@@ -36,11 +36,38 @@ playable back later.
 
 ![Recording a voice note](docs/screenshots/note-recording.png)
 
+## Control with your voice
+
+Marginalia listens for short trigger words while you read. Every
+core action has multiple synonyms, and you can add your own custom
+triggers — they persist across interface-language switches.
+
+| Action | Default triggers |
+|---|---|
+| pause | `pause` |
+| resume | `resume`, `continue` |
+| next chunk | `next`, `skip` |
+| previous chunk | `back`, `previous` |
+| repeat chunk | `repeat`, `again` |
+| stop | `stop` |
+| next chapter | `next chapter` |
+| previous chapter | `previous chapter` |
+| bookmark | `bookmark`, `mark` |
+| dictate a note | `note` |
+| where am I | `where`, `position` |
+
+A separate Italian set ships with the app and activates when you
+switch the interface language to Italian. Default triggers are
+locked (you can't accidentally remove "pause"). Anything you add
+through the editor is a **custom** trigger — visually distinct,
+removable, and kept when you switch interface language.
+
+![Voice commands editor](docs/screenshots/voice-commands.png)
+
 ## Settings
 
-Themes, voices, voice-command triggers (with per-language defaults
-plus your own customs), STT engine selection, chunk size, and the
-local file paths the app uses — all editable from the app.
+Themes, voices, STT engine selection, chunk size, and the local file
+paths the app uses — all editable from the app.
 
 ![Settings page](docs/screenshots/settings.png)
 
