@@ -1,126 +1,121 @@
 # Marginalia
 
-Marginalia is a local AI-first voice reading and annotation engine.
+**Listen to your documents, dictate notes — offline on your Mac.**
 
-## Quick Start
+A voice-first reader for the macOS desktop: drop in a `.md`, `.txt`,
+`.pdf`, `.epub` or a URL, and Marginalia reads it aloud while you do
+something else, listens for short voice commands ("pause", "next",
+"avanti", "ripeti"), and lets you dictate margin notes that stay
+linked to the exact passage you were on.
 
-Run the TUI (auto-detects platform and enables GPU acceleration):
+Everything runs on-device. No accounts. No cloud. The mic and the
+TTS engine are both local.
 
-```bash
-make tui-rs
-```
+![Marginalia reading view](docs/screenshots/reading.png)
 
-On **macOS Apple Silicon** this auto-enables Kokoro TTS via MLX Metal GPU (~1s latency per chunk, 12x realtime). On other platforms it falls back to ONNX Runtime CPU or fake providers.
+## What it does
 
-Run tests:
+- **Reads any document aloud** with on-device neural TTS (Kokoro
+  82M via Apple MLX on Apple Silicon, ~1s latency per chunk).
+- **Listens for voice commands** through Apple Speech (default) or
+  Whisper, with WebRTC AEC3 echo-cancellation so the playback never
+  triggers its own commands.
+- **Captures voice notes** while you read — say "nota", dictate, the
+  text and audio attach to the chunk you were on.
+- **Remembers where you were** across restarts. Library, sessions,
+  notes, bookmarks all live in a local SQLite store.
+- **Italian + English** out of the box, with a per-language voice
+  catalog you can extend from the in-app installer.
 
-```bash
-cargo test
-```
+## Capture a thought without leaving the page
 
-## Architecture
+Say "nota" while reading. Marginalia opens a dictation overlay,
+records the audio, transcribes it, and pins the result to the
+chunk you were listening to — visible in the right margin and
+playable back later.
 
-One shared Rust engine with platform-specific host applications:
+![Recording a voice note](docs/screenshots/note-recording.png)
 
-```
-apps/
-  tui-rs/              Terminal UI (desktop dev/admin tool)
-  cli-rs/              CLI for testing core (ingest, read, bench)
+## Settings
 
-crates/
-  marginalia-core/             Domain, ports, application services (no external deps)
-  marginalia-runtime/          Orchestration: core + storage + providers
-  marginalia-storage-sqlite/   SQLite persistence
-  marginalia-import-text/      Text/Markdown document importer
-  marginalia-config/           Shared configuration types (voice commands, STT, TTS, playback)
-  marginalia-models/           Model discovery, download, and cache management
-  marginalia-tts-mlx/          Kokoro TTS via MLX Metal GPU (macOS Apple Silicon)
-  marginalia-tts-kokoro/       Kokoro TTS via ONNX Runtime (cross-platform)
-  marginalia-stt-apple/        Apple SFSpeechRecognizer — commands + dictation (macOS)
-  marginalia-stt-whisper/      Whisper STT — commands + dictation (cross-platform)
-  marginalia-stt-vosk/         Vosk STT (legacy, no longer wired in tui-rs)
-  marginalia-playback-host/    Audio playback (rodio in-process)
-  marginalia-provider-fake/    Fake providers for testing
-  marginalia-devtools/         Development utilities
+Themes, voices, voice-command triggers (with per-language defaults
+plus your own customs), STT engine selection, chunk size, and the
+local file paths the app uses — all editable from the app.
 
-models/                Local model assets (downloaded via make bootstrap-beta)
-benchmark/             TTS backend benchmark suite
-```
+![Settings page](docs/screenshots/settings.png)
 
-## TTS Backends
+## Install & run
 
-| Backend | Platform | Latency (164ch) | RTFx | Requires |
-|---|---|---|---|---|
-| **marginalia-tts-mlx** | macOS Apple Silicon | ~1000ms | 12x | Xcode + Metal |
-| marginalia-tts-kokoro | Cross-platform | ~5700ms | 2.3x | ONNX Runtime |
+### Mac app
 
-On macOS Apple Silicon, `make tui-rs` automatically selects the MLX backend. The Kokoro model downloads from HuggingFace on first use (~312MB).
-
-See [`benchmark/README.md`](benchmark/README.md) for full benchmark results across 8 backends.
-
-## Build Targets
+The Mac app (SwiftUI + Rust core via FFI) is the primary surface.
 
 ```bash
-# Default build (no native deps required)
-cargo build --release
+git clone https://github.com/Gibbio/Marginalia.git
+cd Marginalia
 
-# TUI with platform auto-detection
-make tui-rs
-
-# TUI with explicit MLX TTS (macOS Apple Silicon only)
-cargo build --release -p marginalia-tui --features mlx-tts
-
-# CLI tool
-cargo run -p marginalia-cli -- help
-
-# Optional providers (need native libs)
-cargo build -p marginalia-stt-apple     # needs Xcode (Swift helper)
-cargo build -p marginalia-stt-whisper   # needs cmake + C++ compiler
-cargo build -p marginalia-tts-mlx       # needs Xcode + Metal Toolchain
-```
-
-## Bootstrap
-
-Download model assets:
-
-```bash
-# All Beta providers
+# Pre-download the TTS + STT model assets (one-time)
 make bootstrap-beta
 
-# Individual
-make bootstrap-kokoro    # Kokoro ONNX model + voices
-make bootstrap-ort       # ONNX Runtime library
-make bootstrap-whisper   # Whisper STT model (commands + dictation)
+# Build the .app bundle (Apple Silicon only — needs Xcode + Metal)
+make bundle-live
+
+# Launch
+open apps/mac-gui/build/Marginalia.app
 ```
 
-Apple STT (`marginalia-stt-apple`) needs no model download — it uses the
-Neural Engine via SFSpeechRecognizer. Requires macOS Dictation to be enabled
-(`System Settings → Keyboard → Dictation → ON`).
+First launch asks for microphone permission and walks you through
+installing voices for your language.
 
+### Terminal UI
 
-Verify setup:
+For headless use or a quick test, the TUI runs the same engine:
 
 ```bash
-make beta-doctor
+make tui-rs        # auto-detects platform, enables MLX on arm64 macOS
 ```
 
-## Build Your Own App
+On non-Apple-Silicon machines the TUI falls back to Kokoro ONNX
+(cross-platform CPU, ~5.7 s/chunk) or to fake providers if no model
+is installed.
 
-Marginalia is a **library-first** project. The TUI is just one host app — you
-can build your own (GUI, mobile, web) using the runtime crates.
+## How it works (one paragraph)
 
-### 1. Add dependencies
+Hexagonal architecture in Rust. A small `marginalia-core` defines
+the domain types and trait-shaped ports (`SpeechSynthesizer`,
+`CommandRecognizer`, `DocumentRepository`, …). Provider crates
+implement those ports against real backends (MLX, ONNX,
+SFSpeechRecognizer, Whisper, SQLite, rodio, AEC3). `marginalia-runtime`
+composes them. Apps (`apps/tui-rs`, `apps/mac-gui`) construct the
+runtime and route user input. The mac-gui talks to the runtime
+through UniFFI bindings in `crates/marginalia-ffi`.
+
+For the full picture (crate map, port traits, TTS critical path,
+STT pipeline, FFI flow, where to look when…) see
+[**`docs/architecture.md`**](docs/architecture.md).
+
+## Engines
+
+| Backend | Where | Latency / quality |
+|---|---|---|
+| Kokoro 82M via MLX Metal | macOS Apple Silicon | ~1 s / chunk, 12× realtime |
+| Kokoro 82M via ONNX Runtime | Cross-platform CPU | ~5.7 s / chunk, 2.3× realtime |
+| Apple Speech (SFSpeechRecognizer) | macOS | ~0.2 s, multilingual, near-zero CPU |
+| Whisper (ggml-small) | Cross-platform | ~2 s, fully offline, ~460 MB model |
+| WebRTC AEC3 | Always-on with Apple Speech | Pure-Rust port — no false trigger from playback |
+
+## Build your own app
+
+Marginalia is a library-first project. The Mac app is just one host;
+you can wire the runtime into your own GUI / mobile / CLI in a few
+lines.
 
 ```toml
 [dependencies]
-marginalia-runtime = { git = "https://github.com/Gibbio/Marginalia", tag = "v0.1.0-beta", features = ["host-playback"] }
-marginalia-config  = { git = "https://github.com/Gibbio/Marginalia", tag = "v0.1.0-beta" }
-
-# Optional — enable the providers you need:
-# marginalia-runtime features: apple-stt, whisper-stt, mlx-tts, host-playback
+marginalia-runtime = { git = "https://github.com/Gibbio/Marginalia", features = ["host-playback"] }
+marginalia-config  = { git = "https://github.com/Gibbio/Marginalia" }
+# Optional: marginalia-runtime/{apple-stt, whisper-stt, mlx-tts, host-playback}
 ```
-
-### 2. Build the runtime (5 lines)
 
 ```rust
 use marginalia_runtime::{RuntimeBuilder, RuntimeConfig};
@@ -129,174 +124,72 @@ use marginalia_config::*;
 let output = RuntimeBuilder::new(".marginalia/app.sqlite3")
     .config(RuntimeConfig::default())
     .voice_commands(VoiceCommandsSection::default())
-    .stt(SttSection::default())       // or configure engine = "apple"
-    .mlx(MlxSection::default())       // or kokoro() for ONNX
+    .stt(SttSection::default())
+    .mlx(MlxSection::default())
     .playback(PlaybackSection::default())
     .build()?;
 
-let runtime = output.runtime;
-// output.stt_label, output.tts_label etc. for logging
+let mut runtime = output.runtime;
 ```
 
-The builder handles: database setup, provider wiring (TTS, STT, playback),
-AEC echo cancellation, TTS cache, and session restore — all behind feature
-flags. Your app does 5-10 lines instead of 500.
-
-### 3. Execute commands and queries
-
-The runtime exposes a JSON-based frontend API via `RuntimeFrontend`:
+Drive it through a JSON-shaped frontend API — same one the TUI and
+mac-gui use:
 
 ```rust
-use marginalia_runtime::RuntimeFrontend;
-use serde_json::json;
-
-// Commands (mutate state)
-let response = runtime.execute_frontend_command("start_session", json!({
-    "target": "/path/to/document.txt"
-}));
-
-// Queries (read state)
-let response = runtime.execute_frontend_query("get_session_snapshot", json!({}));
-let session = &response.payload["session"];
-println!("Reading: {} chunk {}", session["document_id"], session["chunk_index"]);
+runtime.execute_frontend_command("ingest_document", json!({ "path": "book.txt" }));
+runtime.execute_frontend_command("start_session", json!({ "target": "book.txt" }));
+let snap = runtime.execute_frontend_query("get_session_snapshot", json!({}));
 ```
 
-#### Available commands
+Available commands (subset): `ingest_document`, `start_session`,
+`pause_session`, `resume_session`, `next_chunk`, `previous_chunk`,
+`next_chapter`, `previous_chapter`, `repeat_chunk`, `create_note`,
+`restore_session`.
 
-| Command | Payload | Description |
-|---|---|---|
-| `ingest_document` | `{ "path": "file.txt" }` | Import a document into the library |
-| `start_session` | `{ "target": "doc_id_or_path" }` | Start reading (auto-ingests if path) |
-| `pause_session` | `{}` | Pause playback |
-| `resume_session` | `{}` | Resume playback |
-| `stop_session` | `{}` | Stop session (deactivates it) |
-| `next_chunk` | `{}` | Advance to next chunk |
-| `previous_chunk` | `{}` | Go back one chunk |
-| `next_chapter` | `{}` | Skip to next chapter |
-| `previous_chapter` | `{}` | Go to previous chapter |
-| `repeat_chunk` | `{}` | Replay current chunk |
-| `restart_chapter` | `{}` | Restart current chapter from first chunk |
-| `create_note` | `{ "text": "..." }` | Attach a note to the current position |
-| `restore_session` | `{}` | Restore last active session (auto-called by builder) |
+Available queries: `get_app_snapshot`, `get_session_snapshot`,
+`get_document_view`, `list_documents`, `list_notes`,
+`search_documents`, `search_notes`, `get_doctor_report`,
+`get_backend_capabilities`.
 
-#### Available queries
+Subscribe to typed events (`PlaybackFinished`, `ChunkAdvanced`,
+`SessionRestored`, `SessionStopped`, `Error`) via channel or
+callback.
 
-| Query | Payload | Returns |
-|---|---|---|
-| `get_app_snapshot` | `{}` | `{ "app": { "state", "document_count", ... } }` |
-| `get_session_snapshot` | `{}` | `{ "session": { "document_id", "chunk_text", "playback_state", ... } }` |
-| `get_document_view` | `{ "document_id": "..." }` | `{ "document": { "sections": [...], "chunks": [...] } }` |
-| `list_documents` | `{}` | `{ "documents": [...] }` |
-| `list_notes` | `{ "document_id": "..." }` | `{ "notes": [...] }` |
-| `search_documents` | `{ "query": "..." }` | `{ "search": { "results": [...] } }` |
-| `search_notes` | `{ "query": "..." }` | `{ "search": { "results": [...] } }` |
-| `get_doctor_report` | `{}` | Provider health check report |
-| `get_backend_capabilities` | `{}` | List of supported commands/queries |
-| `auto_advance` | `{}` | Auto-advance if current chunk finished (returns `{ "advanced": bool }`) |
+## Build targets
 
-### 4. Subscribe to events
-
-The runtime pushes typed events — no polling needed:
-
-```rust
-use marginalia_runtime::RuntimeEvent;
-
-// Option A: channel (for polling loops / TUI)
-let rx = runtime.subscribe_events();
-match rx.try_recv() {
-    Ok(RuntimeEvent::PlaybackFinished { document_id, chunk_index, .. }) => { ... }
-    Ok(RuntimeEvent::ChunkAdvanced { .. }) => { ... }
-    Ok(RuntimeEvent::SessionRestored { .. }) => { ... }
-    _ => {}
-}
-
-// Option B: callback (for mobile / FFI)
-runtime.on_event(Box::new(|event| {
-    match event {
-        RuntimeEvent::PlaybackFinished { .. } => { /* update UI */ }
-        _ => {}
-    }
-}));
+```bash
+cargo build --release                                          # default (no native deps)
+cargo build --release -p marginalia-tui --features mlx-tts     # TUI with MLX TTS
+make tui-rs                                                    # TUI auto-detect
+make build-xcframework                                         # mac-gui FFI bindings
+make bundle-live                                               # mac-gui .app bundle
+cargo test                                                     # tests
 ```
 
-#### Event types
+`marginalia-tts-mlx` requires Xcode + Metal Toolchain on macOS.
+`marginalia-stt-whisper` requires cmake + a C++ compiler.
 
-| Event | Fields | When |
-|---|---|---|
-| `PlaybackFinished` | `document_id, section_index, chunk_index` | A chunk finished playing naturally |
-| `ChunkAdvanced` | `document_id, section_index, chunk_index` | Reading moved to a new chunk |
-| `SessionRestored` | `session_id, document_id, section_index, chunk_index` | Session restored from database on startup |
-| `SessionStopped` | `document_id` | Session explicitly stopped |
-| `Error` | `message` | Runtime error the app should surface |
+## Bootstrap (model assets)
 
-### 5. Configure voice commands
-
-```rust
-use marginalia_config::VoiceCommandsSection;
-
-let mut vc = VoiceCommandsSection::default();
-vc.pause = vec!["pause".into(), "hold".into()];
-vc.next = vec!["next".into(), "forward".into()];
-
-// Resolve a recognized phrase to an action:
-match vc.resolve_action("go forward please") {
-    Some("next") => { /* advance */ }
-    Some("pause") => { /* pause */ }
-    _ => { /* not a command */ }
-}
+```bash
+make bootstrap-beta       # all Beta providers
+make bootstrap-kokoro     # Kokoro ONNX model + voices
+make bootstrap-ort        # ONNX Runtime library
+make bootstrap-whisper    # Whisper STT model
+make beta-doctor          # verify setup
 ```
 
-### 6. Download models programmatically
-
-```rust
-use marginalia_models::ModelManager;
-
-let models = ModelManager::new()?;
-
-// Whisper STT model (~460MB, cached after first download)
-let whisper_path = models.ensure_whisper("ggml-small.bin")?;
-
-// Kokoro voice embedding
-let voice_path = models.ensure_kokoro_voice("if_sara")?;
-```
-
-### Minimal example: ingest + read
-
-```rust
-use marginalia_runtime::{RuntimeBuilder, RuntimeConfig};
-use marginalia_config::*;
-use serde_json::json;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let output = RuntimeBuilder::new(".marginalia/demo.sqlite3")
-        .config(RuntimeConfig::default())
-        .build()?;
-    let mut runtime = output.runtime;
-
-    // Import a document
-    runtime.execute_frontend_command("ingest_document", json!({
-        "path": "my-book.txt"
-    }));
-
-    // Start reading (auto-plays first chunk with TTS)
-    runtime.execute_frontend_command("start_session", json!({
-        "target": "my-book.txt"
-    }));
-
-    // The runtime handles: TTS synthesis, playback, auto-advance to next
-    // chunk, session persistence. Your app just needs to render the UI.
-
-    Ok(())
-}
-```
+Apple STT needs no model download — it uses the Neural Engine via
+`SFSpeechRecognizer`. Requires macOS Dictation to be enabled
+(`System Settings → Keyboard → Dictation → ON`).
 
 ## Credits & upstream sources
 
-Marginalia depends on excellent open-source work by other people. The
-TTS/STT models, voices and Rust bindings are not ours — we wrap them, we
-don't redistribute the weights. Everything below is downloaded on demand
-to the user's machine (HuggingFace cache or per-asset path). Many thanks
-to the maintainers.
+Marginalia depends on excellent open-source work by other people.
+The TTS/STT models, voices, and Rust bindings are not ours — we
+wrap them, we don't redistribute the weights. Everything below is
+downloaded on demand to the user's machine (HuggingFace cache or
+per-asset path). Many thanks to the maintainers.
 
 ### Models & voices (downloaded by `make bootstrap-*` and the in-app installer)
 
@@ -305,8 +198,8 @@ to the maintainers.
 | Kokoro 82M (MLX, default on Apple Silicon) — weights `kokoro-v1_0.safetensors` and per-language voice embeddings under `voices/` | [`prince-canuma/Kokoro-82M`](https://huggingface.co/prince-canuma/Kokoro-82M) | Apache-2.0 |
 | Kokoro 82M (ONNX, cross-platform fallback) — `onnx/model_q8f16.onnx` | [`onnx-community/Kokoro-82M-v1.0-ONNX`](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) | Apache-2.0 |
 | Kokoro reference G2P (the phonemizer rules `marginalia-tts-mlx` mirrors clause-by-clause) | [`hexgrad/misaki`](https://github.com/hexgrad/misaki) | MIT |
-| Whisper STT — `ggml-small.bin` and the rest of the ggml family | [`ggerganov/whisper.cpp`](https://huggingface.co/ggerganov/whisper.cpp) | MIT (model weights: MIT, see whisper.cpp repo) |
-| Voice catalog HF API endpoint hit by Settings → Installazioni → "Aggiorna lista voci" | `https://huggingface.co/api/models/prince-canuma/Kokoro-82M/tree/main/voices` | (HF public API) |
+| Whisper STT — `ggml-small.bin` and the rest of the ggml family | [`ggerganov/whisper.cpp`](https://huggingface.co/ggerganov/whisper.cpp) | MIT |
+| Voice catalog HF API endpoint hit by Settings → Installations → "Refresh voice list" | `https://huggingface.co/api/models/prince-canuma/Kokoro-82M/tree/main/voices` | (HF public API) |
 
 ### Build dependencies that aren't on crates.io
 
@@ -319,7 +212,7 @@ to the maintainers.
 
 | Crate | What it does |
 |---|---|
-| [`rodio`](https://crates.io/crates/rodio) (0.22) | Audio playback for the TUI and CLI; mac-gui uses `AVAudioPlayer` for chunks/notes/preview and only goes through rodio in `marginalia-playback-host` for shared sink ownership |
+| [`rodio`](https://crates.io/crates/rodio) (0.22) | Audio playback for the TUI and CLI; the mac-gui uses `AVAudioPlayer` for chunks/notes/preview and only goes through rodio in `marginalia-playback-host` for shared sink ownership |
 | [`cpal`](https://crates.io/crates/cpal) (0.17) | Cross-platform audio device access (mic capture for the AEC pipeline, speaker output for rodio) |
 | [`aec3`](https://crates.io/crates/aec3) | Pure-Rust port of WebRTC AEC3 — keeps the TTS playback from triggering its own voice commands |
 | [`whisper-rs`](https://crates.io/crates/whisper-rs) (0.16) | Whisper.cpp Rust bindings used by `marginalia-stt-whisper` |
@@ -328,7 +221,7 @@ to the maintainers.
 | [`espeak-ng`](https://github.com/espeak-ng/espeak-ng) | External phonemizer used by both TTS backends, called clause-by-clause |
 | [`epub`](https://crates.io/crates/epub) | Pure-Rust EPUB 2/3 parser used by `marginalia-import-epub` |
 | [`readability-rust`](https://crates.io/crates/readability) + [`scraper`](https://crates.io/crates/scraper) + [`ureq`](https://crates.io/crates/ureq) | The `marginalia-import-url` web-article importer |
-| Apple `SFSpeechRecognizer` (system framework) | Native Italian/multilingual STT used by `marginalia-stt-apple`'s Swift helper |
+| Apple `SFSpeechRecognizer` (system framework) | Native multilingual STT used by `marginalia-stt-apple`'s Swift helper |
 
 If your project is in this list and you'd like the credit phrased
 differently — or removed — open an issue and we'll fix it.

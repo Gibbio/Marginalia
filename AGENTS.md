@@ -44,12 +44,6 @@ This repository ships the **engine and apps**:
 - `crates/marginalia-config` — TOML schema
 - `crates/marginalia-devtools` — dev utilities
 
-It must **not** contain:
-
-- a desktop / web UI other than tui-rs and mac-gui
-- a server or remote service
-- payment / accounts / multi-user infrastructure
-
 ## Build
 
 ```bash
