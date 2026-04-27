@@ -896,14 +896,6 @@ public struct ReadingView<Host: MarginaliaHost>: View {
                 .help(T("reading.margin.add.help"))
                 .accessibilityLabel(T("reading.margin.add.a11y"))
                 .disabled(host.currentSession == nil)
-                Text("⌥M")
-                    .font(.mono(10))
-                    .foregroundStyle(Tokens.textFaint)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .strokeBorder(Tokens.line, lineWidth: 1)
-                    )
             }
             .padding(.horizontal, 18).padding(.vertical, 14)
             Divider().frame(height: 1).overlay(Tokens.line)
