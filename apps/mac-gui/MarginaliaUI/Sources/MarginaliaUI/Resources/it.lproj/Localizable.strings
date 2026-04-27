@@ -47,6 +47,19 @@
 "settings.commands.chip.default-tooltip"  = "Trigger di default per la lingua dell'interfaccia. Non rimovibile.";
 "settings.commands.chip.custom-tooltip"   = "Trigger custom — aggiunto da te. Persiste anche cambiando lingua interfaccia.";
 "settings.commands.chip.conflict"         = "\u{201C}%1$@\u{201D} è già usato in \u{201C}%2$@\u{201D}";
+
+// Voice-command action labels — what the user sees on the row's left.
+"settings.commands.action.pause"          = "Metti in pausa";
+"settings.commands.action.resume"         = "Riprendi";
+"settings.commands.action.next"           = "Chunk successivo";
+"settings.commands.action.back"           = "Chunk precedente";
+"settings.commands.action.repeat"         = "Ripeti chunk";
+"settings.commands.action.stop"           = "Ferma e riavvolgi";
+"settings.commands.action.next_chapter"   = "Capitolo successivo";
+"settings.commands.action.prev_chapter"   = "Capitolo precedente";
+"settings.commands.action.bookmark"       = "Salva posizione";
+"settings.commands.action.note"           = "Detta una nota";
+"settings.commands.action.where"          = "Leggi posizione";
 "settings.info.text-prep"     = "Il chunk è l'unità minima di sintesi e navigazione vocale. Chunk piccoli = risposta rapida ai comandi e salti fini, ma più frammentazione. Il cambio richiede di re-importare i documenti esistenti. La cache audio contiene i file sintetizzati per chunk; cancellarla non perde lavoro, solo tempo di rigenerazione. La cache note contiene gli audio delle note dettate: svuotarla cancella in modo definitivo anche le annotazioni associate.";
 "settings.info.installations" = "Marginalia funziona offline. Solo qui, su esplicita azione tua, l'app può contattare huggingface.co e github.com per scaricare modelli mancanti. Tutti gli asset sono Apache-2.0 o MIT.";
 "settings.info.theme"         = "Cambia la tinta di accento — highlight, player pill, barre audio, hover nelle note. Lo sfondo warm-dark resta invariato: è parte dell'identità di Marginalia.";
@@ -62,6 +75,7 @@
 "settings.voice.preview_stop_a11y" = "Ferma anteprima";
 "settings.stt.apple-requires"     = "Apple Speech richiede la dettatura macOS.";
 "settings.stt.open-sys-prefs"     = "Apri Impostazioni di sistema →";
+"settings.stt.debug-toggle"       = "Mostra trascrizione grezza nel log";
 "settings.audio.volume"           = "Volume";
 "settings.text-prep.chunk-size"   = "DIMENSIONE CHUNK";
 
@@ -185,6 +199,50 @@
 // Per-language bulk actions in the Voice installations group
 "settings.install.install_all"   = "installa tutte";
 "settings.install.uninstall_all" = "disinstalla tutte";
+
+// Theme cards — display name + blurb. Inchiostro and Marea are proper
+// nouns that don't get translated; only "Personalizzata" / blurbs do.
+"settings.theme.inchiostro.display" = "Inchiostro";
+"settings.theme.inchiostro.blurb"   = "il tema originale, con un accento indaco/viola — pensato come inchiostro fresco su vellum.";
+"settings.theme.marea.display"      = "Marea";
+"settings.theme.marea.blurb"        = "un blu più calmo e freddo, meno saturato — per le sessioni di lettura lunghe.";
+"settings.theme.custom.display"     = "Personalizzata";
+"settings.theme.custom.blurb"       = "scegli la tinta di accento con lo slider qui sotto.";
+// Composed: "Tema <display>" — used as accessibility label.
+"settings.theme.card.a11y"          = "Tema %@";
+
+// Installations — catalog refresh button
+"settings.install.refresh"          = "Aggiorna lista voci";
+"settings.install.refreshing"       = "Aggiornamento…";
+
+// Installations — InstallRow secondary line states
+"settings.install.state.queued"        = "in coda";
+"settings.install.state.downloading"   = "scaricando…";
+"settings.install.state.installed"     = "installato";
+"settings.install.state.not_installed" = "non installato";
+"settings.install.state.unavailable"   = "non disponibile";
+"settings.install.state.error"         = "errore: %@";
+
+// Installations — voice-language disclosure headers. Region-specific
+// pairs first; primary subtag fallback otherwise. Keys are lowercase
+// BCP-47 — the lookup helper lowercases the input before matching.
+"settings.install.voices.en-us" = "Voci inglesi (US)";
+"settings.install.voices.en-gb" = "Voci inglesi (UK)";
+"settings.install.voices.pt-br" = "Voci portoghesi (BR)";
+"settings.install.voices.pt-pt" = "Voci portoghesi (PT)";
+"settings.install.voices.zh-cn" = "Voci cinesi (mandarino)";
+"settings.install.voices.zh-tw" = "Voci cinesi (tradizionale)";
+"settings.install.voices.it"    = "Voci italiane";
+"settings.install.voices.en"    = "Voci inglesi";
+"settings.install.voices.fr"    = "Voci francesi";
+"settings.install.voices.de"    = "Voci tedesche";
+"settings.install.voices.es"    = "Voci spagnole";
+"settings.install.voices.pt"    = "Voci portoghesi";
+"settings.install.voices.ja"    = "Voci giapponesi";
+"settings.install.voices.zh"    = "Voci cinesi";
+"settings.install.voices.hi"    = "Voci hindi";
+// Fallback used when the BCP-47 doesn't match any of the above.
+"settings.install.voices.other" = "Voci — %@";
 
 // LogPane footer at the bottom of the window
 "logpane.idle"                = "pronto";

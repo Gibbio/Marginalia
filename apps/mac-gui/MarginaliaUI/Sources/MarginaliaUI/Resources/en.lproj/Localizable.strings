@@ -45,6 +45,19 @@
 "settings.commands.chip.default-tooltip"  = "Default trigger for the current interface language. Not removable.";
 "settings.commands.chip.custom-tooltip"   = "Custom trigger — added by you. Persists across interface language changes.";
 "settings.commands.chip.conflict"         = "\u{201C}%1$@\u{201D} is already used in \u{201C}%2$@\u{201D}";
+
+// Voice-command action labels — what the user sees on the row's left.
+"settings.commands.action.pause"          = "Pause";
+"settings.commands.action.resume"         = "Resume";
+"settings.commands.action.next"           = "Next chunk";
+"settings.commands.action.back"           = "Previous chunk";
+"settings.commands.action.repeat"         = "Repeat chunk";
+"settings.commands.action.stop"           = "Stop and rewind";
+"settings.commands.action.next_chapter"   = "Next chapter";
+"settings.commands.action.prev_chapter"   = "Previous chapter";
+"settings.commands.action.bookmark"       = "Save position";
+"settings.commands.action.note"           = "Dictate a note";
+"settings.commands.action.where"          = "Read position";
 "settings.info.text-prep"     = "A chunk is the atomic unit of synthesis and voice navigation. Smaller chunks = snappier command response and finer jumps, but more fragmentation. Changes require re-importing existing documents. The audio cache holds the synthesized chunk files; clearing it loses no work, only regeneration time. The notes cache holds the recorded dictation audio: clearing it permanently deletes the linked annotations as well.";
 "settings.info.installations" = "Marginalia runs offline. Only in this section, and only when you explicitly act, may the app reach huggingface.co and github.com to download missing models. All assets are Apache-2.0 or MIT.";
 "settings.info.theme"         = "Changes the accent tint — highlights, player pill, audio bars, note hover. The warm-dark background stays — it's part of Marginalia's identity.";
@@ -60,6 +73,7 @@
 "settings.voice.preview_stop_a11y" = "Stop preview";
 "settings.stt.apple-requires"     = "Apple Speech requires macOS Dictation.";
 "settings.stt.open-sys-prefs"     = "Open System Settings →";
+"settings.stt.debug-toggle"       = "Show raw transcript in the log";
 "settings.audio.volume"           = "Volume";
 "settings.text-prep.chunk-size"   = "CHUNK SIZE";
 
@@ -183,6 +197,50 @@
 // Per-language bulk actions in the Voice installations group
 "settings.install.install_all"   = "install all";
 "settings.install.uninstall_all" = "uninstall all";
+
+// Theme cards — display name + blurb. Inchiostro and Marea are proper
+// nouns that stay in Italian; only "Custom" / blurbs translate.
+"settings.theme.inchiostro.display" = "Inchiostro";
+"settings.theme.inchiostro.blurb"   = "the original theme, accented with indigo-violet — meant to feel like fresh ink on vellum.";
+"settings.theme.marea.display"      = "Marea";
+"settings.theme.marea.blurb"        = "a cooler, calmer blue with less saturation — meant for long reading sessions.";
+"settings.theme.custom.display"     = "Custom";
+"settings.theme.custom.blurb"       = "pick the accent hue with the slider below.";
+// Composed: "Theme <display>" — used as accessibility label.
+"settings.theme.card.a11y"          = "Theme %@";
+
+// Installations — catalog refresh button
+"settings.install.refresh"          = "Refresh voice list";
+"settings.install.refreshing"       = "Refreshing…";
+
+// Installations — InstallRow secondary line states
+"settings.install.state.queued"        = "queued";
+"settings.install.state.downloading"   = "downloading…";
+"settings.install.state.installed"     = "installed";
+"settings.install.state.not_installed" = "not installed";
+"settings.install.state.unavailable"   = "unavailable";
+"settings.install.state.error"         = "error: %@";
+
+// Installations — voice-language disclosure headers. Region-specific
+// pairs first; primary subtag fallback otherwise. Keys are lowercase
+// BCP-47 — the lookup helper lowercases the input before matching.
+"settings.install.voices.en-us" = "English voices (US)";
+"settings.install.voices.en-gb" = "English voices (UK)";
+"settings.install.voices.pt-br" = "Portuguese voices (BR)";
+"settings.install.voices.pt-pt" = "Portuguese voices (PT)";
+"settings.install.voices.zh-cn" = "Chinese voices (Mandarin)";
+"settings.install.voices.zh-tw" = "Chinese voices (Traditional)";
+"settings.install.voices.it"    = "Italian voices";
+"settings.install.voices.en"    = "English voices";
+"settings.install.voices.fr"    = "French voices";
+"settings.install.voices.de"    = "German voices";
+"settings.install.voices.es"    = "Spanish voices";
+"settings.install.voices.pt"    = "Portuguese voices";
+"settings.install.voices.ja"    = "Japanese voices";
+"settings.install.voices.zh"    = "Chinese voices";
+"settings.install.voices.hi"    = "Hindi voices";
+// Fallback used when the BCP-47 doesn't match any of the above.
+"settings.install.voices.other" = "Voices — %@";
 
 // LogPane footer at the bottom of the window
 "logpane.idle"                = "ready";

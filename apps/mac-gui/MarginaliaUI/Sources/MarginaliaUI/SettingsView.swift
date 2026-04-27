@@ -643,7 +643,7 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             )
             miniStatGrid.padding(.top, 16)
             AccentCheckbox(checked: $draftSttDebug,
-                           label: "Mostra trascrizione grezza nel log",
+                           label: T("settings.stt.debug-toggle"),
                            accent: accent)
                 .padding(.top, 16)
             if draft.sttEngine == "apple" {
@@ -765,13 +765,13 @@ public struct SettingsView<Host: MarginaliaHost>: View {
     }
 
     /// Look-up used by CommandRow to reject a trigger that's already in
-    /// use by a different command. Returns the user-facing label (e.g.
-    /// "Metti in pausa") of the conflicting command, or nil if the word
-    /// is free.
-    /// Checks both stored triggers (customs + carry-over from a prior
-    /// language switch) and the current language's defaults for every
-    /// other command — so a user can't accidentally type "pause" into
-    /// the resume row when "pause" is the pause command's default.
+    /// use by a different command. Returns the user-facing label of
+    /// the conflicting command, or nil if the word is free.
+    /// Checks the stored triggers AND every language's default set
+    /// for every other command — typing "indietro" into resume must
+    /// be rejected even when interface is English, because it's the
+    /// IT default for `back` and adding it would create an ambiguous
+    /// trigger the moment the user switches back to Italian.
     private func triggerConflict(candidate raw: String, excluding own: String) -> String? {
         let needle = raw.trimmingCharacters(in: .whitespaces).lowercased()
         guard !needle.isEmpty else { return nil }
@@ -779,10 +779,8 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             if cmd.triggers.contains(where: { $0.lowercased() == needle }) {
                 return cmd.label
             }
-            let defaults = VoiceCommandDefaults.triggers(
-                for: interfaceLang, action: cmd.action
-            )
-            if defaults.contains(where: { $0.lowercased() == needle }) {
+            let blessed = VoiceCommandDefaults.allLanguageTriggers(action: cmd.action)
+            if blessed.contains(needle) {
                 return cmd.label
             }
         }
@@ -1214,8 +1212,8 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                             .frame(width: 12, height: 12)
                     }
                     Text(host.catalogRefreshInflight
-                         ? "Aggiornamento…"
-                         : "Aggiorna lista voci")
+                         ? T("settings.install.refreshing")
+                         : T("settings.install.refresh"))
                         .font(.serif(13))
                 }
                 .padding(.horizontal, 10)
@@ -1257,32 +1255,30 @@ public struct SettingsView<Host: MarginaliaHost>: View {
 
     /// Group label for the voice-catalog disclosure headers. Uses the
     /// FULL BCP-47 for pairs that would otherwise collapse into a
-    /// duplicated heading (`en-US` and `en-GB` both → "Voci inglesi"),
+    /// duplicated heading (`en-US` and `en-GB` both → "English voices"),
     /// mirroring the fix applied to the onboarding voice picker.
+    /// Look-up walks the localized table by BCP-47 first, then falls
+    /// back to the primary subtag, then to a generic "Voices — <tag>".
     private static func languageDisplay(_ bcp47: String) -> String {
+        // Normalize to lowercase before lookup — the .strings keys use
+        // a lowercase BCP-47 form so input casing variations don't
+        // miss the table. Region-specific match first, then primary
+        // subtag, then a generic "Voices — <tag>" fallback (with the
+        // ORIGINAL casing in the visible label, since the user
+        // typically expects "ko-KR" not "ko-kr").
         let full = bcp47.lowercased()
-        switch full {
-        case "en-us": return "Voci inglesi (US)"
-        case "en-gb": return "Voci inglesi (UK)"
-        case "pt-br": return "Voci portoghesi (BR)"
-        case "pt-pt": return "Voci portoghesi (PT)"
-        case "zh-cn": return "Voci cinesi (mandarino)"
-        case "zh-tw": return "Voci cinesi (tradizionale)"
-        default: break
+        let regionKey = "settings.install.voices.\(full)"
+        let regionTranslated = T(regionKey)
+        if regionTranslated != regionKey {
+            return regionTranslated
         }
-        let code = String(full.prefix(2))
-        switch code {
-        case "it": return "Voci italiane"
-        case "en": return "Voci inglesi"
-        case "fr": return "Voci francesi"
-        case "de": return "Voci tedesche"
-        case "es": return "Voci spagnole"
-        case "pt": return "Voci portoghesi"
-        case "ja": return "Voci giapponesi"
-        case "zh": return "Voci cinesi"
-        case "hi": return "Voci hindi"
-        default:   return "Voci — \(bcp47)"
+        let primary = String(full.prefix(2))
+        let primaryKey = "settings.install.voices.\(primary)"
+        let primaryTranslated = T(primaryKey)
+        if primaryTranslated != primaryKey {
+            return primaryTranslated
         }
+        return String(format: T("settings.install.voices.other"), bcp47)
     }
 
     @ViewBuilder
@@ -1474,10 +1470,10 @@ public struct SettingsView<Host: MarginaliaHost>: View {
                 )
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(theme.display)
+                    Text(themeDisplay(theme))
                         .font(.serif(17, italic: active))
                         .foregroundStyle(Tokens.text)
-                    Text(theme.blurb)
+                    Text(themeBlurb(theme))
                         .font(.serif(13, italic: true))
                         .foregroundStyle(Tokens.textDim)
                         .lineSpacing(2)
@@ -1497,9 +1493,29 @@ public struct SettingsView<Host: MarginaliaHost>: View {
             .shadow(color: active ? previewAccent.glow : .clear, radius: 9)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Tema \(theme.display)")
-        .accessibilityHint(theme.blurb)
+        .accessibilityLabel(String(format: T("settings.theme.card.a11y"),
+                                   themeDisplay(theme)))
+        .accessibilityHint(themeBlurb(theme))
         .accessibilityAddTraits(active ? .isSelected : [])
+    }
+
+    /// Localized display name for a theme. The two named themes
+    /// (Inchiostro / Marea) are proper nouns and resolve to the same
+    /// string in both lprojs; "Custom" is the only one that actually
+    /// translates. Falls back to the hardcoded `theme.display` if the
+    /// id isn't keyed (defensive — currently every shipped theme has
+    /// a key).
+    private func themeDisplay(_ theme: Theme) -> String {
+        let key = "settings.theme.\(theme.id).display"
+        let translated = T(key)
+        return translated == key ? theme.display : translated
+    }
+
+    /// Localized one-liner shown under the theme display name.
+    private func themeBlurb(_ theme: Theme) -> String {
+        let key = "settings.theme.\(theme.id).blurb"
+        let translated = T(key)
+        return translated == key ? theme.blurb : translated
     }
 
     private var interfaceLanguageSection: some View {

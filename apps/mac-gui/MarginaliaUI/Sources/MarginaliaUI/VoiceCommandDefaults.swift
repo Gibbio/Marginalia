@@ -34,6 +34,38 @@ public enum VoiceCommandDefaults {
         return perAction.values.flatMap { $0 }
     }
 
+    /// Lowercased union of every default trigger for a given action
+    /// across every supported language. The customs view subtracts
+    /// this from the stored `triggers` list — that way a word which
+    /// is a default in some other language doesn't pop up as "user
+    /// custom" after the user switches interface language. The word
+    /// is still in the TOML and the STT resolver keeps recognizing
+    /// it (so existing muscle memory keeps working); the UI just
+    /// stops misattributing it.
+    public static func allLanguageTriggers(action: String) -> Set<String> {
+        var out = Set<String>()
+        for (_, perAction) in table {
+            if let list = perAction[action] {
+                for w in list { out.insert(w.lowercased()) }
+            }
+        }
+        return out
+    }
+
+    /// Lowercased union of every default trigger across every action
+    /// and every language — used by the conflict check so the user
+    /// can't add a custom that's already someone else's default in
+    /// any language.
+    public static func allLanguageTriggersAcrossActions() -> [String: String] {
+        var out: [String: String] = [:]  // word -> action
+        for (_, perAction) in table {
+            for (action, list) in perAction {
+                for w in list { out[w.lowercased()] = action }
+            }
+        }
+        return out
+    }
+
     /// Trigger sets per (language, action). Order matters for display:
     /// the editor renders defaults in this exact order. Adding a new
     /// language is one entry; adding a new action is one key inside
@@ -41,11 +73,15 @@ public enum VoiceCommandDefaults {
     /// the host's `voiceCommands`, not this table.
     private static let table: [String: [String: [String]]] = [
         "it": [
-            "pause":        ["pausa", "ferma", "pause"],
-            "resume":       ["riprendi", "continua", "resume"],
-            "next":         ["avanti", "prossimo", "next"],
-            "back":         ["indietro", "back"],
-            "repeat":       ["ripeti", "repeat"],
+            // Italian defaults are pure-Italian — no English fallbacks.
+            // "stop" is kept because it's a loanword routinely used in
+            // spoken Italian; "pause", "resume", "next", "back", "repeat"
+            // are not.
+            "pause":        ["pausa", "ferma"],
+            "resume":       ["riprendi", "continua"],
+            "next":         ["avanti", "prossimo"],
+            "back":         ["indietro"],
+            "repeat":       ["ripeti"],
             "stop":         ["stop", "basta"],
             "next_chapter": ["prossimo capitolo", "capitolo avanti"],
             "prev_chapter": ["capitolo precedente", "capitolo indietro"],

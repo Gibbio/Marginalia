@@ -251,7 +251,13 @@ public struct CommandRow: View {
     public var body: some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(cmd.label)
+                // Display label is the localized one for the current
+                // interface language, keyed by action. We fall back to
+                // `cmd.label` (whatever the host stored, typically
+                // Italian) only if the .strings file is missing the
+                // key — a soft signal so a forgotten translation
+                // shows the old hardcoded text instead of a raw key.
+                Text(localizedLabel)
                     .font(.serif(16))
                     .foregroundStyle(Tokens.text)
                 Text(cmd.action)
@@ -296,18 +302,34 @@ public struct CommandRow: View {
         .padding(.vertical, 14)
     }
 
+    /// Localized label for the row, derived from the action id. Falls
+    /// back to `cmd.label` (the host-provided string) if the
+    /// `settings.commands.action.<action>` key is missing from the
+    /// active .lproj — keeps the row readable while flagging an
+    /// untranslated action via a stale Italian label.
+    private var localizedLabel: String {
+        let key = "settings.commands.action.\(cmd.action)"
+        let translated = T(key)
+        return translated == key ? cmd.label : translated
+    }
+
     /// Defaults the picker should display as locked chips, derived
     /// each render from the `(language, action)` table.
     private var defaults: [String] {
         VoiceCommandDefaults.triggers(for: interfaceLang, action: cmd.action)
     }
 
-    /// Triggers stored in `cmd.triggers` minus the current-language
-    /// defaults — i.e. anything the user added on top of the blessed
-    /// set. Lowercased compare to match the resolver's normalization.
+    /// Triggers stored in `cmd.triggers` that aren't part of *any*
+    /// language's default set for this action. Subtracting the union
+    /// (rather than just the current language) prevents words from
+    /// the previous interface language from popping up as "user
+    /// custom" after a language switch — they stay in the TOML so
+    /// the resolver keeps recognizing them, the UI just doesn't
+    /// misattribute them. Lowercased compare to match the resolver's
+    /// normalization.
     private var customs: [String] {
-        let defaultSet = Set(defaults.map { $0.lowercased() })
-        return cmd.triggers.filter { !defaultSet.contains($0.lowercased()) }
+        let blessed = VoiceCommandDefaults.allLanguageTriggers(action: cmd.action)
+        return cmd.triggers.filter { !blessed.contains($0.lowercased()) }
     }
 
     private var addTriggerInput: some View {
@@ -331,9 +353,12 @@ public struct CommandRow: View {
         let v = draft.trimmingCharacters(in: .whitespaces).lowercased()
         guard !v.isEmpty else { draft = ""; return }
 
-        // Adding a word that's already a default for THIS command is a
-        // no-op — the user will see it sitting in the locked group.
-        if defaults.contains(where: { $0.lowercased() == v }) {
+        // Adding a word that's already a default for THIS command in
+        // any supported language is a silent no-op — the user sees
+        // it sitting in the locked group when the relevant interface
+        // language is active. (Add it once, get it everywhere.)
+        if VoiceCommandDefaults.allLanguageTriggers(action: cmd.action)
+            .contains(v) {
             draft = ""
             return
         }
@@ -590,16 +615,21 @@ public struct InstallRow: View {
 
     private var secondaryLine: String {
         switch state {
-        case .queued?:                        return "\(item.size) · in coda"
+        case .queued?:
+            return "\(item.size) · \(T("settings.install.state.queued"))"
         case .downloading(let f)?:
             if let f = f {
                 return "\(item.size) · \(Int(f * 100))%"
             }
-            return "\(item.size) · scaricando…"
+            return "\(item.size) · \(T("settings.install.state.downloading"))"
         case .failed(let m)?:
-            return "errore: \(m.isEmpty ? "non disponibile" : m)"
+            let detail = m.isEmpty ? T("settings.install.state.unavailable") : m
+            return String(format: T("settings.install.state.error"), detail)
         default:
-            return "\(item.size) · \(isInstalled ? "installato" : "non installato")"
+            let stateLabel = isInstalled
+                ? T("settings.install.state.installed")
+                : T("settings.install.state.not_installed")
+            return "\(item.size) · \(stateLabel)"
         }
     }
 
